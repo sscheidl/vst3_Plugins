@@ -1,7 +1,8 @@
 # Planung
 
-Stand: 2026-11-12. Das erste Testobjekt, Toy Piano Classic 0.1.0, ist gebaut
-und automatisch geprüft. Der Test in den DAWs steht aus.
+Stand: 2026-11-13. Das erste Testobjekt, Toy Piano Classic 0.1.0, ist gebaut
+und automatisch geprüft. In Studio One lädt es, die Regler reagieren. Angehört
+wurde es noch nicht; Waveform und Live stehen aus.
 
 ## Entscheidungen
 
@@ -59,8 +60,8 @@ Bei der Umsetzung selbst festgelegt, weil die Vorgaben es offen ließen:
 | 2 | Klangkern unverändert übernommen, Firmware-Test läuft mit MSVC | Erledigt |
 | 3 | Noten, Parameter, Abtastrate des Hosts, Stereo, Zustand | Erledigt |
 | 4 | Master Pitch mit Glättung, dazu Pitch Bend und Volume | Erledigt |
-| 5 | GUI mit vier Reglern | Erledigt, bisher nur angesehen, nicht bedient |
-| 6 | Abnahme in den DAWs, CPU-Last | **Offen** |
+| 5 | GUI mit vier Reglern | Erledigt, in Studio One bedient |
+| 6 | Abnahme in den DAWs, CPU-Last | **Begonnen:** lädt in Studio One. Hörtest, Waveform, Live und CPU-Last offen |
 | 7 | CI auf GitHub | **Offen** |
 
 Die Ergebnisse stehen im

@@ -6,8 +6,9 @@ a native Windows plug-in.
 
 ![The plug-in window](docs/editor.png)
 
-**Status:** builds, passes Steinberg's validator and its own tests. Not yet
-played in a DAW, see [Still to be checked](#still-to-be-checked).
+**Status:** builds, passes Steinberg's validator and its own tests. It loads in
+Studio One and its knobs respond there. Nobody has listened to it in a DAW yet,
+see [Still to be checked](#still-to-be-checked).
 
 ## Sound and controls
 
@@ -127,17 +128,18 @@ recorded with GCC and glibc.
 | State save and load; damaged state | identical round trip; rejected |
 | Parameter texts, MIDI controller map | as in the tables above |
 | Window in the SDK's `editorhost` at 120 % display scale | drawn as in the picture |
+| Studio One: plug-in loads, knobs respond | reported by the operator |
 
-All of this ran on one machine: Windows 11 x64, MSVC 19.51 (Visual Studio
+Everything but the last row is automated or was captured by script. All of it
+ran on one machine: Windows 11 x64, MSVC 19.51 (Visual Studio
 Build Tools 2026) and MSVC 19.44 (Build Tools 2022).
 
 ## Still to be checked
 
-Nothing here has been run inside a DAW yet.
-
-* Loads and plays in Studio One, Tracktion Waveform 14 and Ableton Live 12 Lite.
-* Knob handling with the mouse: drag, wheel, Ctrl+click. The window has only
-  been looked at, not operated.
+* Listening test in Studio One: notes, velocity, level, and Master Pitch moved
+  while a note sounds.
+* Loads and plays in Tracktion Waveform 14 and Ableton Live 12 Lite.
+* Mouse wheel and Ctrl+click on the knobs.
 * Knobs, host automation and the host's own parameter view stay in step.
 * Pitch wheel and CC 16/73/75 reach the plug-in in each DAW.
 * Project save and reload restores the four values.
