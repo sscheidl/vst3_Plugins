@@ -1,0 +1,30 @@
+# Build output
+build/
+out/
+dist/
+_deps/
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.user
+*.suo
+
+# Project-local scratch (see Playground AGENTS.md)
+.work/
+tmp/
+outputs/
+
+# Local backups, never versioned (BAK/ holds a 357 MB archive)
+BAK/
+
+# Windows
+desktop.ini
+Thumbs.db
+
+# Python tooling
+__pycache__/
+.pytest_cache/
