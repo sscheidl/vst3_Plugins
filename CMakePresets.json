@@ -1,0 +1,59 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "windows-vs2026-x64",
+      "displayName": "Windows x64 (Visual Studio 2026)",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/windows-vs2026-x64",
+      "cacheVariables": { "CMAKE_CONFIGURATION_TYPES": "Debug;Release" }
+    },
+    {
+      "name": "windows-vs2022-x64",
+      "displayName": "Windows x64 (Visual Studio 2022 fallback)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/windows-vs2022-x64",
+      "cacheVariables": { "CMAKE_CONFIGURATION_TYPES": "Debug;Release" }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-vs2026-x64-release",
+      "configurePreset": "windows-vs2026-x64",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-vs2026-x64-debug",
+      "configurePreset": "windows-vs2026-x64",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-vs2022-x64-release",
+      "configurePreset": "windows-vs2022-x64",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-vs2026-x64-release",
+      "configurePreset": "windows-vs2026-x64",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "windows-vs2026-x64-debug",
+      "configurePreset": "windows-vs2026-x64",
+      "configuration": "Debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "windows-vs2022-x64-release",
+      "configurePreset": "windows-vs2022-x64",
+      "configuration": "Release",
+      "output": { "outputOnFailure": true }
+    }
+  ]
+}
