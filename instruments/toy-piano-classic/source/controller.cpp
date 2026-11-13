@@ -138,10 +138,39 @@ tresult PLUGIN_API Controller::setParamNormalized(ParamID tag, ParamValue value)
     return result;
 }
 
+tresult PLUGIN_API Controller::getState(IBStream* state) {
+    if(!state)
+        return kInvalidArgument;
+    IBStreamer stream(state, kLittleEndian);
+    if(!stream.writeInt32(kControllerStateVersion) || !stream.writeDouble(editor_zoom_))
+        return kResultFalse;
+    return kResultOk;
+}
+
+tresult PLUGIN_API Controller::setState(IBStream* state) {
+    if(!state)
+        return kInvalidArgument;
+    IBStreamer stream(state, kLittleEndian);
+    int32 version = 0;
+    double zoom = 1.0;
+    if(!stream.readInt32(version) || version != kControllerStateVersion
+       || !stream.readDouble(zoom))
+        return kResultFalse;
+    editor_zoom_ = ClampEditorZoom(zoom);
+    for(Editor* editor : editors_)
+        editor->SetZoom(editor_zoom_);
+    return kResultOk;
+}
+
 IPlugView* PLUGIN_API Controller::createView(FIDString name) {
-    if(name && std::strcmp(name, ViewType::kEditor) == 0)
-        return new Editor(this);
-    return nullptr;
+    if(!name || std::strcmp(name, ViewType::kEditor) != 0)
+        return nullptr;
+    // The window holds a reference to this controller, so `this` outlives it.
+    return new Editor(this, editor_zoom_, [this](double zoom) {
+        editor_zoom_ = zoom;
+        // The zoom belongs to the project: tell the host there is something to save.
+        setDirty(true);
+    });
 }
 
 void Controller::editorAttached(EditorView* editor) {

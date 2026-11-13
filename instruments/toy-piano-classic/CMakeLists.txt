@@ -1,5 +1,9 @@
 # Toy Piano Classic: VST3 instrument around the unchanged Daisy Seed3 sound engine.
 
+# Its own version; moduleinfo.json takes it from here. Keep it equal to
+# FULL_VERSION_STR in source/version.h.
+project(ToyPianoClassic VERSION 0.2.0 LANGUAGES CXX)
+
 # The firmware engine exactly as copied from Daisy-Seed. Its own warnings stay
 # as they are; the files are not to be edited here.
 add_library(toy_piano_core STATIC

@@ -1,6 +1,6 @@
 # Planung
 
-Stand: 2026-11-13. Das erste Testobjekt, Toy Piano Classic 0.1.0, ist gebaut
+Stand: 2026-11-13. Das erste Testobjekt, Toy Piano Classic 0.2.0, ist gebaut
 und automatisch geprüft. In Studio One lädt es, die Regler reagieren. Angehört
 wurde es noch nicht; Waveform und Live stehen aus.
 
@@ -37,7 +37,7 @@ lassen sich ändern, solange kein zweites Plugin darauf aufbaut.
 | Polyphonie | 16 Stimmen |
 | Pegel | Eigener Volume-Regler |
 | MIDI | Noten mit Velocity, Pitch Bend, CCs für Attack, Decay und Pitch |
-| GUI | Regler mit Wertanzeige, feste Größe |
+| GUI | Regler mit Wertanzeige. Zunächst feste Größe; seit 2026-11-13 frei skalierbar mit festem Seitenverhältnis, 50 bis 200 % |
 | Test-Hosts | Studio One, Tracktion Waveform 14, Ableton Live 12 Lite |
 
 Bei der Umsetzung selbst festgelegt, weil die Vorgaben es offen ließen:
@@ -60,7 +60,7 @@ Bei der Umsetzung selbst festgelegt, weil die Vorgaben es offen ließen:
 | 2 | Klangkern unverändert übernommen, Firmware-Test läuft mit MSVC | Erledigt |
 | 3 | Noten, Parameter, Abtastrate des Hosts, Stereo, Zustand | Erledigt |
 | 4 | Master Pitch mit Glättung, dazu Pitch Bend und Volume | Erledigt |
-| 5 | GUI mit vier Reglern | Erledigt, in Studio One bedient |
+| 5 | GUI mit vier Reglern | Erledigt, in Studio One bedient (Version 0.1.0). Größenänderung seit 0.2.0, in den DAWs noch nicht ausprobiert |
 | 6 | Abnahme in den DAWs, CPU-Last | **Begonnen:** lädt in Studio One. Hörtest, Waveform, Live und CPU-Last offen |
 | 7 | CI auf GitHub | **Offen** |
 
@@ -97,7 +97,7 @@ und die Tests ausführt. Zwei Dinge sind vorher zu klären:
 | 1 | Welcher Effekt wird das erste Testobjekt unter `effects/`? | `drive` oder `stereo-delay`: wenig Zustand, klar messbar. Reverb und Tape hängen stärker an DaisySP. |
 | 2 | Wird DaisySP auf dem Desktop mitgenutzt? | Ja, als Submodul, sobald ein Port mehr als eine Funktion davon braucht. DaisySP ist reines C++ unter MIT. |
 | 3 | Kopie oder gemeinsamer DSP-Kern mit Daisy-Seed? | Beim zweiten Port neu bewerten. Toy Piano kam mit drei unveränderten Dateien aus; das spricht bisher für die Kopie. |
-| 4 | Was wandert nach `common/`? | Kandidaten nach diesem Port: die Größenabstimmung des Fensters mit dem Host und die Parameterklassen für Zeiten und dB. Erst verschieben, wenn ein zweites Plugin sie braucht. |
+| 4 | Was wandert nach `common/`? | Kandidaten nach diesem Port: die Größenabstimmung und das Skalieren des Fensters sowie die Parameterklassen für Zeiten und dB. Erst verschieben, wenn ein zweites Plugin sie braucht. |
 | 5 | Hersteller-URL und E-Mail im Plugin | Beide Felder sind leer. Eintragen, sobald feststeht, was dort stehen soll. |
 | 6 | Sollen Ergebnisse zurück in die Firmware fließen? | Der Nyquist-Schutz wäre ein Kandidat, falls die Firmware je über ±2 Halbtöne hinaus moduliert. |
 
@@ -122,3 +122,8 @@ und die Tests ausführt. Zwei Dinge sind vorher zu klären:
 * **Die Fenstergröße muss mit dem Host ausgehandelt werden.** Bei skalierten
   Anzeigen fragt mancher Host die Größe ab, bevor er den Skalierungsfaktor
   mitteilt. Das Fenster war im ersten Versuch bei 120 % abgeschnitten.
+* **Vektorzeichnung macht das Fenster frei skalierbar.** Ohne Bitmaps genügt ein
+  Zoomfaktor für das ganze Fenster. Mit dem Host sind drei Dinge abzustimmen:
+  dass das Fenster veränderbar ist, welche Größen erlaubt sind, und was bei
+  einer neuen Größe geschieht. Ob der Nutzer am Rand ziehen kann, entscheidet
+  trotzdem der Host.

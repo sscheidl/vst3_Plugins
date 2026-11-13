@@ -19,6 +19,9 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
 
     Steinberg::tresult PLUGIN_API initialize(Steinberg::FUnknown* context) SMTG_OVERRIDE;
     Steinberg::tresult PLUGIN_API setComponentState(Steinberg::IBStream* state) SMTG_OVERRIDE;
+    // The controller's own state: the zoom of the editor window.
+    Steinberg::tresult PLUGIN_API setState(Steinberg::IBStream* state) SMTG_OVERRIDE;
+    Steinberg::tresult PLUGIN_API getState(Steinberg::IBStream* state) SMTG_OVERRIDE;
     Steinberg::tresult PLUGIN_API setParamNormalized(Steinberg::Vst::ParamID tag,
                                                      Steinberg::Vst::ParamValue value) SMTG_OVERRIDE;
     Steinberg::IPlugView* PLUGIN_API createView(Steinberg::FIDString name) SMTG_OVERRIDE;
@@ -42,6 +45,7 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
 
   private:
     std::vector<Editor*> editors_; // the open windows; they are not owned here
+    double editor_zoom_ = 1.0;     // set by resizing a window, saved with the project
 };
 
 } // namespace taureon::toy_piano_classic

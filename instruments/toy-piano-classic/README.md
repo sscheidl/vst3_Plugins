@@ -1,13 +1,14 @@
 # Toy Piano Classic
 
-VST3 instrument, version 0.1.0. First test object of this repository: the
+VST3 instrument, version 0.2.0. First test object of this repository: the
 sound engine of the Daisy Seed3 firmware *Toy Piano*, running unchanged inside
 a native Windows plug-in.
 
 ![The plug-in window](docs/editor.png)
 
-**Status:** builds, passes Steinberg's validator and its own tests. It loads in
-Studio One and its knobs respond there. Nobody has listened to it in a DAW yet,
+**Status:** builds, passes Steinberg's validator and its own tests. Version
+0.1.0 loaded in Studio One and its knobs responded there; 0.2.0, which added
+the resizable window, has not been in a DAW. Nobody has listened to either yet,
 see [Still to be checked](#still-to-be-checked).
 
 ## Sound and controls
@@ -23,7 +24,12 @@ attack/decay envelope. 16 voices. Releasing a key does not stop a note.
 | Volume | silence, then −60 to +24 dB | 0 dB | 0 dB is the firmware's level |
 
 Ctrl+click resets a knob to its default; the mouse wheel moves it in small
-steps. The window has a fixed layout and follows the Windows display scale.
+steps.
+
+The window can be resized between 50 % and 200 %; it keeps its aspect ratio
+and scales as a whole. Everything in it is drawn as vectors, so it stays sharp
+at any size. The size is saved with the project. On top of that the window
+follows the Windows display scale.
 
 Volume acts in front of the engine's soft limiter. Raising it makes notes
 louder and dense chords more compressed, but the output never exceeds 0.8 of
@@ -128,7 +134,10 @@ recorded with GCC and glibc.
 | State save and load; damaged state | identical round trip; rejected |
 | Parameter texts, MIDI controller map | as in the tables above |
 | Window in the SDK's `editorhost` at 120 % display scale | drawn as in the picture |
-| Studio One: plug-in loads, knobs respond | reported by the operator |
+| Same window resized by script to 300 × 124, 920 × 380 and 700 × 420 pixels | scales sharply; a window of another shape shows background below the content |
+| Resize arithmetic: aspect ratio, 50 to 200 %, dragged edge decides | passed |
+| Window zoom in the controller state: round trip, limits, damaged state | passed |
+| Studio One, version 0.1.0: plug-in loads, knobs respond | reported by the operator |
 
 Everything but the last row is automated or was captured by script. All of it
 ran on one machine: Windows 11 x64, MSVC 19.51 (Visual Studio
@@ -142,7 +151,10 @@ Build Tools 2026) and MSVC 19.44 (Build Tools 2022).
 * Mouse wheel and Ctrl+click on the knobs.
 * Knobs, host automation and the host's own parameter view stay in step.
 * Pitch wheel and CC 16/73/75 reach the plug-in in each DAW.
-* Project save and reload restores the four values.
+* Project save and reload restores the four values and the window size.
+* Resizing by dragging the window edge in each DAW. Whether a plug-in window
+  can be dragged at all is the host's decision; so far the window has only
+  been resized by script.
 * Window size on displays with other scale factors, and when moved between
   displays.
 * CPU load. It has not been measured.
@@ -154,7 +166,10 @@ Build Tools 2026) and MSVC 19.44 (Build Tools 2022).
   size and then smoothed over about 5 ms.
 * Attack and decay are read at the strike. Automating them does not bend notes
   that already sound, as in the firmware.
-* No presets, no on-screen keyboard, no resizable window.
+* No presets, no on-screen keyboard.
+* The window scales, it does not reflow: a larger window shows larger knobs,
+  not more of them. Bitmaps would not survive this; any artwork added later has
+  to be vector-drawn or supplied in several resolutions.
 
 ## Sources
 
@@ -165,6 +180,6 @@ Build Tools 2026) and MSVC 19.44 (Build Tools 2022).
 | `source/parameters.h` | Parameters, ranges, MIDI controller numbers |
 | `source/processor.*` | Audio side: MIDI notes in, stereo out, state |
 | `source/controller.*` | Parameters as the host sees them, MIDI controller map |
-| `source/editor.*` | The window |
+| `source/editor.*` | The window and its resizing |
 | `source/factory.cpp`, `plugin_ids.h`, `version.h` | Registration, IDs, version |
 | `tests/` | Engine test from the firmware, plug-in test |

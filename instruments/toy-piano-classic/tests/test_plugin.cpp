@@ -2,6 +2,7 @@
 // processor is driven in-process through the VST3 SDK's hosting classes, the
 // way a host drives it.
 #include "controller.h"
+#include "editor.h"
 #include "engine.h"
 #include "parameters.h"
 #include "processor.h"
@@ -526,8 +527,85 @@ void TestController() {
     CHECK(controller->getParamNormalized(kParamVolume) == 0.8);
     CHECK(controller->getParamNormalized(kParamPitchBend) == kDefaultPitchBend);
     processor->terminate();
+
+    // The controller's own state is the zoom of the editor window.
+    const auto zoom_state = [](int32 version, double zoom) {
+        auto stream = owned(new MemoryStream());
+        int32 written = 0;
+        stream->write(&version, sizeof(version), &written);
+        stream->write(&zoom, sizeof(zoom), &written);
+        int64 start = 0;
+        stream->seek(0, IBStream::kIBSeekSet, &start);
+        return stream;
+    };
+    const auto saved_zoom = [](Controller& source) {
+        MemoryStream saved;
+        CHECK(source.getState(&saved) == kResultOk);
+        CHECK(saved.getSize() == 4 + 8);
+        double zoom = 0.0;
+        std::memcpy(&zoom, saved.getData() + 4, sizeof(zoom));
+        return zoom;
+    };
+    CHECK(saved_zoom(*controller) == 1.0);
+    CHECK(controller->setState(zoom_state(kControllerStateVersion, 1.5)) == kResultOk);
+    CHECK(saved_zoom(*controller) == 1.5);
+    CHECK(controller->setState(zoom_state(kControllerStateVersion, 10.0)) == kResultOk);
+    CHECK(saved_zoom(*controller) == kMaxEditorZoom); // out of range: clamped
+    CHECK(controller->setState(zoom_state(kControllerStateVersion, 0.01)) == kResultOk);
+    CHECK(saved_zoom(*controller) == kMinEditorZoom);
+    CHECK(controller->setState(zoom_state(99, 1.5)) != kResultOk);
+    MemoryStream empty;
+    CHECK(controller->setState(&empty) != kResultOk);
+    CHECK(saved_zoom(*controller) == kMinEditorZoom); // a rejected state changes nothing
+    // Loading the sound's state leaves the window zoom alone.
+    stream.seek(0, IBStream::kIBSeekSet, &position);
+    CHECK(controller->setComponentState(&stream) == kResultOk);
+    CHECK(saved_zoom(*controller) == kMinEditorZoom);
+
     controller->terminate();
-    std::printf("controller: value texts, MIDI map (pitch wheel, CC 16, 73, 75), state\n");
+    std::printf("controller: value texts, MIDI map (pitch wheel, CC 16, 73, 75), state, zoom\n");
+}
+
+// Resizing the window: the aspect ratio holds, the zoom stays within its
+// limits, and the edge being dragged decides.
+void TestEditorResize() {
+    const auto same = [](EditorSize a, EditorSize b) {
+        return a.width == b.width && a.height == b.height;
+    };
+    const EditorSize base = EditorSizeFor(1.0);
+    CHECK(same(base, {460, 190}));
+    // Right edge dragged: the height follows the width.
+    CHECK(same(ConstrainEditorSize({600, 190}, base, 1.0), {600, 248}));
+    // Bottom edge dragged: the width follows the height.
+    CHECK(same(ConstrainEditorSize({460, 300}, base, 1.0), {726, 300}));
+    // Corner dragged: the larger move decides.
+    CHECK(same(ConstrainEditorSize({700, 200}, base, 1.0), {700, 289}));
+    // Limits: 50 % and 200 %, also on a scaled display.
+    CHECK(same(ConstrainEditorSize({10, 10}, base, 1.0), {230, 95}));
+    CHECK(same(ConstrainEditorSize({5000, 190}, base, 1.0), {920, 380}));
+    CHECK(same(ConstrainEditorSize({10, 10}, EditorSizeFor(1.2), 1.2), {276, 114}));
+    CHECK(same(ConstrainEditorSize({5000, 228}, EditorSizeFor(1.2), 1.2), {1104, 456}));
+    // Asking for the current size changes nothing.
+    for(const double total : {0.5, 0.8, 1.0, 1.2, 1.37, 2.0, 2.4}) {
+        const EditorSize size = EditorSizeFor(total);
+        CHECK(same(ConstrainEditorSize(size, size, 1.0 + (total > 2.0 ? 0.2 : 0.0)), size));
+    }
+    // Every allowed size has the layout's aspect ratio, to the pixel.
+    for(int width = 200; width <= 1000; width += 7) {
+        const EditorSize size = ConstrainEditorSize({width, 190}, base, 1.0);
+        CHECK(std::abs(size.height - size.width * kEditorHeight / kEditorWidth) <= 0.5);
+    }
+    // A window size leads back to the zoom it was made for.
+    for(const double scale : {1.0, 1.2, 1.5, 2.0})
+        for(const double zoom : {0.5, 0.75, 1.0, 1.3, 2.0}) {
+            const EditorSize size = EditorSizeFor(scale * zoom);
+            CHECK(std::fabs(EditorZoomForSize(size.width, size.height, scale) - zoom) < 0.005);
+        }
+    // A window of another shape: the content fits into it.
+    CHECK(std::fabs(EditorZoomForSize(700, 420, 1.0) - 700 / kEditorWidth) < 1e-12);
+    CHECK(std::fabs(EditorZoomForSize(700, 200, 1.0) - 200 / kEditorHeight) < 1e-12);
+    CHECK(ClampEditorZoom(std::nan("")) == kMinEditorZoom);
+    std::printf("editor resize: aspect ratio kept, zoom 50..200 %%, dragged edge decides\n");
 }
 
 } // namespace
@@ -543,6 +621,7 @@ int main() {
     TestVolume();
     TestPitchBend();
     TestController();
+    TestEditorResize();
     std::printf("PASS\n");
     return 0;
 }

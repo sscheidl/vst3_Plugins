@@ -10,8 +10,11 @@
 #include "vstgui/lib/controls/cknob.h"
 #include "vstgui/lib/controls/ctextlabel.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <string>
+#include <utility>
 
 namespace taureon::toy_piano_classic {
 
@@ -22,8 +25,8 @@ using namespace VSTGUI;
 namespace {
 
 // Layout in unscaled pixels.
-constexpr CCoord kWidth = 460;
-constexpr CCoord kHeight = 190;
+constexpr CCoord kWidth = kEditorWidth;
+constexpr CCoord kHeight = kEditorHeight;
 constexpr CCoord kMargin = 20;
 constexpr CCoord kColumnWidth = (kWidth - 2 * kMargin) / 4;
 constexpr CCoord kKnobSize = 64;
@@ -66,9 +69,9 @@ CTextLabel* MakeLabel(const CRect& size, const char* text, CFontRef font, CColor
 
 } // namespace
 
-Editor::Editor(EditController* controller) : VSTGUIEditor(controller) {
-    ViewRect size(0, 0, static_cast<int32>(kWidth), static_cast<int32>(kHeight));
-    setRect(size);
+Editor::Editor(EditController* controller, double zoom, std::function<void(double)> zoom_changed)
+: VSTGUIEditor(controller), zoom_(ClampEditorZoom(zoom)), zoom_changed_(std::move(zoom_changed)) {
+    setRect(ScaledSize());
 }
 
 tresult PLUGIN_API Editor::queryInterface(const TUID _iid, void** obj) {
@@ -131,18 +134,84 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         knobs_ = {};
         return false;
     }
-    frame->setZoom(scale_);
+    const ViewRect wanted = ScaledSize();
+    LayOut(wanted.getWidth(), wanted.getHeight());
     // `rect` holds the size the host knows. A host that asked for the size
     // before it told us the scale factor made its window too small.
-    ViewRect wanted = ScaledSize();
-    if(plugFrame && (rect.getWidth() != wanted.getWidth() || rect.getHeight() != wanted.getHeight()))
-        plugFrame->resizeView(this, &wanted);
+    RequestScaledSize();
     return true;
 }
 
 ViewRect Editor::ScaledSize() const {
-    return ViewRect(0, 0, static_cast<int32>(std::lround(kWidth * scale_)),
-                    static_cast<int32>(std::lround(kHeight * scale_)));
+    const EditorSize size = EditorSizeFor(scale_ * zoom_);
+    return ViewRect(0, 0, size.width, size.height);
+}
+
+void Editor::LayOut(int32 width, int32 height) {
+    if(!frame)
+        return;
+    frame->setZoom(scale_ * zoom_);
+    // setZoom() sizes the frame to its content. A host may hand out a window
+    // of another shape; the frame then fills it and shows background beside
+    // or below the content.
+    frame->setSize(width, height);
+}
+
+void Editor::RequestScaledSize() {
+    ViewRect wanted = ScaledSize();
+    // Ask with `rect` still at the old size: hosts compare the two and answer
+    // with onSize(), which lays out again and updates `rect`.
+    if(frame && plugFrame
+       && (rect.getWidth() != wanted.getWidth() || rect.getHeight() != wanted.getHeight()))
+        plugFrame->resizeView(this, &wanted);
+}
+
+tresult PLUGIN_API Editor::canResize() {
+    return kResultTrue;
+}
+
+tresult PLUGIN_API Editor::checkSizeConstraint(ViewRect* size) {
+    if(!size)
+        return kInvalidArgument;
+    const EditorSize allowed = ConstrainEditorSize({size->getWidth(), size->getHeight()},
+                                                   {rect.getWidth(), rect.getHeight()}, scale_);
+    size->right = size->left + allowed.width;
+    size->bottom = size->top + allowed.height;
+    return kResultTrue;
+}
+
+tresult PLUGIN_API Editor::onSize(ViewRect* newSize) {
+    if(!newSize)
+        return kInvalidArgument;
+    const int32 width = newSize->getWidth();
+    const int32 height = newSize->getHeight();
+    if(width <= 0 || height <= 0)
+        return kResultFalse;
+    const ViewRect current = ScaledSize();
+    if(width != current.getWidth() || height != current.getHeight()) {
+        // The user resized the window.
+        const double zoom = EditorZoomForSize(width, height, scale_);
+        if(zoom != zoom_) {
+            zoom_ = zoom;
+            if(zoom_changed_)
+                zoom_changed_(zoom_);
+        }
+    }
+    LayOut(width, height);
+    setRect(*newSize);
+    return kResultOk;
+}
+
+void Editor::SetZoom(double zoom) {
+    zoom = ClampEditorZoom(zoom);
+    if(zoom == zoom_)
+        return;
+    zoom_ = zoom;
+    if(frame) {
+        const ViewRect wanted = ScaledSize();
+        LayOut(wanted.getWidth(), wanted.getHeight());
+        RequestScaledSize();
+    }
 }
 
 tresult PLUGIN_API Editor::getSize(ViewRect* size) {
@@ -214,12 +283,9 @@ tresult PLUGIN_API Editor::setContentScaleFactor(ScaleFactor factor) {
         return kInvalidArgument;
     scale_ = factor;
     if(frame) {
-        frame->setZoom(scale_);
-        // Ask first, with `rect` still at the old size: hosts compare the two
-        // and answer with onSize(), which updates `rect`.
-        ViewRect wanted = ScaledSize();
-        if(plugFrame)
-            plugFrame->resizeView(this, &wanted);
+        const ViewRect wanted = ScaledSize();
+        LayOut(wanted.getWidth(), wanted.getHeight());
+        RequestScaledSize();
     }
     return kResultOk;
 }

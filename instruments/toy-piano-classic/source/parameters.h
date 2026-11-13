@@ -99,5 +99,7 @@ inline double LogTimePosition(double seconds, double minimum, double maximum) {
 // Layout of the saved state: version, then master pitch, attack, decay and
 // volume as normalized doubles.
 constexpr std::int32_t kStateVersion = 1;
+// Layout of the controller's own state: version, then the editor zoom as a double.
+constexpr std::int32_t kControllerStateVersion = 1;
 
 } // namespace taureon::toy_piano_classic

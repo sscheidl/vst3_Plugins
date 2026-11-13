@@ -1,9 +1,15 @@
 # Opens a plug-in in the SDK's editorhost, captures only that window with
 # PrintWindow (nothing else on the screen), saves a PNG and closes the host.
+#
+# With -ClientWidth and -ClientHeight the host window is first resized so that
+# its content area has that size in pixels, the way a user would drag it. The
+# script does not apply the plug-in's size constraint, so any shape can be tried.
 param(
     [Parameter(Mandatory)] [string] $EditorHost,
     [Parameter(Mandatory)] [string] $Plugin,
-    [Parameter(Mandatory)] [string] $Output
+    [Parameter(Mandatory)] [string] $Output,
+    [int] $ClientWidth = 0,
+    [int] $ClientHeight = 0
 )
 
 Add-Type -AssemblyName System.Drawing
@@ -13,8 +19,11 @@ using System.Runtime.InteropServices;
 public static class Win {
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+    [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after,
+        int x, int y, int cx, int cy, uint flags);
 }
 '@
 
@@ -28,10 +37,23 @@ try {
         if ($process.MainWindowHandle -ne [IntPtr]::Zero) { $handle = $process.MainWindowHandle; break }
     }
     if ($handle -eq [IntPtr]::Zero) { throw "editorhost showed no window" }
-    Start-Sleep -Milliseconds 1200   # let the editor draw
+    Start-Sleep -Milliseconds 1000   # let the editor draw
 
     $rect = New-Object Win+RECT
+    $client = New-Object Win+RECT
+    if ($ClientWidth -gt 0 -and $ClientHeight -gt 0) {
+        [void][Win]::GetWindowRect($handle, [ref]$rect)
+        [void][Win]::GetClientRect($handle, [ref]$client)
+        $frameWidth = ($rect.Right - $rect.Left) - $client.Right
+        $frameHeight = ($rect.Bottom - $rect.Top) - $client.Bottom
+        # SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+        [void][Win]::SetWindowPos($handle, [IntPtr]::Zero, 0, 0,
+            $ClientWidth + $frameWidth, $ClientHeight + $frameHeight, 0x0016)
+        Start-Sleep -Milliseconds 800
+    }
+
     [void][Win]::GetWindowRect($handle, [ref]$rect)
+    [void][Win]::GetClientRect($handle, [ref]$client)
     $width = $rect.Right - $rect.Left
     $height = $rect.Bottom - $rect.Top
     $bitmap = New-Object System.Drawing.Bitmap $width, $height
@@ -42,7 +64,7 @@ try {
     $graphics.Dispose()
     $bitmap.Save($Output, [System.Drawing.Imaging.ImageFormat]::Png)
     $bitmap.Dispose()
-    "captured ${width}x${height}, PrintWindow=$ok, dpi=$([Win]::GetDpiForWindow($handle)), title='$($process.MainWindowTitle)'"
+    "window ${width}x${height}, content $($client.Right)x$($client.Bottom), PrintWindow=$ok, dpi=$([Win]::GetDpiForWindow($handle))"
 }
 finally {
     if (-not $process.HasExited) {
