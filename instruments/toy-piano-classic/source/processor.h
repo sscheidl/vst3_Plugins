@@ -2,6 +2,7 @@
 
 #include "engine.h"
 #include "parameters.h"
+#include "spsc_queue.h"
 
 #include "public.sdk/source/vst/vstaudioeffect.h"
 
@@ -29,6 +30,8 @@ class Processor : public Steinberg::Vst::AudioEffect {
     Steinberg::tresult PLUGIN_API process(Steinberg::Vst::ProcessData& data) SMTG_OVERRIDE;
     Steinberg::tresult PLUGIN_API setState(Steinberg::IBStream* state) SMTG_OVERRIDE;
     Steinberg::tresult PLUGIN_API getState(Steinberg::IBStream* state) SMTG_OVERRIDE;
+    // Notes from the screen keyboard arrive here, on the host's UI thread.
+    Steinberg::tresult PLUGIN_API notify(Steinberg::Vst::IMessage* message) SMTG_OVERRIDE;
 
   private:
     void ReadParameterChanges(Steinberg::Vst::IParameterChanges& changes);
@@ -45,6 +48,14 @@ class Processor : public Steinberg::Vst::AudioEffect {
     std::atomic<double> decay_{kDefaultDecay};
     std::atomic<double> volume_{kDefaultVolume};
     std::atomic<double> pitch_bend_{kDefaultPitchBend};
+
+    // Screen keyboard notes, from notify() to process(). The firmware's own
+    // lock-free queue, which there carries USB-MIDI notes to the audio callback.
+    struct KeyboardNote {
+        std::uint8_t note = 0;
+        std::uint8_t velocity = 0;
+    };
+    toy_piano::SpscQueue<KeyboardNote, 64> keyboard_notes_;
 };
 
 } // namespace taureon::toy_piano_classic

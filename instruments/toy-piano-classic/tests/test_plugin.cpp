@@ -4,12 +4,14 @@
 #include "controller.h"
 #include "editor.h"
 #include "engine.h"
+#include "keyboard_layout.h"
 #include "parameters.h"
 #include "processor.h"
 #include "toy_piano.h"
 
 #include "public.sdk/source/common/memorystream.h"
 #include "public.sdk/source/vst/hosting/eventlist.h"
+#include "public.sdk/source/vst/hosting/hostclasses.h"
 #include "public.sdk/source/vst/hosting/parameterchanges.h"
 #include "public.sdk/source/vst/hosting/processdata.h"
 #include "public.sdk/source/vst/utility/stringconvert.h"
@@ -21,6 +23,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -528,84 +531,269 @@ void TestController() {
     CHECK(controller->getParamNormalized(kParamPitchBend) == kDefaultPitchBend);
     processor->terminate();
 
-    // The controller's own state is the zoom of the editor window.
-    const auto zoom_state = [](int32 version, double zoom) {
+    // The controller's own state: the window's zoom and whether the keyboard shows.
+    const auto window_state = [](int32 version, double zoom, int keyboard) {
         auto stream = owned(new MemoryStream());
         int32 written = 0;
         stream->write(&version, sizeof(version), &written);
         stream->write(&zoom, sizeof(zoom), &written);
+        if(keyboard >= 0) {
+            const int8 flag = static_cast<int8>(keyboard);
+            stream->write(const_cast<int8*>(&flag), sizeof(flag), &written);
+        }
         int64 start = 0;
         stream->seek(0, IBStream::kIBSeekSet, &start);
         return stream;
     };
-    const auto saved_zoom = [](Controller& source) {
-        MemoryStream saved;
-        CHECK(source.getState(&saved) == kResultOk);
-        CHECK(saved.getSize() == 4 + 8);
-        double zoom = 0.0;
-        std::memcpy(&zoom, saved.getData() + 4, sizeof(zoom));
-        return zoom;
+    const auto saved = [](Controller& source) {
+        MemoryStream state;
+        CHECK(source.getState(&state) == kResultOk);
+        CHECK(state.getSize() == 4 + 8 + 1);
+        int32 version = 0;
+        std::memcpy(&version, state.getData(), sizeof(version));
+        CHECK(version == kControllerStateVersion);
+        EditorSettings settings;
+        std::memcpy(&settings.zoom, state.getData() + 4, sizeof(settings.zoom));
+        settings.keyboard = state.getData()[12] != 0;
+        return settings;
     };
-    CHECK(saved_zoom(*controller) == 1.0);
-    CHECK(controller->setState(zoom_state(kControllerStateVersion, 1.5)) == kResultOk);
-    CHECK(saved_zoom(*controller) == 1.5);
-    CHECK(controller->setState(zoom_state(kControllerStateVersion, 10.0)) == kResultOk);
-    CHECK(saved_zoom(*controller) == kMaxEditorZoom); // out of range: clamped
-    CHECK(controller->setState(zoom_state(kControllerStateVersion, 0.01)) == kResultOk);
-    CHECK(saved_zoom(*controller) == kMinEditorZoom);
-    CHECK(controller->setState(zoom_state(99, 1.5)) != kResultOk);
+    const auto is = [&](double zoom, bool keyboard) {
+        const EditorSettings settings = saved(*controller);
+        return settings.zoom == zoom && settings.keyboard == keyboard;
+    };
+    CHECK(is(1.0, true)); // keyboard shown by default
+    CHECK(controller->setState(window_state(2, 1.5, 0)) == kResultOk);
+    CHECK(is(1.5, false));
+    // Version 1, as saved by plug-in 0.2.0: no keyboard flag, the keyboard shows.
+    CHECK(controller->setState(window_state(1, 1.25, -1)) == kResultOk);
+    CHECK(is(1.25, true));
+    CHECK(controller->setState(window_state(2, 10.0, 0)) == kResultOk);
+    CHECK(is(kMaxEditorZoom, false)); // out of range: clamped
+    CHECK(controller->setState(window_state(2, 0.01, 1)) == kResultOk);
+    CHECK(is(kMinEditorZoom, true));
+    CHECK(controller->setState(window_state(99, 1.5, 0)) != kResultOk);
+    CHECK(controller->setState(window_state(0, 1.5, 0)) != kResultOk);
+    CHECK(controller->setState(window_state(2, 1.5, -1)) != kResultOk); // flag missing
     MemoryStream empty;
     CHECK(controller->setState(&empty) != kResultOk);
-    CHECK(saved_zoom(*controller) == kMinEditorZoom); // a rejected state changes nothing
-    // Loading the sound's state leaves the window zoom alone.
+    CHECK(is(kMinEditorZoom, true)); // a rejected state changes nothing
+    // Loading the sound's state leaves the window settings alone.
     stream.seek(0, IBStream::kIBSeekSet, &position);
     CHECK(controller->setComponentState(&stream) == kResultOk);
-    CHECK(saved_zoom(*controller) == kMinEditorZoom);
+    CHECK(is(kMinEditorZoom, true));
 
     controller->terminate();
-    std::printf("controller: value texts, MIDI map (pitch wheel, CC 16, 73, 75), state, zoom\n");
+    std::printf("controller: value texts, MIDI map (pitch wheel, CC 16, 73, 75), state, "
+                "window settings\n");
 }
 
 // Resizing the window: the aspect ratio holds, the zoom stays within its
-// limits, and the edge being dragged decides.
+// limits, and the window follows the mouse without jumping.
 void TestEditorResize() {
+    using Clock = DragConstraint::Clock;
     const auto same = [](EditorSize a, EditorSize b) {
         return a.width == b.width && a.height == b.height;
     };
-    const EditorSize base = EditorSizeFor(1.0);
+    // One request of a drag, as Windows reports it: it starts from the size
+    // granted before and puts the dragged edge or corner where the mouse is.
+    // The requests come 10 ms apart.
+    Clock::time_point now{};
+    const auto request = [&](DragConstraint& drag, EditorSize asked, EditorSize current,
+                             double scale, bool keyboard) {
+        now += std::chrono::milliseconds(10);
+        return drag.Apply(asked, current, scale, keyboard, now);
+    };
+    const EditorSize base = EditorSizeFor(1.0, false);
+    const EditorSize with_keys = EditorSizeFor(1.0, true);
     CHECK(same(base, {460, 190}));
-    // Right edge dragged: the height follows the width.
-    CHECK(same(ConstrainEditorSize({600, 190}, base, 1.0), {600, 248}));
-    // Bottom edge dragged: the width follows the height.
-    CHECK(same(ConstrainEditorSize({460, 300}, base, 1.0), {726, 300}));
-    // Corner dragged: the larger move decides.
-    CHECK(same(ConstrainEditorSize({700, 200}, base, 1.0), {700, 289}));
-    // Limits: 50 % and 200 %, also on a scaled display.
-    CHECK(same(ConstrainEditorSize({10, 10}, base, 1.0), {230, 95}));
-    CHECK(same(ConstrainEditorSize({5000, 190}, base, 1.0), {920, 380}));
-    CHECK(same(ConstrainEditorSize({10, 10}, EditorSizeFor(1.2), 1.2), {276, 114}));
-    CHECK(same(ConstrainEditorSize({5000, 228}, EditorSizeFor(1.2), 1.2), {1104, 456}));
-    // Asking for the current size changes nothing.
-    for(const double total : {0.5, 0.8, 1.0, 1.2, 1.37, 2.0, 2.4}) {
-        const EditorSize size = EditorSizeFor(total);
-        CHECK(same(ConstrainEditorSize(size, size, 1.0 + (total > 2.0 ? 0.2 : 0.0)), size));
+    CHECK(same(with_keys, {460, 272}));
+    {
+        DragConstraint drag;
+        // Right edge dragged: the edge stays under the mouse, the height follows.
+        CHECK(same(request(drag, {600, 190}, base, 1.0, false), {600, 248}));
+        CHECK(same(request(drag, {600, 272}, with_keys, 1.0, true), {600, 355}));
+        // Bottom edge: the width follows.
+        CHECK(same(request(drag, {460, 300}, base, 1.0, false), {726, 300}));
     }
-    // Every allowed size has the layout's aspect ratio, to the pixel.
-    for(int width = 200; width <= 1000; width += 7) {
-        const EditorSize size = ConstrainEditorSize({width, 190}, base, 1.0);
-        CHECK(std::abs(size.height - size.width * kEditorHeight / kEditorWidth) <= 0.5);
+    {
+        DragConstraint drag;
+        // Corner: the allowed size nearest to the mouse.
+        CHECK(same(request(drag, {700, 200}, base, 1.0, false), {669, 276}));
+    }
+    // Limits: 50 % and 200 %, also on a scaled display.
+    const EditorSize scaled = EditorSizeFor(1.2, false);
+    for(const auto& [asked, current, scale, expected] :
+        {std::tuple{EditorSize{10, 10}, base, 1.0, EditorSize{230, 95}},
+         std::tuple{EditorSize{5000, 190}, base, 1.0, EditorSize{920, 380}},
+         std::tuple{EditorSize{10, 10}, scaled, 1.2, EditorSize{276, 114}},
+         std::tuple{EditorSize{5000, 228}, scaled, 1.2, EditorSize{1104, 456}}}) {
+        DragConstraint drag;
+        CHECK(same(request(drag, asked, current, scale, false), expected));
+    }
+    // Asking for the current size changes nothing.
+    for(const bool keyboard : {false, true})
+        for(const double total : {0.5, 0.8, 1.0, 1.2, 1.37, 2.0, 2.4}) {
+            DragConstraint drag;
+            const EditorSize size = EditorSizeFor(total, keyboard);
+            CHECK(same(request(drag, size, size, total > 2.0 ? 1.2 : 1.0, keyboard), size));
+        }
+    // Every granted size has the layout's aspect ratio within a pixel. (Both
+    // sides are rounded, so the height can be off by up to 0.5 + 0.5 * 272 / 460.)
+    for(const bool keyboard : {false, true})
+        for(const bool corner : {false, true})
+            for(int width = 200; width <= 1000; width += 7)
+                for(int height = 80; height <= 500; height += 31) {
+                    const EditorSize size = ConstrainEditorSize(
+                        {width, height}, EditorSizeFor(1.0, keyboard), 1.0, keyboard, corner);
+                    CHECK(std::abs(size.height
+                                   - size.width * EditorBaseHeight(keyboard) / kEditorWidth)
+                          < 1.0);
+                }
+    for(const bool keyboard : {false, true}) {
+        const EditorSize anchor = EditorSizeFor(1.0, keyboard);
+        // Corner drag, the mouse 7 px right and 2 px down per request. Up to
+        // 0.2.0 the window jumped back and forth here; now it grows steadily,
+        // also when the mouse meets the window's height by chance.
+        DragConstraint drag;
+        EditorSize current = anchor;
+        bool met_height = false;
+        for(int step = 1; step <= 60; ++step) {
+            const EditorSize mouse = {anchor.width + 7 * step, anchor.height + 2 * step};
+            met_height = met_height || mouse.height == current.height;
+            const EditorSize next = request(drag, mouse, current, 1.0, keyboard);
+            CHECK(next.width >= current.width && next.height >= current.height);
+            CHECK(next.width - current.width <= 8);
+            current = next;
+        }
+        CHECK(met_height); // the case that used to jump did occur
+        // After a pause, a new drag: a right-edge drag that follows the mouse.
+        now += std::chrono::seconds(1);
+        int mouse = current.width;
+        for(int step = 1; step <= 30; ++step) {
+            mouse -= 5;
+            current = request(drag, {mouse, current.height}, current, 1.0, keyboard);
+            CHECK(current.width == mouse);
+        }
     }
     // A window size leads back to the zoom it was made for.
-    for(const double scale : {1.0, 1.2, 1.5, 2.0})
-        for(const double zoom : {0.5, 0.75, 1.0, 1.3, 2.0}) {
-            const EditorSize size = EditorSizeFor(scale * zoom);
-            CHECK(std::fabs(EditorZoomForSize(size.width, size.height, scale) - zoom) < 0.005);
-        }
+    for(const bool keyboard : {false, true})
+        for(const double scale : {1.0, 1.2, 1.5, 2.0})
+            for(const double zoom : {0.5, 0.75, 1.0, 1.3, 2.0}) {
+                const EditorSize size = EditorSizeFor(scale * zoom, keyboard);
+                CHECK(std::fabs(EditorZoomForSize(size.width, size.height, scale, keyboard) - zoom)
+                      < 0.005);
+            }
     // A window of another shape: the content fits into it.
-    CHECK(std::fabs(EditorZoomForSize(700, 420, 1.0) - 700 / kEditorWidth) < 1e-12);
-    CHECK(std::fabs(EditorZoomForSize(700, 200, 1.0) - 200 / kEditorHeight) < 1e-12);
+    CHECK(std::fabs(EditorZoomForSize(700, 420, 1.0, false) - 700 / kEditorWidth) < 1e-12);
+    CHECK(std::fabs(EditorZoomForSize(700, 200, 1.0, false) - 200 / kEditorTopHeight) < 1e-12);
     CHECK(ClampEditorZoom(std::nan("")) == kMinEditorZoom);
-    std::printf("editor resize: aspect ratio kept, zoom 50..200 %%, dragged edge decides\n");
+    std::printf("editor resize: aspect ratio kept, zoom 50..200 %%, drags follow the mouse\n");
+}
+// The keyboard's geometry: every key where it is drawn, black keys on top.
+void TestKeyboardLayout() {
+    constexpr double width = 420.0, height = 68.0;
+    int white = 0, black = 0;
+    for(int note = kKeyboardLowNote; note <= kKeyboardHighNote; ++note) {
+        const KeyRect key = KeyRectFor(note, width, height);
+        CHECK(key.left >= 0.0 && key.right <= width && key.bottom <= height);
+        const double centre = (key.left + key.right) / 2.0;
+        if(IsBlackKey(note)) {
+            ++black;
+            CHECK(NoteAt(centre, height * 0.3, width, height) == note);
+            // Below a black key lie the two white keys beside it.
+            const double boundary = (WhiteKeyIndex(note) + 1) * width / kKeyboardWhiteKeys;
+            CHECK(NoteAt(boundary - 1.0, height * 0.9, width, height) == note - 1);
+            CHECK(NoteAt(boundary + 1.0, height * 0.9, width, height) == note + 1);
+        } else {
+            ++white;
+            CHECK(NoteAt(centre, height * 0.9, width, height) == note);
+        }
+    }
+    CHECK(white == kKeyboardWhiteKeys && black == 10);
+    CHECK(kKeyboardHighNote - kKeyboardLowNote == 24); // two octaves and the top C
+    CHECK(WhiteKeyIndex(kKeyboardHighNote) == kKeyboardWhiteKeys - 1);
+    for(const auto& [x, y] : {std::pair{-1.0, 10.0}, {width, 10.0}, {10.0, height}, {10.0, -1.0}})
+        CHECK(NoteAt(x, y, width, height) == -1);
+    // A scan over the whole keyboard finds every key and nothing else.
+    bool found[128] = {};
+    for(double x = 0.0; x < width; x += 0.5)
+        for(double y = 0.0; y < height; y += 2.0) {
+            const int note = NoteAt(x, y, width, height);
+            CHECK(note >= kKeyboardLowNote && note <= kKeyboardHighNote);
+            found[note] = true;
+        }
+    for(int note = kKeyboardLowNote; note <= kKeyboardHighNote; ++note)
+        CHECK(found[note]);
+    CHECK(kKeyboardVelocity == 100);
+    std::printf("keyboard: 25 keys C4..C6, every key where it is drawn\n");
+}
+
+// Notes from the screen keyboard: from the controller as a message to the
+// processor, then through the firmware's queue into the engine.
+void TestScreenKeyboardNotes() {
+    IPtr<HostApplication> host = owned(new HostApplication());
+    IPtr<Processor> processor = owned(new Processor());
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(processor->initialize(host) == kResultOk);
+    CHECK(controller->initialize(host) == kResultOk);
+    // What a host does: connect the two halves.
+    CHECK(processor->connect(controller) == kResultOk);
+    CHECK(controller->connect(processor) == kResultOk);
+
+    constexpr int block = 64;
+    ProcessSetup setup{kRealtime, kSample32, block, 48000.0};
+    CHECK(processor->setupProcessing(setup) == kResultOk);
+    CHECK(processor->setActive(true) == kResultOk);
+    HostProcessData data;
+    CHECK(data.prepare(*processor.get(), block, kSample32));
+    data.numSamples = block;
+    const auto render = [&](int samples) {
+        std::vector<float> out;
+        for(int done = 0; done < samples; done += block) {
+            CHECK(processor->process(data) == kResultOk);
+            out.insert(out.end(), data.outputs[0].channelBuffers32[0],
+                       data.outputs[0].channelBuffers32[0] + block);
+        }
+        return out;
+    };
+
+    // A struck key sounds from the next block on, exactly like a MIDI note-on
+    // with the firmware's key velocity at that block's first sample.
+    controller->PlayNote(64);
+    const int total = 48000;
+    const auto played = render(total);
+    CHECK(Identical(played, RenderCore(48000.0f, {{0, 64, kKeyboardVelocity}}, total,
+                                       AttackSeconds(kDefaultAttack),
+                                       DecaySeconds(kDefaultDecay))));
+    CHECK(Peak(played) > 0.0f);
+
+    // Keys struck while the audio is off are not played later.
+    CHECK(processor->setActive(false) == kResultOk);
+    controller->PlayNote(70);
+    CHECK(processor->setActive(true) == kResultOk);
+    CHECK(Peak(render(4800)) == 0.0f);
+
+    // Messages that are not keyboard notes, or carry nonsense, are refused.
+    const auto message = [](const char* id, int64 note, int64 velocity) {
+        auto result = owned(new HostMessage());
+        result->setMessageID(id);
+        result->getAttributes()->setInt(kNoteMessageNote, note);
+        result->getAttributes()->setInt(kNoteMessageVelocity, velocity);
+        return result;
+    };
+    CHECK(processor->notify(message(kNoteMessageId, 128, 100)) != kResultOk);
+    CHECK(processor->notify(message(kNoteMessageId, 60, 0)) != kResultOk);
+    CHECK(processor->notify(message("SomethingElse", 60, 100)) != kResultOk);
+    CHECK(Peak(render(4800)) == 0.0f);
+    CHECK(processor->notify(message(kNoteMessageId, 60, 100)) == kResultOk);
+    CHECK(Peak(render(4800)) > 0.0f);
+
+    processor->setActive(false);
+    processor->disconnect(controller);
+    controller->disconnect(processor);
+    processor->terminate();
+    controller->terminate();
+    std::printf("screen keyboard: note message reaches the engine, bit-exact\n");
 }
 
 } // namespace
@@ -622,6 +810,8 @@ int main() {
     TestPitchBend();
     TestController();
     TestEditorResize();
+    TestKeyboardLayout();
+    TestScreenKeyboardNotes();
     std::printf("PASS\n");
     return 0;
 }

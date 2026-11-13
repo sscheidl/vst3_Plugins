@@ -4,10 +4,12 @@
 
 #include "base/source/fstreamer.h"
 #include "pluginterfaces/vst/ivstevents.h"
+#include "pluginterfaces/vst/ivstmessage.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace taureon::toy_piano_classic {
 
@@ -50,6 +52,9 @@ tresult PLUGIN_API Processor::canProcessSampleSize(int32 symbolicSampleSize) {
 }
 
 tresult PLUGIN_API Processor::setActive(TBool state) {
+    // Keyboard notes struck while the audio was off are not played later.
+    KeyboardNote stale;
+    while(keyboard_notes_.Pop(stale)) {}
     if(state) {
         // The host has fixed the sample rate by now. All notes end here.
         UpdateEngine();
@@ -102,6 +107,12 @@ void Processor::Render(ProcessData& data, SampleType** channels, int32 numChanne
                 channels[channel][position] = static_cast<SampleType>(sample);
         }
     };
+
+    // Screen keyboard notes start with the block: they come from the UI and
+    // have no sample position.
+    KeyboardNote key;
+    while(keyboard_notes_.Pop(key))
+        engine_.NoteOn(key.note, key.velocity, attack, decay);
 
     IEventList* events = data.inputEvents;
     const int32 event_count = events ? events->getEventCount() : 0;
@@ -172,6 +183,22 @@ tresult PLUGIN_API Processor::setState(IBStream* state) {
     attack_.store(Clamp01(attack));
     decay_.store(Clamp01(decay));
     volume_.store(Clamp01(volume));
+    return kResultOk;
+}
+
+tresult PLUGIN_API Processor::notify(IMessage* message) {
+    if(!message || !message->getMessageID()
+       || std::strcmp(message->getMessageID(), kNoteMessageId) != 0)
+        return AudioEffect::notify(message);
+    IAttributeList* attributes = message->getAttributes();
+    int64 note = -1, velocity = 0;
+    if(!attributes || attributes->getInt(kNoteMessageNote, note) != kResultOk
+       || attributes->getInt(kNoteMessageVelocity, velocity) != kResultOk)
+        return kInvalidArgument;
+    if(note < 0 || note > 127 || velocity < 1 || velocity > 127)
+        return kInvalidArgument;
+    // A full queue drops the note, as the firmware does.
+    keyboard_notes_.Push({static_cast<std::uint8_t>(note), static_cast<std::uint8_t>(velocity)});
     return kResultOk;
 }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "editor.h"
 #include "pluginterfaces/vst/ivstmidicontrollers.h"
 #include "public.sdk/source/vst/vsteditcontroller.h"
 
@@ -7,7 +8,6 @@
 
 namespace taureon::toy_piano_classic {
 
-class Editor;
 
 // Parameter side of the plug-in: declares the parameters, tells the host which
 // MIDI controllers drive them and creates the editor window.
@@ -28,6 +28,9 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
     void editorAttached(Steinberg::Vst::EditorView* editor) SMTG_OVERRIDE;
     void editorRemoved(Steinberg::Vst::EditorView* editor) SMTG_OVERRIDE;
 
+    // Plays a note through the processor, as the screen keyboard does.
+    void PlayNote(int note);
+
     // IMidiMapping
     Steinberg::tresult PLUGIN_API getMidiControllerAssignment(
         Steinberg::int32 busIndex, Steinberg::int16 channel,
@@ -45,7 +48,7 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
 
   private:
     std::vector<Editor*> editors_; // the open windows; they are not owned here
-    double editor_zoom_ = 1.0;     // set by resizing a window, saved with the project
+    EditorSettings editor_;        // window size and keyboard, saved with the project
 };
 
 } // namespace taureon::toy_piano_classic

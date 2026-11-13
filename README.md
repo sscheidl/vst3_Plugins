@@ -13,7 +13,7 @@ prove and records what was learned.
 
 | Project | Kind | Status |
 | --- | --- | --- |
-| [Toy Piano Classic](instruments/toy-piano-classic/) | Instrument | 0.2.0: builds, validated and tested; 0.1.0 loads in Studio One, not yet listened to |
+| [Toy Piano Classic](instruments/toy-piano-classic/) | Instrument | 0.3.0: builds, validated and tested; 0.1.0 loads in Studio One, not yet listened to |
 
 ## Layout
 
@@ -72,7 +72,9 @@ It opens a plug-in's window without a DAW:
 ```
 
 [scripts/capture-editor.ps1](scripts/capture-editor.ps1) does the same and
-saves a picture of that window.
+saves a picture of that window; it can resize the window and click into it
+first. [scripts/resize-benchmark.ps1](scripts/resize-benchmark.ps1) measures
+how long the window takes per resize step.
 
 ## License
 

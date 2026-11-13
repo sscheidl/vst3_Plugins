@@ -4,12 +4,18 @@
 # With -ClientWidth and -ClientHeight the host window is first resized so that
 # its content area has that size in pixels, the way a user would drag it. The
 # script does not apply the plug-in's size constraint, so any shape can be tried.
+#
+# -Click x,y clicks the plug-in window at that point of its content area
+# (repeatable, after any resize). -Hold x,y presses the mouse there, captures
+# while it is held, then releases it.
 param(
     [Parameter(Mandatory)] [string] $EditorHost,
     [Parameter(Mandatory)] [string] $Plugin,
     [Parameter(Mandatory)] [string] $Output,
     [int] $ClientWidth = 0,
-    [int] $ClientHeight = 0
+    [int] $ClientHeight = 0,
+    [string[]] $Click = @(),
+    [string] $Hold = ""
 )
 
 Add-Type -AssemblyName System.Drawing
@@ -24,6 +30,25 @@ public static class Win {
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after,
         int x, int y, int cx, int cy, uint flags);
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
+    [DllImport("user32.dll")] public static extern IntPtr ChildWindowFromPointEx(IntPtr parent,
+        POINT point, uint flags);
+    [DllImport("user32.dll")] public static extern bool MapWindowPoints(IntPtr from, IntPtr to,
+        ref POINT point, uint count);
+    [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint msg,
+        IntPtr wParam, IntPtr lParam);
+    // Sends a mouse message to the deepest child window under a point of `top`'s client area.
+    public static void Mouse(IntPtr top, int x, int y, uint msg, int keys) {
+        IntPtr target = top;
+        POINT p = new POINT { X = x, Y = y };
+        while (true) {
+            IntPtr child = ChildWindowFromPointEx(target, p, 1); // CWP_SKIPINVISIBLE
+            if (child == IntPtr.Zero || child == target) break;
+            MapWindowPoints(target, child, ref p, 1);
+            target = child;
+        }
+        SendMessage(target, msg, (IntPtr)keys, (IntPtr)((p.Y << 16) | (p.X & 0xFFFF)));
+    }
 }
 '@
 
@@ -52,6 +77,19 @@ try {
         Start-Sleep -Milliseconds 800
     }
 
+    foreach ($point in $Click) {
+        $x, $y = $point.Split(',') | ForEach-Object { [int]$_ }
+        [Win]::Mouse($handle, $x, $y, 0x0201, 1)   # WM_LBUTTONDOWN, MK_LBUTTON
+        Start-Sleep -Milliseconds 60
+        [Win]::Mouse($handle, $x, $y, 0x0202, 0)   # WM_LBUTTONUP
+        Start-Sleep -Milliseconds 600
+    }
+    if ($Hold) {
+        $holdX, $holdY = $Hold.Split(',') | ForEach-Object { [int]$_ }
+        [Win]::Mouse($handle, $holdX, $holdY, 0x0201, 1)
+        Start-Sleep -Milliseconds 400
+    }
+
     [void][Win]::GetWindowRect($handle, [ref]$rect)
     [void][Win]::GetClientRect($handle, [ref]$client)
     $width = $rect.Right - $rect.Left
@@ -64,6 +102,7 @@ try {
     $graphics.Dispose()
     $bitmap.Save($Output, [System.Drawing.Imaging.ImageFormat]::Png)
     $bitmap.Dispose()
+    if ($Hold) { [Win]::Mouse($handle, $holdX, $holdY, 0x0202, 0) }
     "window ${width}x${height}, content $($client.Right)x$($client.Bottom), PrintWindow=$ok, dpi=$([Win]::GetDpiForWindow($handle))"
 }
 finally {

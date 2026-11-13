@@ -1,6 +1,6 @@
 # Planung
 
-Stand: 2026-11-13. Das erste Testobjekt, Toy Piano Classic 0.2.0, ist gebaut
+Stand: 2026-11-13. Das erste Testobjekt, Toy Piano Classic 0.3.0, ist gebaut
 und automatisch geprüft. In Studio One lädt es, die Regler reagieren. Angehört
 wurde es noch nicht; Waveform und Live stehen aus.
 
@@ -38,6 +38,7 @@ lassen sich ändern, solange kein zweites Plugin darauf aufbaut.
 | Pegel | Eigener Volume-Regler |
 | MIDI | Noten mit Velocity, Pitch Bend, CCs für Attack, Decay und Pitch |
 | GUI | Regler mit Wertanzeige. Zunächst feste Größe; seit 2026-11-13 frei skalierbar mit festem Seitenverhältnis, 50 bis 200 % |
+| Bildschirm-Klaviatur | Seit 0.3.0: zwei Oktaven unter den Reglern, per Knopf ein- und ausblendbar |
 | Test-Hosts | Studio One, Tracktion Waveform 14, Ableton Live 12 Lite |
 
 Bei der Umsetzung selbst festgelegt, weil die Vorgaben es offen ließen:
@@ -51,6 +52,10 @@ Bei der Umsetzung selbst festgelegt, weil die Vorgaben es offen ließen:
 | Vorgabewerte | Attack 2 ms, Decay 583 ms | Kurzer Anschlag, mittlerer Ausklang |
 | Master Pitch: Wirkung | Sofort auf klingende Noten, über etwa 5 ms geglättet | Nur so ist der Regler ohne Knackser automatisierbar |
 | Messlatte | Bitgenau gleich dem Kern bei Master Pitch 0 und Volume 0 dB | Schärfster möglicher Nachweis, dass die Hülle den Klang nicht verändert |
+| Klaviatur: Umfang | 25 Tasten, C4 bis C6 | Zwei Oktaven samt oberem C; derselbe Tonumfang wie die 16 Hardware-Tasten der Firmware |
+| Klaviatur: Anschlag | Feste Velocity 100 | Mit diesem Wert sendet die Firmware ihre Hardware-Tasten |
+| Klaviatur: Notenweg | VST3-Nachricht vom Controller an den Processor, dort über die lock-free Queue der Firmware in den Audio-Thread | Der vorgesehene VST3-Weg zwischen den beiden Hälften; die Queue ist unverändert aus der Firmware übernommen |
+| Klaviatur: Vorgabe | Eingeblendet; der Zustand wird mit dem Projekt gespeichert | Projekte aus 0.2.0 öffnen mit Klaviatur |
 
 ## Stand des Fahrplans
 
@@ -60,7 +65,7 @@ Bei der Umsetzung selbst festgelegt, weil die Vorgaben es offen ließen:
 | 2 | Klangkern unverändert übernommen, Firmware-Test läuft mit MSVC | Erledigt |
 | 3 | Noten, Parameter, Abtastrate des Hosts, Stereo, Zustand | Erledigt |
 | 4 | Master Pitch mit Glättung, dazu Pitch Bend und Volume | Erledigt |
-| 5 | GUI mit vier Reglern | Erledigt, in Studio One bedient (Version 0.1.0). Größenänderung seit 0.2.0, in den DAWs noch nicht ausprobiert |
+| 5 | GUI mit vier Reglern | Erledigt, in Studio One bedient (Version 0.1.0). Größenänderung seit 0.2.0, Klaviatur seit 0.3.0, beides in den DAWs noch nicht ausprobiert |
 | 6 | Abnahme in den DAWs, CPU-Last | **Begonnen:** lädt in Studio One. Hörtest, Waveform, Live und CPU-Last offen |
 | 7 | CI auf GitHub | **Offen** |
 
@@ -127,3 +132,13 @@ und die Tests ausführt. Zwei Dinge sind vorher zu klären:
   dass das Fenster veränderbar ist, welche Größen erlaubt sind, und was bei
   einer neuen Größe geschieht. Ob der Nutzer am Rand ziehen kann, entscheidet
   trotzdem der Host.
+* **Ruckeln erst messen, dann beheben.** Ein Größenschritt kostet im Plugin
+  3–4 ms. Geruckelt hat in 0.2.0 die Regel: Bei jedem Mausereignis neu zu
+  entscheiden, ob Breite oder Höhe führt, ließ das Fenster beim Ziehen an der
+  Ecke springen. Die Lösung merkt sich je Ziehvorgang, ob eine Kante oder eine
+  Ecke gezogen wird. Außerdem darf „Projekt geändert" nicht bei jedem
+  Zwischenschritt an den Host gehen.
+* **Die beiden VST3-Hälften reden über Nachrichten.** Was im Fenster passiert,
+  erreicht den Audioteil nur als Parameter oder als Nachricht. Für Noten von
+  der Bildschirm-Klaviatur passt die Nachricht; die Firmware-Queue bringt sie
+  ohne Sperren in den Audio-Thread.

@@ -1,5 +1,6 @@
 #include "editor.h"
 
+#include "keyboard_view.h"
 #include "parameters.h"
 #include "version.h"
 
@@ -7,6 +8,7 @@
 #include "public.sdk/source/vst/vsteditcontroller.h"
 #include "vstgui/lib/cfont.h"
 #include "vstgui/lib/cframe.h"
+#include "vstgui/lib/cvstguitimer.h"
 #include "vstgui/lib/controls/cknob.h"
 #include "vstgui/lib/controls/ctextlabel.h"
 
@@ -26,13 +28,19 @@ namespace {
 
 // Layout in unscaled pixels.
 constexpr CCoord kWidth = kEditorWidth;
-constexpr CCoord kHeight = kEditorHeight;
 constexpr CCoord kMargin = 20;
 constexpr CCoord kColumnWidth = (kWidth - 2 * kMargin) / 4;
 constexpr CCoord kKnobSize = 64;
 constexpr CCoord kNameTop = 58;
 constexpr CCoord kKnobTop = 82;
 constexpr CCoord kValueTop = 152;
+constexpr CCoord kKeyboardTop = kEditorTopHeight - 4;
+constexpr CCoord kKeyboardBottom = kEditorTopHeight + kKeyboardSectionHeight - 18;
+constexpr CCoord kButtonWidth = 52;
+
+// After the last step of a drag, wait this long before telling the host the
+// project changed. Hosts may do real work for that message.
+constexpr auto kSettleDelay = std::chrono::milliseconds(400);
 
 constexpr CColor kBackground(28, 30, 36);
 constexpr CColor kTrack(64, 68, 80);
@@ -69,8 +77,11 @@ CTextLabel* MakeLabel(const CRect& size, const char* text, CFontRef font, CColor
 
 } // namespace
 
-Editor::Editor(EditController* controller, double zoom, std::function<void(double)> zoom_changed)
-: VSTGUIEditor(controller), zoom_(ClampEditorZoom(zoom)), zoom_changed_(std::move(zoom_changed)) {
+Editor::Editor(EditController* controller, const EditorSettings& settings,
+               EditorCallbacks callbacks)
+: VSTGUIEditor(controller), callbacks_(std::move(callbacks)) {
+    settings_.zoom = ClampEditorZoom(settings.zoom);
+    settings_.keyboard = settings.keyboard;
     setRect(ScaledSize());
 }
 
@@ -80,18 +91,32 @@ tresult PLUGIN_API Editor::queryInterface(const TUID _iid, void** obj) {
 }
 
 bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
-    frame = new CFrame(CRect(0, 0, kWidth, kHeight), this);
+    frame = new CFrame(CRect(0, 0, kWidth, EditorBaseHeight(settings_.keyboard)), this);
     frame->setBackgroundColor(kBackground);
+    applied_zoom_ = 1.0;
 
     const auto title_font = makeOwned<CFontDesc>("Segoe UI", 20, kBoldFace);
     const auto name_font = makeOwned<CFontDesc>("Segoe UI", 11, kBoldFace);
     const auto value_font = makeOwned<CFontDesc>("Segoe UI", 14);
 
-    frame->addView(MakeLabel(CRect(kMargin, 14, kWidth / 2 + 60, 42), stringPluginName,
+    frame->addView(MakeLabel(CRect(kMargin, 14, kWidth / 2 + 20, 42), stringPluginName,
                              title_font, kText, kLeftText));
-    frame->addView(MakeLabel(CRect(kWidth / 2 + 60, 18, kWidth - kMargin, 40),
+    const CCoord button_left = kWidth - kMargin - kButtonWidth;
+    frame->addView(MakeLabel(CRect(kWidth / 2 + 20, 18, button_left - 12, 40),
                              stringCompanyName "  " FULL_VERSION_STR, name_font, kDimText,
                              kRightText));
+    keyboard_button_ = new ToggleButton(CRect(button_left, 18, kWidth - kMargin, 40), "KEYS",
+                                        settings_.keyboard,
+                                        [this](bool on) { ShowKeyboard(on); });
+    frame->addView(keyboard_button_);
+    keyboard_view_ = new KeyboardView(CRect(kMargin, kKeyboardTop, kWidth - kMargin,
+                                            kKeyboardBottom),
+                                      [this](int note) {
+                                          if(callbacks_.strike)
+                                              callbacks_.strike(note);
+                                      });
+    keyboard_view_->setVisible(settings_.keyboard);
+    frame->addView(keyboard_view_);
 
     for(std::size_t i = 0; i < knobs_.size(); ++i) {
         const KnobSpec& spec = kKnobs[i];
@@ -132,38 +157,83 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         frame->forget();
         frame = nullptr;
         knobs_ = {};
+        keyboard_view_ = nullptr;
+        keyboard_button_ = nullptr;
         return false;
     }
     const ViewRect wanted = ScaledSize();
     LayOut(wanted.getWidth(), wanted.getHeight());
     // `rect` holds the size the host knows. A host that asked for the size
     // before it told us the scale factor made its window too small.
-    RequestScaledSize();
+    Resize();
     return true;
 }
 
 ViewRect Editor::ScaledSize() const {
-    const EditorSize size = EditorSizeFor(scale_ * zoom_);
+    const EditorSize size = EditorSizeFor(scale_ * settings_.zoom, settings_.keyboard);
     return ViewRect(0, 0, size.width, size.height);
 }
 
 void Editor::LayOut(int32 width, int32 height) {
     if(!frame)
         return;
-    frame->setZoom(scale_ * zoom_);
-    // setZoom() sizes the frame to its content. A host may hand out a window
-    // of another shape; the frame then fills it and shows background beside
-    // or below the content.
+    // Zooming invalidates and repaints the whole window, so only when needed.
+    const double total = scale_ * settings_.zoom;
+    if(total != applied_zoom_) {
+        frame->setZoom(total);
+        applied_zoom_ = total;
+    }
+    // A host may hand out a window of another shape; the frame then fills it
+    // and shows background beside or below the content.
     frame->setSize(width, height);
 }
 
-void Editor::RequestScaledSize() {
+void Editor::Resize() {
+    if(!frame)
+        return;
     ViewRect wanted = ScaledSize();
+    if(rect.getWidth() == wanted.getWidth() && rect.getHeight() == wanted.getHeight())
+        return;
     // Ask with `rect` still at the old size: hosts compare the two and answer
     // with onSize(), which lays out again and updates `rect`.
-    if(frame && plugFrame
-       && (rect.getWidth() != wanted.getWidth() || rect.getHeight() != wanted.getHeight()))
-        plugFrame->resizeView(this, &wanted);
+    if(plugFrame && plugFrame->resizeView(this, &wanted) == kResultTrue)
+        return;
+    // Refused: keep the window and zoom the content to fit into it.
+    settings_.zoom = EditorZoomForSize(rect.getWidth(), rect.getHeight(), scale_,
+                                       settings_.keyboard);
+    LayOut(rect.getWidth(), rect.getHeight());
+}
+
+void Editor::ShowKeyboard(bool show) {
+    if(show == settings_.keyboard)
+        return;
+    settings_.keyboard = show;
+    if(keyboard_view_)
+        keyboard_view_->setVisible(show);
+    if(keyboard_button_)
+        keyboard_button_->SetOn(show);
+    const ViewRect wanted = ScaledSize();
+    LayOut(wanted.getWidth(), wanted.getHeight());
+    Resize();
+    UserChanged();
+}
+
+void Editor::UserChanged() {
+    if(callbacks_.changed)
+        callbacks_.changed(settings_);
+    settle_pending_ = true;
+    last_change_ = std::chrono::steady_clock::now();
+}
+
+CMessageResult Editor::notify(CBaseObject* sender, const char* message) {
+    const CMessageResult result = VSTGUIEditor::notify(sender, message);
+    if(message == CVSTGUITimer::kMsgTimer && settle_pending_
+       && std::chrono::steady_clock::now() - last_change_ >= kSettleDelay) {
+        settle_pending_ = false;
+        if(callbacks_.settled)
+            callbacks_.settled();
+    }
+    return result;
 }
 
 tresult PLUGIN_API Editor::canResize() {
@@ -173,8 +243,9 @@ tresult PLUGIN_API Editor::canResize() {
 tresult PLUGIN_API Editor::checkSizeConstraint(ViewRect* size) {
     if(!size)
         return kInvalidArgument;
-    const EditorSize allowed = ConstrainEditorSize({size->getWidth(), size->getHeight()},
-                                                   {rect.getWidth(), rect.getHeight()}, scale_);
+    const EditorSize allowed =
+        drag_.Apply({size->getWidth(), size->getHeight()}, {rect.getWidth(), rect.getHeight()},
+                    scale_, settings_.keyboard, DragConstraint::Clock::now());
     size->right = size->left + allowed.width;
     size->bottom = size->top + allowed.height;
     return kResultTrue;
@@ -190,11 +261,10 @@ tresult PLUGIN_API Editor::onSize(ViewRect* newSize) {
     const ViewRect current = ScaledSize();
     if(width != current.getWidth() || height != current.getHeight()) {
         // The user resized the window.
-        const double zoom = EditorZoomForSize(width, height, scale_);
-        if(zoom != zoom_) {
-            zoom_ = zoom;
-            if(zoom_changed_)
-                zoom_changed_(zoom_);
+        const double zoom = EditorZoomForSize(width, height, scale_, settings_.keyboard);
+        if(zoom != settings_.zoom) {
+            settings_.zoom = zoom;
+            UserChanged();
         }
     }
     LayOut(width, height);
@@ -202,15 +272,20 @@ tresult PLUGIN_API Editor::onSize(ViewRect* newSize) {
     return kResultOk;
 }
 
-void Editor::SetZoom(double zoom) {
-    zoom = ClampEditorZoom(zoom);
-    if(zoom == zoom_)
+void Editor::ApplySettings(const EditorSettings& settings) {
+    const double zoom = ClampEditorZoom(settings.zoom);
+    if(zoom == settings_.zoom && settings.keyboard == settings_.keyboard)
         return;
-    zoom_ = zoom;
+    settings_.zoom = zoom;
+    settings_.keyboard = settings.keyboard;
+    if(keyboard_view_)
+        keyboard_view_->setVisible(settings_.keyboard);
+    if(keyboard_button_)
+        keyboard_button_->SetOn(settings_.keyboard);
     if(frame) {
         const ViewRect wanted = ScaledSize();
         LayOut(wanted.getWidth(), wanted.getHeight());
-        RequestScaledSize();
+        Resize();
     }
 }
 
@@ -222,7 +297,14 @@ tresult PLUGIN_API Editor::getSize(ViewRect* size) {
 }
 
 void PLUGIN_API Editor::close() {
+    if(settle_pending_) { // a change made just before closing still counts
+        settle_pending_ = false;
+        if(callbacks_.settled)
+            callbacks_.settled();
+    }
     knobs_ = {};
+    keyboard_view_ = nullptr;
+    keyboard_button_ = nullptr;
     if(frame) {
         frame->removeAll(true);
         if(frame->getNbReference() == 1)
@@ -285,7 +367,7 @@ tresult PLUGIN_API Editor::setContentScaleFactor(ScaleFactor factor) {
     if(frame) {
         const ViewRect wanted = ScaledSize();
         LayOut(wanted.getWidth(), wanted.getHeight());
-        RequestScaledSize();
+        Resize();
     }
     return kResultOk;
 }

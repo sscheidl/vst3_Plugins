@@ -99,7 +99,15 @@ inline double LogTimePosition(double seconds, double minimum, double maximum) {
 // Layout of the saved state: version, then master pitch, attack, decay and
 // volume as normalized doubles.
 constexpr std::int32_t kStateVersion = 1;
-// Layout of the controller's own state: version, then the editor zoom as a double.
-constexpr std::int32_t kControllerStateVersion = 1;
+// Layout of the controller's own state: version, the editor zoom as a double,
+// then (from version 2) the keyboard as one byte, 1 for shown. Version 1 is
+// what plug-in 0.2.0 saved and is still read.
+constexpr std::int32_t kControllerStateVersion = 2;
+
+// The message that carries a note struck on the screen keyboard from the
+// controller to the processor.
+constexpr const char* kNoteMessageId = "TaureonToyPianoNote";
+constexpr const char* kNoteMessageNote = "note";
+constexpr const char* kNoteMessageVelocity = "velocity";
 
 } // namespace taureon::toy_piano_classic

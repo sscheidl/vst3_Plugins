@@ -1,6 +1,7 @@
 #include "controller.h"
 
 #include "editor.h"
+#include "keyboard_layout.h"
 #include "parameters.h"
 #include "plugin_ids.h"
 
@@ -11,6 +12,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <utility>
 
 namespace taureon::toy_piano_classic {
 
@@ -142,7 +144,8 @@ tresult PLUGIN_API Controller::getState(IBStream* state) {
     if(!state)
         return kInvalidArgument;
     IBStreamer stream(state, kLittleEndian);
-    if(!stream.writeInt32(kControllerStateVersion) || !stream.writeDouble(editor_zoom_))
+    if(!stream.writeInt32(kControllerStateVersion) || !stream.writeDouble(editor_.zoom)
+       || !stream.writeInt8(editor_.keyboard ? 1 : 0))
         return kResultFalse;
     return kResultOk;
 }
@@ -153,24 +156,41 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
     IBStreamer stream(state, kLittleEndian);
     int32 version = 0;
     double zoom = 1.0;
-    if(!stream.readInt32(version) || version != kControllerStateVersion
+    int8 keyboard = 1; // version 1 (plug-in 0.2.0) had no keyboard: show it
+    if(!stream.readInt32(version) || version < 1 || version > kControllerStateVersion
        || !stream.readDouble(zoom))
         return kResultFalse;
-    editor_zoom_ = ClampEditorZoom(zoom);
+    if(version >= 2 && !stream.readInt8(keyboard))
+        return kResultFalse;
+    editor_.zoom = ClampEditorZoom(zoom);
+    editor_.keyboard = keyboard != 0;
     for(Editor* editor : editors_)
-        editor->SetZoom(editor_zoom_);
+        editor->ApplySettings(editor_);
     return kResultOk;
+}
+
+void Controller::PlayNote(int note) {
+    if(note < 0 || note > 127)
+        return;
+    IPtr<IMessage> message = owned(allocateMessage());
+    if(!message)
+        return; // the host offers no messages: nothing to play through
+    message->setMessageID(kNoteMessageId);
+    message->getAttributes()->setInt(kNoteMessageNote, note);
+    message->getAttributes()->setInt(kNoteMessageVelocity, kKeyboardVelocity);
+    sendMessage(message);
 }
 
 IPlugView* PLUGIN_API Controller::createView(FIDString name) {
     if(!name || std::strcmp(name, ViewType::kEditor) != 0)
         return nullptr;
     // The window holds a reference to this controller, so `this` outlives it.
-    return new Editor(this, editor_zoom_, [this](double zoom) {
-        editor_zoom_ = zoom;
-        // The zoom belongs to the project: tell the host there is something to save.
-        setDirty(true);
-    });
+    EditorCallbacks callbacks;
+    callbacks.changed = [this](const EditorSettings& settings) { editor_ = settings; };
+    // Window size and keyboard belong to the project: the host should offer to save.
+    callbacks.settled = [this] { setDirty(true); };
+    callbacks.strike = [this](int note) { PlayNote(note); };
+    return new Editor(this, editor_, std::move(callbacks));
 }
 
 void Controller::editorAttached(EditorView* editor) {
