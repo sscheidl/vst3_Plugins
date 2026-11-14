@@ -1,0 +1,680 @@
+{
+  "schema": 1,
+  "product": {
+    "id": "torus-classic",
+    "name": "Torus Classic",
+    "version": "0.2.1",
+    "vendor": "TAUREON",
+    "format": "VST3",
+    "platform": "Windows x64",
+    "license": "MIT"
+  },
+  "components": [
+    {
+      "id": "torus-classic.core",
+      "path": "core/",
+      "layer": 1,
+      "version": "torus@259ed82 stmlib@5dc8b89 via daisy-seed@10f906f",
+      "description": "Hardware-free Torus DSP (six Part models) and the stmlib parts it uses; vendored, patched for the desktop",
+      "license": "MIT (Emilie Gillet; DaisyExamples contributors; TAUREON)"
+    },
+    {
+      "id": "torus-classic.engine",
+      "path": "engine/",
+      "layer": 2,
+      "version": "0.1.0",
+      "description": "Dry four-voice instrument: note FIFO, triggers, parameter smoothing, model changes, output stage; no reverb",
+      "interface": "engine/dry_engine.h",
+      "depends_on": [
+        "torus-classic.core"
+      ],
+      "license": "MIT (TAUREON)"
+    },
+    {
+      "id": "torus-classic.adapter",
+      "path": "adapter/",
+      "layer": 3,
+      "version": "0.2.1",
+      "description": "Streaming adapter: host sample rate, 12-sample quanta, event time, latency",
+      "interface": "adapter/stream_adapter.h",
+      "depends_on": [],
+      "license": "MIT (TAUREON)"
+    },
+    {
+      "id": "torus-classic.shell",
+      "path": "source/",
+      "layer": 4,
+      "version": "0.2.1",
+      "description": "VST3 processor, controller, state and editor",
+      "depends_on": [
+        "torus-classic.engine",
+        "torus-classic.adapter",
+        "vst3sdk",
+        "vstgui"
+      ],
+      "license": "MIT (TAUREON)"
+    },
+    {
+      "id": "torus-classic.reference",
+      "path": "tests/reference/",
+      "test_only": true,
+      "version": "daisy-seed@10f906f",
+      "description": "Pinned firmware engine with its reverb, verbatim, for the dry reference comparison; not part of the plug-in",
+      "license": "MIT (Emilie Gillet; DaisyExamples contributors; TAUREON)"
+    }
+  ],
+  "origins": {
+    "daisy-seed": {
+      "repository": "https://github.com/sscheidl/Daisy-Seed",
+      "commit": "10f906fcd5a036fd88d20851186337e46fa38198",
+      "path": "instruments/physical-modeling",
+      "last_commit_touching_path": "2c4db79f8f99ba49ef7b5d9ea55a84b566dcedae",
+      "working_tree_modified_at_copy": false,
+      "product": "Daisy Physical Modeling 0.1.1"
+    },
+    "torus": {
+      "repository": "https://github.com/daisyaudio/DaisyExamples",
+      "commit": "259ed82c7d4c0d7699f695945e6e111b7dc7cb27",
+      "path": "patch/Torus",
+      "note": "as recorded by Daisy-Seed torus/UPSTREAM.md; taken through Daisy-Seed, with its corrections"
+    },
+    "stmlib": {
+      "repository": "https://github.com/pichenettes/stmlib",
+      "commit": "5dc8b89b9d166de5f47ba91ee9d25c8805c2bd86",
+      "note": "as recorded by Daisy-Seed torus/UPSTREAM.md; taken through Daisy-Seed"
+    },
+    "vst3sdk": {
+      "repository": "https://github.com/steinbergmedia/vst3sdk",
+      "tag": "v3.8.0_build_66",
+      "commit": "9fad9770f2ae8542ab1a548a68c1ad1ac690abe0",
+      "submodule": "external/vst3sdk"
+    }
+  },
+  "hash_method": "SHA-256 of the file content with CRLF replaced by LF (the content Git stores)",
+  "files": [
+    {
+      "local": "core/torus/resources.h",
+      "origin": "instruments/physical-modeling/torus/resources.h",
+      "relation": "patched",
+      "origin_sha256": "fb2967c023ea757a17fee7928e2ad3c41a1fa44575f5d712a253cfdb10126160",
+      "origin_git_blob": "e28d76781c995b08d2fe6ce00eb7d56b6bfdf20f",
+      "local_sha256": "5bd5039b4fc8fbc0045d264b3b9ddead7b39670a040eaf0f75cfccb04d42d472"
+    },
+    {
+      "local": "core/torus/resources.cpp",
+      "origin": "instruments/physical-modeling/torus/resources.cpp",
+      "relation": "patched",
+      "origin_sha256": "334b5162877dd762e08c13ad1eb70a237d6add08fa47abddc8371d7bab9f0787",
+      "origin_git_blob": "85c9c257023d082c50f64184c64f6a7702f8d8c6",
+      "local_sha256": "1f07b20262540b02439fe9cab7242ef92b0640e7db06a228d479eff5f1d704a2"
+    },
+    {
+      "local": "core/torus/dsp/dsp.h",
+      "origin": "instruments/physical-modeling/torus/dsp/dsp.h",
+      "relation": "verbatim",
+      "origin_sha256": "1f27c45fc1e603172d0f5f801e1e000dc2e605e7452353992fc5c89582a70fd5",
+      "origin_git_blob": "9f29a2e37cc14fda711d4dd3bf91f9bca58e4eb1",
+      "local_sha256": "1f27c45fc1e603172d0f5f801e1e000dc2e605e7452353992fc5c89582a70fd5"
+    },
+    {
+      "local": "core/torus/dsp/fm_voice.h",
+      "origin": "instruments/physical-modeling/torus/dsp/fm_voice.h",
+      "relation": "verbatim",
+      "origin_sha256": "77a3138feb2fce8abc273662fc77cf163fd8e229792074c630f4119eeef9bca1",
+      "origin_git_blob": "c17de7c524a185da7eb9517d8b259d5d5ea129e4",
+      "local_sha256": "77a3138feb2fce8abc273662fc77cf163fd8e229792074c630f4119eeef9bca1"
+    },
+    {
+      "local": "core/torus/dsp/fm_voice.cpp",
+      "origin": "instruments/physical-modeling/torus/dsp/fm_voice.cpp",
+      "relation": "verbatim",
+      "origin_sha256": "b7d2fe16f1328e0cdd52f86f840fbaeae47781fb8597ce340d755c3acad36c19",
+      "origin_git_blob": "bee84e18bf4a715d785e532696e88068740f4605",
+      "local_sha256": "b7d2fe16f1328e0cdd52f86f840fbaeae47781fb8597ce340d755c3acad36c19"
+    },
+    {
+      "local": "core/torus/dsp/follower.h",
+      "origin": "instruments/physical-modeling/torus/dsp/follower.h",
+      "relation": "verbatim",
+      "origin_sha256": "a705450e842d03130f724ca649c166465f71f1200e28d95a8a4c416ae10da040",
+      "origin_git_blob": "b03e1bede43a12b08df7d197a595db6456b9e672",
+      "local_sha256": "a705450e842d03130f724ca649c166465f71f1200e28d95a8a4c416ae10da040"
+    },
+    {
+      "local": "core/torus/dsp/limiter.h",
+      "origin": "instruments/physical-modeling/torus/dsp/limiter.h",
+      "relation": "verbatim",
+      "origin_sha256": "e74a8044fec4e848a73c8877472278741c45b139c0a78c2bc9af625c4d97940b",
+      "origin_git_blob": "7fff954f45732932f659a707b41eecf6ddf10c5e",
+      "local_sha256": "e74a8044fec4e848a73c8877472278741c45b139c0a78c2bc9af625c4d97940b"
+    },
+    {
+      "local": "core/torus/dsp/note_filter.h",
+      "origin": "instruments/physical-modeling/torus/dsp/note_filter.h",
+      "relation": "verbatim",
+      "origin_sha256": "d6afe1c487ecc713099dbb38552e88815154f8313c97abfe8e02e7b26e6fbf59",
+      "origin_git_blob": "ba05e5d58cdb62fdc6aaad50aa04390d4dc7a07f",
+      "local_sha256": "d6afe1c487ecc713099dbb38552e88815154f8313c97abfe8e02e7b26e6fbf59"
+    },
+    {
+      "local": "core/torus/dsp/optimization.h",
+      "origin": "instruments/physical-modeling/torus/dsp/optimization.h",
+      "relation": "patched",
+      "origin_sha256": "9965a7489ee8b2b56cf54ca3e16d44fe8690175887fb4ca60881bf8566f50aba",
+      "origin_git_blob": "1d5ad0aa9a324166d8d7912625eba99c3269724f",
+      "local_sha256": "124b730998b96a5fb8dbeab9da33ed66e05024851ec31e1774f80781f61aa1f1"
+    },
+    {
+      "local": "core/torus/dsp/part.h",
+      "origin": "instruments/physical-modeling/torus/dsp/part.h",
+      "relation": "patched",
+      "origin_sha256": "806492877ef427e6dba91577daf9b5c0b2486da4509d5f8538213ae39fac98a4",
+      "origin_git_blob": "cacbf1085a8f01750319df683bdb0d51063b93ad",
+      "local_sha256": "0997dc65a7a5864c340ba2fc5b6048505a276d04e28fd39b367c50d5560401d4"
+    },
+    {
+      "local": "core/torus/dsp/part.cpp",
+      "origin": "instruments/physical-modeling/torus/dsp/part.cpp",
+      "relation": "patched",
+      "origin_sha256": "6f9e90b8a0961ebcf3636387a9193d6b3a06c8aa8e206066da55988675fe610a",
+      "origin_git_blob": "8f6440794e219b65d8e0a23e4a73c00cc618a9d6",
+      "local_sha256": "84f1a27795b09094f2fcbcfea2444dd9e1284d072b717ed728eb17eef598c736"
+    },
+    {
+      "local": "core/torus/dsp/patch.h",
+      "origin": "instruments/physical-modeling/torus/dsp/patch.h",
+      "relation": "verbatim",
+      "origin_sha256": "8fb9d6f54f83d6c2c360aa8e1c582ad44bd07b24639d09465783db2f118f958c",
+      "origin_git_blob": "e4937b51d758ce273b95163b1979c0f6bb36283a",
+      "local_sha256": "8fb9d6f54f83d6c2c360aa8e1c582ad44bd07b24639d09465783db2f118f958c"
+    },
+    {
+      "local": "core/torus/dsp/performance_state.h",
+      "origin": "instruments/physical-modeling/torus/dsp/performance_state.h",
+      "relation": "verbatim",
+      "origin_sha256": "c41399f081902d25a3260b9482c4c549399d0bf1da02f97064a0d6f49b5bac74",
+      "origin_git_blob": "279407dbe463f5c3002bfa68e11d5b04dc3c4a93",
+      "local_sha256": "c41399f081902d25a3260b9482c4c549399d0bf1da02f97064a0d6f49b5bac74"
+    },
+    {
+      "local": "core/torus/dsp/plucker.h",
+      "origin": "instruments/physical-modeling/torus/dsp/plucker.h",
+      "relation": "patched",
+      "origin_sha256": "560461fccb8823f19cf24256be21959f31e7200c8a9ae5c556816c394217974a",
+      "origin_git_blob": "e8aa853789ac24879571ac5cb6277934aa4319d0",
+      "local_sha256": "c5741d756e7a519e41fe08508858002c0d8a2ab5bc75a070147e3d80d9452420"
+    },
+    {
+      "local": "core/torus/dsp/resonator.h",
+      "origin": "instruments/physical-modeling/torus/dsp/resonator.h",
+      "relation": "verbatim",
+      "origin_sha256": "8109085c5d839a9ba6cfd69824acdfba81ce4a605082355cba8c67aba4dafd31",
+      "origin_git_blob": "093fd14e7f4dd82789e62f81dbd3608bdf69fd25",
+      "local_sha256": "8109085c5d839a9ba6cfd69824acdfba81ce4a605082355cba8c67aba4dafd31"
+    },
+    {
+      "local": "core/torus/dsp/resonator.cpp",
+      "origin": "instruments/physical-modeling/torus/dsp/resonator.cpp",
+      "relation": "patched",
+      "origin_sha256": "2fbbee1b790a97fbebb81c658321f6c3d82e25e86daa4b1b324f2d4c575f4458",
+      "origin_git_blob": "24933a2671a76caa7ae4074ba13679280798ded2",
+      "local_sha256": "4be188f4cd321d3a238967c4362bf80a05975c0ccdad330a7e4ece3e1e7645c4"
+    },
+    {
+      "local": "core/torus/dsp/string.h",
+      "origin": "instruments/physical-modeling/torus/dsp/string.h",
+      "relation": "patched",
+      "origin_sha256": "c35a7a2c326ecdb871bbe734177a074bb7401d4b017cae94a5fe393d92efd672",
+      "origin_git_blob": "7c7049c4f0b25c9d9b4fc259b3c65b1ff6c8989b",
+      "local_sha256": "68100cd8abcb313d7262b0656b35631ad7804e7a2af9ae3242d2ebbdd28c2b44"
+    },
+    {
+      "local": "core/torus/dsp/string.cpp",
+      "origin": "instruments/physical-modeling/torus/dsp/string.cpp",
+      "relation": "patched",
+      "origin_sha256": "250c76b3f6f06ee57d3ac86fbde2f84b9d7af6ef4f839a34655a048323270f75",
+      "origin_git_blob": "071955c905fe46cc0a56ebf5ccafdccb0a7c2a42",
+      "local_sha256": "db49af759d9c2f7aa74821640a927a1c738ee85c3f99c8b22dcd7a813867b65c"
+    },
+    {
+      "local": "core/stmlib/stmlib.h",
+      "origin": "instruments/physical-modeling/third_party/stmlib/stmlib.h",
+      "relation": "verbatim",
+      "origin_sha256": "3afc8589a951e882d9eea16b3eda8623dd6fb0079dd11dfbce817e65be6cfba9",
+      "origin_git_blob": "a4fc9d5cc0b5f9f4784d228783ef1c5f884781d1",
+      "local_sha256": "3afc8589a951e882d9eea16b3eda8623dd6fb0079dd11dfbce817e65be6cfba9"
+    },
+    {
+      "local": "core/stmlib/LICENSE",
+      "origin": "instruments/physical-modeling/third_party/stmlib/LICENSE",
+      "relation": "verbatim",
+      "origin_sha256": "6fde7600ac71ff9e4bdc28b642063d1a65e195f28bb07fb52a9b476efb5aa791",
+      "origin_git_blob": "362def273410712a6967c46f6503c17525347d24",
+      "local_sha256": "6fde7600ac71ff9e4bdc28b642063d1a65e195f28bb07fb52a9b476efb5aa791"
+    },
+    {
+      "local": "core/stmlib/dsp/cosine_oscillator.h",
+      "origin": "instruments/physical-modeling/third_party/stmlib/dsp/cosine_oscillator.h",
+      "relation": "verbatim",
+      "origin_sha256": "d9e30f117d87f14807968c43241a4e57717946af9bbe97e5142264362b90717e",
+      "origin_git_blob": "2206a48e526684cf33163b3fa8bb4c5990c3c1b5",
+      "local_sha256": "d9e30f117d87f14807968c43241a4e57717946af9bbe97e5142264362b90717e"
+    },
+    {
+      "local": "core/stmlib/dsp/delay_line.h",
+      "origin": "instruments/physical-modeling/third_party/stmlib/dsp/delay_line.h",
+      "relation": "verbatim",
+      "origin_sha256": "d6d1bb8e33dedf80bfca976ca1d544fc6ef01bcb1d71a45f3946a0682fd68dcb",
+      "origin_git_blob": "22d5c5ae27f4a00f1da753dae3d3e9993ec25cb8",
+      "local_sha256": "d6d1bb8e33dedf80bfca976ca1d544fc6ef01bcb1d71a45f3946a0682fd68dcb"
+    },
+    {
+      "local": "core/stmlib/dsp/dsp.h",
+      "origin": "instruments/physical-modeling/third_party/stmlib/dsp/dsp.h",
+      "relation": "verbatim",
+      "origin_sha256": "cd1602ffdca749af9677b4322dd6e6223d037dfc0bdb89c18a65244713efc7dc",
+      "origin_git_blob": "08d2d08d02b44b3dc0a620b998fb6f1f05dd493d",
+      "local_sha256": "cd1602ffdca749af9677b4322dd6e6223d037dfc0bdb89c18a65244713efc7dc"
+    },
+    {
+      "local": "core/stmlib/dsp/filter.h",
+      "origin": "instruments/physical-modeling/third_party/stmlib/dsp/filter.h",
+      "relation": "verbatim",
+      "origin_sha256": "a7f5871c58ed8c1dcf303e73e142a8337a0db9fd5f9edb5c352d40900f82706a",
+      "origin_git_blob": "4d231a289afd6bddd5de5c2f0920d6aa991a490f",
+      "local_sha256": "a7f5871c58ed8c1dcf303e73e142a8337a0db9fd5f9edb5c352d40900f82706a"
+    },
+    {
+      "local": "core/stmlib/dsp/parameter_interpolator.h",
+      "origin": "instruments/physical-modeling/third_party/stmlib/dsp/parameter_interpolator.h",
+      "relation": "verbatim",
+      "origin_sha256": "4b05028c320e6946418a36e9662a4e5a142e5bfab0423835a77d074d9c7fc217",
+      "origin_git_blob": "e213b040138f80b08424bc30f0f1ffb02ae20260",
+      "local_sha256": "4b05028c320e6946418a36e9662a4e5a142e5bfab0423835a77d074d9c7fc217"
+    },
+    {
+      "local": "core/stmlib/dsp/units.h",
+      "origin": "instruments/physical-modeling/third_party/stmlib/dsp/units.h",
+      "relation": "verbatim",
+      "origin_sha256": "be38219743728af8e081373371153eab8a3461d8d01128f81b0dfee2be7bff2d",
+      "origin_git_blob": "b2cc29f5f8d878c842c18db8000d8e255f49a4b0",
+      "local_sha256": "be38219743728af8e081373371153eab8a3461d8d01128f81b0dfee2be7bff2d"
+    },
+    {
+      "local": "core/stmlib/dsp/units.cc",
+      "origin": "instruments/physical-modeling/third_party/stmlib/dsp/units.cc",
+      "relation": "verbatim",
+      "origin_sha256": "0acbe230ffaa2d181ba285fce54f2fd0b2339b3ec163a1dd00c946e6bf82ea4a",
+      "origin_git_blob": "0a69d3c193b77640f97e9992bf8a560daa6e527d",
+      "local_sha256": "0acbe230ffaa2d181ba285fce54f2fd0b2339b3ec163a1dd00c946e6bf82ea4a"
+    },
+    {
+      "local": "core/torus/dsp/rng.h",
+      "origin": "instruments/physical-modeling/third_party/stmlib/utils/random.h",
+      "relation": "derived",
+      "origin_sha256": "423f01e905fa279864878f34e42136ad1eb37a33dad58739affaaab06b793e5d",
+      "origin_git_blob": "a95021f578d7ba9cdd6a3843b4a5c1a52ec54500",
+      "local_sha256": "13384dae9d468c6d5937dee5afd2e93472ee4cda2f30bd4fab090956c8990b7d"
+    },
+    {
+      "local": "engine/config.h",
+      "origin": "instruments/physical-modeling/src/config.h",
+      "relation": "adapted",
+      "origin_sha256": "922ad82f506c11c97738b6539a084d86a9dcc227dca0f1c352d0b815f8df5916",
+      "origin_git_blob": "08ab266f91c6ac62855082e34eb0ce1e324e9810",
+      "local_sha256": "57640addc55c409cff734d7957bae31802013df4c00ba4b412c6bb52b29d8412"
+    },
+    {
+      "local": "engine/parameter_manager.h",
+      "origin": "instruments/physical-modeling/src/parameter_manager.h",
+      "relation": "adapted",
+      "origin_sha256": "a139891f92e4da66afc1e73c80f6050d7796982b6d4915b8cbec90c58a85efff",
+      "origin_git_blob": "b5b7474b2e999d0694e14fc7e61867da2a0ba0b2",
+      "local_sha256": "2d16a211bbf1eb9686652d98b4d5a89270a000c28a3e436c1f1f7cc689377f56"
+    },
+    {
+      "local": "engine/audio_output.h",
+      "origin": "instruments/physical-modeling/src/audio_output.h",
+      "relation": "adapted",
+      "origin_sha256": "846ad3a93f21d1bf861cff2014dc97353b05bfa5d498c2f63555979ae1373833",
+      "origin_git_blob": "5d015b299d24d4d35caf1eea6f5cabde57a6500c",
+      "local_sha256": "f921e635f49d2fd8d3815d94425bbf90b6f4291bad046f59fe790a5c6779a91d"
+    },
+    {
+      "local": "engine/synth.h",
+      "origin": "instruments/physical-modeling/src/physical_modeling.h",
+      "relation": "adapted",
+      "origin_sha256": "3c9e1eebdf2c48f1163b1c9789902db2f6b9ecee4aa66df2b80969e8c4fc8254",
+      "origin_git_blob": "f1996afbeaef3c4d5f10f67c4fb7723a4f37e0aa",
+      "local_sha256": "dc9c326660fc0a5834564732ecacaab1504c264cdecb1c7f42eb4c03bcfa84b8"
+    },
+    {
+      "local": "engine/synth.cpp",
+      "origin": "instruments/physical-modeling/src/physical_modeling.cpp",
+      "relation": "adapted",
+      "origin_sha256": "ae92a5282455ed0ea4df0861fde1c492d769b9b34737c7eeb99d2d9363d318f1",
+      "origin_git_blob": "93cc8947d10626391610ac6fedc0075759ce5fd2",
+      "local_sha256": "a3a812db7aea7b2cb11022e3b18f44966c0d6e69546948296861e562684d161e"
+    },
+    {
+      "local": "source/spsc_queue.h",
+      "origin": "instruments/physical-modeling/src/spsc_queue.h",
+      "relation": "patched",
+      "origin_sha256": "9f747dc2dfa9d30ea06bb142eea37b3963a3a52c715b913821f6f0a78bae97f9",
+      "origin_git_blob": "1c557fef553eff5c85a5c65ab9dcf289028139e7",
+      "local_sha256": "63d0e27003f18d0ad132e8980020ebe901c0c81c8229572e0bff38717babc3a1"
+    },
+    {
+      "local": "tests/reference/src/audio_output.h",
+      "origin": "instruments/physical-modeling/src/audio_output.h",
+      "relation": "verbatim",
+      "origin_sha256": "846ad3a93f21d1bf861cff2014dc97353b05bfa5d498c2f63555979ae1373833",
+      "origin_git_blob": "5d015b299d24d4d35caf1eea6f5cabde57a6500c",
+      "local_sha256": "846ad3a93f21d1bf861cff2014dc97353b05bfa5d498c2f63555979ae1373833"
+    },
+    {
+      "local": "tests/reference/src/config.h",
+      "origin": "instruments/physical-modeling/src/config.h",
+      "relation": "verbatim",
+      "origin_sha256": "922ad82f506c11c97738b6539a084d86a9dcc227dca0f1c352d0b815f8df5916",
+      "origin_git_blob": "08ab266f91c6ac62855082e34eb0ce1e324e9810",
+      "local_sha256": "922ad82f506c11c97738b6539a084d86a9dcc227dca0f1c352d0b815f8df5916"
+    },
+    {
+      "local": "tests/reference/src/dsp_memory.h",
+      "origin": "instruments/physical-modeling/src/dsp_memory.h",
+      "relation": "verbatim",
+      "origin_sha256": "859a5eb973f0dda2920814f6ff0082555b2707f866ce756d931d9085254c27ad",
+      "origin_git_blob": "36f1e5913cc662ee9531fb43775106e4bd13b5d8",
+      "local_sha256": "859a5eb973f0dda2920814f6ff0082555b2707f866ce756d931d9085254c27ad"
+    },
+    {
+      "local": "tests/reference/src/parameter_manager.h",
+      "origin": "instruments/physical-modeling/src/parameter_manager.h",
+      "relation": "verbatim",
+      "origin_sha256": "a139891f92e4da66afc1e73c80f6050d7796982b6d4915b8cbec90c58a85efff",
+      "origin_git_blob": "b5b7474b2e999d0694e14fc7e61867da2a0ba0b2",
+      "local_sha256": "a139891f92e4da66afc1e73c80f6050d7796982b6d4915b8cbec90c58a85efff"
+    },
+    {
+      "local": "tests/reference/src/physical_modeling.cpp",
+      "origin": "instruments/physical-modeling/src/physical_modeling.cpp",
+      "relation": "verbatim",
+      "origin_sha256": "ae92a5282455ed0ea4df0861fde1c492d769b9b34737c7eeb99d2d9363d318f1",
+      "origin_git_blob": "93cc8947d10626391610ac6fedc0075759ce5fd2",
+      "local_sha256": "ae92a5282455ed0ea4df0861fde1c492d769b9b34737c7eeb99d2d9363d318f1"
+    },
+    {
+      "local": "tests/reference/src/physical_modeling.h",
+      "origin": "instruments/physical-modeling/src/physical_modeling.h",
+      "relation": "verbatim",
+      "origin_sha256": "3c9e1eebdf2c48f1163b1c9789902db2f6b9ecee4aa66df2b80969e8c4fc8254",
+      "origin_git_blob": "f1996afbeaef3c4d5f10f67c4fb7723a4f37e0aa",
+      "local_sha256": "3c9e1eebdf2c48f1163b1c9789902db2f6b9ecee4aa66df2b80969e8c4fc8254"
+    },
+    {
+      "local": "tests/reference/third_party/stmlib/dsp/cosine_oscillator.h",
+      "origin": "instruments/physical-modeling/third_party/stmlib/dsp/cosine_oscillator.h",
+      "relation": "verbatim",
+      "origin_sha256": "d9e30f117d87f14807968c43241a4e57717946af9bbe97e5142264362b90717e",
+      "origin_git_blob": "2206a48e526684cf33163b3fa8bb4c5990c3c1b5",
+      "local_sha256": "d9e30f117d87f14807968c43241a4e57717946af9bbe97e5142264362b90717e"
+    },
+    {
+      "local": "tests/reference/third_party/stmlib/dsp/delay_line.h",
+      "origin": "instruments/physical-modeling/third_party/stmlib/dsp/delay_line.h",
+      "relation": "verbatim",
+      "origin_sha256": "d6d1bb8e33dedf80bfca976ca1d544fc6ef01bcb1d71a45f3946a0682fd68dcb",
+      "origin_git_blob": "22d5c5ae27f4a00f1da753dae3d3e9993ec25cb8",
+      "local_sha256": "d6d1bb8e33dedf80bfca976ca1d544fc6ef01bcb1d71a45f3946a0682fd68dcb"
+    },
+    {
+      "local": "tests/reference/third_party/stmlib/dsp/dsp.h",
+      "origin": "instruments/physical-modeling/third_party/stmlib/dsp/dsp.h",
+      "relation": "verbatim",
+      "origin_sha256": "cd1602ffdca749af9677b4322dd6e6223d037dfc0bdb89c18a65244713efc7dc",
+      "origin_git_blob": "08d2d08d02b44b3dc0a620b998fb6f1f05dd493d",
+      "local_sha256": "cd1602ffdca749af9677b4322dd6e6223d037dfc0bdb89c18a65244713efc7dc"
+    },
+    {
+      "local": "tests/reference/third_party/stmlib/dsp/filter.h",
+      "origin": "instruments/physical-modeling/third_party/stmlib/dsp/filter.h",
+      "relation": "verbatim",
+      "origin_sha256": "a7f5871c58ed8c1dcf303e73e142a8337a0db9fd5f9edb5c352d40900f82706a",
+      "origin_git_blob": "4d231a289afd6bddd5de5c2f0920d6aa991a490f",
+      "local_sha256": "a7f5871c58ed8c1dcf303e73e142a8337a0db9fd5f9edb5c352d40900f82706a"
+    },
+    {
+      "local": "tests/reference/third_party/stmlib/dsp/parameter_interpolator.h",
+      "origin": "instruments/physical-modeling/third_party/stmlib/dsp/parameter_interpolator.h",
+      "relation": "verbatim",
+      "origin_sha256": "4b05028c320e6946418a36e9662a4e5a142e5bfab0423835a77d074d9c7fc217",
+      "origin_git_blob": "e213b040138f80b08424bc30f0f1ffb02ae20260",
+      "local_sha256": "4b05028c320e6946418a36e9662a4e5a142e5bfab0423835a77d074d9c7fc217"
+    },
+    {
+      "local": "tests/reference/third_party/stmlib/dsp/units.cc",
+      "origin": "instruments/physical-modeling/third_party/stmlib/dsp/units.cc",
+      "relation": "verbatim",
+      "origin_sha256": "0acbe230ffaa2d181ba285fce54f2fd0b2339b3ec163a1dd00c946e6bf82ea4a",
+      "origin_git_blob": "0a69d3c193b77640f97e9992bf8a560daa6e527d",
+      "local_sha256": "0acbe230ffaa2d181ba285fce54f2fd0b2339b3ec163a1dd00c946e6bf82ea4a"
+    },
+    {
+      "local": "tests/reference/third_party/stmlib/dsp/units.h",
+      "origin": "instruments/physical-modeling/third_party/stmlib/dsp/units.h",
+      "relation": "verbatim",
+      "origin_sha256": "be38219743728af8e081373371153eab8a3461d8d01128f81b0dfee2be7bff2d",
+      "origin_git_blob": "b2cc29f5f8d878c842c18db8000d8e255f49a4b0",
+      "local_sha256": "be38219743728af8e081373371153eab8a3461d8d01128f81b0dfee2be7bff2d"
+    },
+    {
+      "local": "tests/reference/third_party/stmlib/LICENSE",
+      "origin": "instruments/physical-modeling/third_party/stmlib/LICENSE",
+      "relation": "verbatim",
+      "origin_sha256": "6fde7600ac71ff9e4bdc28b642063d1a65e195f28bb07fb52a9b476efb5aa791",
+      "origin_git_blob": "362def273410712a6967c46f6503c17525347d24",
+      "local_sha256": "6fde7600ac71ff9e4bdc28b642063d1a65e195f28bb07fb52a9b476efb5aa791"
+    },
+    {
+      "local": "tests/reference/third_party/stmlib/stmlib.h",
+      "origin": "instruments/physical-modeling/third_party/stmlib/stmlib.h",
+      "relation": "verbatim",
+      "origin_sha256": "3afc8589a951e882d9eea16b3eda8623dd6fb0079dd11dfbce817e65be6cfba9",
+      "origin_git_blob": "a4fc9d5cc0b5f9f4784d228783ef1c5f884781d1",
+      "local_sha256": "3afc8589a951e882d9eea16b3eda8623dd6fb0079dd11dfbce817e65be6cfba9"
+    },
+    {
+      "local": "tests/reference/third_party/stmlib/utils/random.cc",
+      "origin": "instruments/physical-modeling/third_party/stmlib/utils/random.cc",
+      "relation": "verbatim",
+      "origin_sha256": "145c4d7a30e373d001fd664ce6f97a475458f7dc8286252d24ca6f592e0cdb93",
+      "origin_git_blob": "3484dac2e415a1c5c0a56162aa82dd16adec94a5",
+      "local_sha256": "145c4d7a30e373d001fd664ce6f97a475458f7dc8286252d24ca6f592e0cdb93"
+    },
+    {
+      "local": "tests/reference/third_party/stmlib/utils/random.h",
+      "origin": "instruments/physical-modeling/third_party/stmlib/utils/random.h",
+      "relation": "verbatim",
+      "origin_sha256": "423f01e905fa279864878f34e42136ad1eb37a33dad58739affaaab06b793e5d",
+      "origin_git_blob": "a95021f578d7ba9cdd6a3843b4a5c1a52ec54500",
+      "local_sha256": "423f01e905fa279864878f34e42136ad1eb37a33dad58739affaaab06b793e5d"
+    },
+    {
+      "local": "tests/reference/torus/dsp/dsp.h",
+      "origin": "instruments/physical-modeling/torus/dsp/dsp.h",
+      "relation": "verbatim",
+      "origin_sha256": "1f27c45fc1e603172d0f5f801e1e000dc2e605e7452353992fc5c89582a70fd5",
+      "origin_git_blob": "9f29a2e37cc14fda711d4dd3bf91f9bca58e4eb1",
+      "local_sha256": "1f27c45fc1e603172d0f5f801e1e000dc2e605e7452353992fc5c89582a70fd5"
+    },
+    {
+      "local": "tests/reference/torus/dsp/fm_voice.cpp",
+      "origin": "instruments/physical-modeling/torus/dsp/fm_voice.cpp",
+      "relation": "verbatim",
+      "origin_sha256": "b7d2fe16f1328e0cdd52f86f840fbaeae47781fb8597ce340d755c3acad36c19",
+      "origin_git_blob": "bee84e18bf4a715d785e532696e88068740f4605",
+      "local_sha256": "b7d2fe16f1328e0cdd52f86f840fbaeae47781fb8597ce340d755c3acad36c19"
+    },
+    {
+      "local": "tests/reference/torus/dsp/fm_voice.h",
+      "origin": "instruments/physical-modeling/torus/dsp/fm_voice.h",
+      "relation": "verbatim",
+      "origin_sha256": "77a3138feb2fce8abc273662fc77cf163fd8e229792074c630f4119eeef9bca1",
+      "origin_git_blob": "c17de7c524a185da7eb9517d8b259d5d5ea129e4",
+      "local_sha256": "77a3138feb2fce8abc273662fc77cf163fd8e229792074c630f4119eeef9bca1"
+    },
+    {
+      "local": "tests/reference/torus/dsp/follower.h",
+      "origin": "instruments/physical-modeling/torus/dsp/follower.h",
+      "relation": "verbatim",
+      "origin_sha256": "a705450e842d03130f724ca649c166465f71f1200e28d95a8a4c416ae10da040",
+      "origin_git_blob": "b03e1bede43a12b08df7d197a595db6456b9e672",
+      "local_sha256": "a705450e842d03130f724ca649c166465f71f1200e28d95a8a4c416ae10da040"
+    },
+    {
+      "local": "tests/reference/torus/dsp/fx/fx_engine.h",
+      "origin": "instruments/physical-modeling/torus/dsp/fx/fx_engine.h",
+      "relation": "verbatim",
+      "origin_sha256": "fe420433d74e2cac26c19e415d26fa4419a2cd974fa66b70f23d4a9aa29554e0",
+      "origin_git_blob": "8cf3e560c41f4edae86590c71c11a09d7822ebad",
+      "local_sha256": "fe420433d74e2cac26c19e415d26fa4419a2cd974fa66b70f23d4a9aa29554e0"
+    },
+    {
+      "local": "tests/reference/torus/dsp/fx/reverb.h",
+      "origin": "instruments/physical-modeling/torus/dsp/fx/reverb.h",
+      "relation": "verbatim",
+      "origin_sha256": "b0fb3d73eec24f8fa0c297def59470204b125bc828a3e7b6877ecdb38d4b66c8",
+      "origin_git_blob": "2134ffa797ab1aa20dc63b48254fc9ac31141452",
+      "local_sha256": "b0fb3d73eec24f8fa0c297def59470204b125bc828a3e7b6877ecdb38d4b66c8"
+    },
+    {
+      "local": "tests/reference/torus/dsp/limiter.h",
+      "origin": "instruments/physical-modeling/torus/dsp/limiter.h",
+      "relation": "verbatim",
+      "origin_sha256": "e74a8044fec4e848a73c8877472278741c45b139c0a78c2bc9af625c4d97940b",
+      "origin_git_blob": "7fff954f45732932f659a707b41eecf6ddf10c5e",
+      "local_sha256": "e74a8044fec4e848a73c8877472278741c45b139c0a78c2bc9af625c4d97940b"
+    },
+    {
+      "local": "tests/reference/torus/dsp/note_filter.h",
+      "origin": "instruments/physical-modeling/torus/dsp/note_filter.h",
+      "relation": "verbatim",
+      "origin_sha256": "d6afe1c487ecc713099dbb38552e88815154f8313c97abfe8e02e7b26e6fbf59",
+      "origin_git_blob": "ba05e5d58cdb62fdc6aaad50aa04390d4dc7a07f",
+      "local_sha256": "d6afe1c487ecc713099dbb38552e88815154f8313c97abfe8e02e7b26e6fbf59"
+    },
+    {
+      "local": "tests/reference/torus/dsp/optimization.h",
+      "origin": "instruments/physical-modeling/torus/dsp/optimization.h",
+      "relation": "verbatim",
+      "origin_sha256": "9965a7489ee8b2b56cf54ca3e16d44fe8690175887fb4ca60881bf8566f50aba",
+      "origin_git_blob": "1d5ad0aa9a324166d8d7912625eba99c3269724f",
+      "local_sha256": "9965a7489ee8b2b56cf54ca3e16d44fe8690175887fb4ca60881bf8566f50aba"
+    },
+    {
+      "local": "tests/reference/torus/dsp/part.cpp",
+      "origin": "instruments/physical-modeling/torus/dsp/part.cpp",
+      "relation": "verbatim",
+      "origin_sha256": "6f9e90b8a0961ebcf3636387a9193d6b3a06c8aa8e206066da55988675fe610a",
+      "origin_git_blob": "8f6440794e219b65d8e0a23e4a73c00cc618a9d6",
+      "local_sha256": "6f9e90b8a0961ebcf3636387a9193d6b3a06c8aa8e206066da55988675fe610a"
+    },
+    {
+      "local": "tests/reference/torus/dsp/part.h",
+      "origin": "instruments/physical-modeling/torus/dsp/part.h",
+      "relation": "verbatim",
+      "origin_sha256": "806492877ef427e6dba91577daf9b5c0b2486da4509d5f8538213ae39fac98a4",
+      "origin_git_blob": "cacbf1085a8f01750319df683bdb0d51063b93ad",
+      "local_sha256": "806492877ef427e6dba91577daf9b5c0b2486da4509d5f8538213ae39fac98a4"
+    },
+    {
+      "local": "tests/reference/torus/dsp/patch.h",
+      "origin": "instruments/physical-modeling/torus/dsp/patch.h",
+      "relation": "verbatim",
+      "origin_sha256": "8fb9d6f54f83d6c2c360aa8e1c582ad44bd07b24639d09465783db2f118f958c",
+      "origin_git_blob": "e4937b51d758ce273b95163b1979c0f6bb36283a",
+      "local_sha256": "8fb9d6f54f83d6c2c360aa8e1c582ad44bd07b24639d09465783db2f118f958c"
+    },
+    {
+      "local": "tests/reference/torus/dsp/performance_state.h",
+      "origin": "instruments/physical-modeling/torus/dsp/performance_state.h",
+      "relation": "verbatim",
+      "origin_sha256": "c41399f081902d25a3260b9482c4c549399d0bf1da02f97064a0d6f49b5bac74",
+      "origin_git_blob": "279407dbe463f5c3002bfa68e11d5b04dc3c4a93",
+      "local_sha256": "c41399f081902d25a3260b9482c4c549399d0bf1da02f97064a0d6f49b5bac74"
+    },
+    {
+      "local": "tests/reference/torus/dsp/plucker.h",
+      "origin": "instruments/physical-modeling/torus/dsp/plucker.h",
+      "relation": "verbatim",
+      "origin_sha256": "560461fccb8823f19cf24256be21959f31e7200c8a9ae5c556816c394217974a",
+      "origin_git_blob": "e8aa853789ac24879571ac5cb6277934aa4319d0",
+      "local_sha256": "560461fccb8823f19cf24256be21959f31e7200c8a9ae5c556816c394217974a"
+    },
+    {
+      "local": "tests/reference/torus/dsp/profile.h",
+      "origin": "instruments/physical-modeling/torus/dsp/profile.h",
+      "relation": "verbatim",
+      "origin_sha256": "3206afea9ff8e839446824f2e35edaa3c52f56bd840d8dc5f38ad7adbd101e30",
+      "origin_git_blob": "68930246d88d2a347eb07941b6a52fdceb613d3a",
+      "local_sha256": "3206afea9ff8e839446824f2e35edaa3c52f56bd840d8dc5f38ad7adbd101e30"
+    },
+    {
+      "local": "tests/reference/torus/dsp/resonator.cpp",
+      "origin": "instruments/physical-modeling/torus/dsp/resonator.cpp",
+      "relation": "verbatim",
+      "origin_sha256": "2fbbee1b790a97fbebb81c658321f6c3d82e25e86daa4b1b324f2d4c575f4458",
+      "origin_git_blob": "24933a2671a76caa7ae4074ba13679280798ded2",
+      "local_sha256": "2fbbee1b790a97fbebb81c658321f6c3d82e25e86daa4b1b324f2d4c575f4458"
+    },
+    {
+      "local": "tests/reference/torus/dsp/resonator.h",
+      "origin": "instruments/physical-modeling/torus/dsp/resonator.h",
+      "relation": "verbatim",
+      "origin_sha256": "8109085c5d839a9ba6cfd69824acdfba81ce4a605082355cba8c67aba4dafd31",
+      "origin_git_blob": "093fd14e7f4dd82789e62f81dbd3608bdf69fd25",
+      "local_sha256": "8109085c5d839a9ba6cfd69824acdfba81ce4a605082355cba8c67aba4dafd31"
+    },
+    {
+      "local": "tests/reference/torus/dsp/string.cpp",
+      "origin": "instruments/physical-modeling/torus/dsp/string.cpp",
+      "relation": "verbatim",
+      "origin_sha256": "250c76b3f6f06ee57d3ac86fbde2f84b9d7af6ef4f839a34655a048323270f75",
+      "origin_git_blob": "071955c905fe46cc0a56ebf5ccafdccb0a7c2a42",
+      "local_sha256": "250c76b3f6f06ee57d3ac86fbde2f84b9d7af6ef4f839a34655a048323270f75"
+    },
+    {
+      "local": "tests/reference/torus/dsp/string.h",
+      "origin": "instruments/physical-modeling/torus/dsp/string.h",
+      "relation": "verbatim",
+      "origin_sha256": "c35a7a2c326ecdb871bbe734177a074bb7401d4b017cae94a5fe393d92efd672",
+      "origin_git_blob": "7c7049c4f0b25c9d9b4fc259b3c65b1ff6c8989b",
+      "local_sha256": "c35a7a2c326ecdb871bbe734177a074bb7401d4b017cae94a5fe393d92efd672"
+    },
+    {
+      "local": "tests/reference/torus/resources.cpp",
+      "origin": "instruments/physical-modeling/torus/resources.cpp",
+      "relation": "verbatim",
+      "origin_sha256": "334b5162877dd762e08c13ad1eb70a237d6add08fa47abddc8371d7bab9f0787",
+      "origin_git_blob": "85c9c257023d082c50f64184c64f6a7702f8d8c6",
+      "local_sha256": "334b5162877dd762e08c13ad1eb70a237d6add08fa47abddc8371d7bab9f0787"
+    },
+    {
+      "local": "tests/reference/torus/resources.h",
+      "origin": "instruments/physical-modeling/torus/resources.h",
+      "relation": "verbatim",
+      "origin_sha256": "fb2967c023ea757a17fee7928e2ad3c41a1fa44575f5d712a253cfdb10126160",
+      "origin_git_blob": "e28d76781c995b08d2fe6ce00eb7d56b6bfdf20f",
+      "local_sha256": "fb2967c023ea757a17fee7928e2ad3c41a1fa44575f5d712a253cfdb10126160"
+    },
+    {
+      "local": "tests/reference/torus/UPSTREAM.md",
+      "origin": "instruments/physical-modeling/torus/UPSTREAM.md",
+      "relation": "verbatim",
+      "origin_sha256": "35bb445453d5809e34d095d9cd6f041d97280d9e6d574eb621d1fca9c99d0779",
+      "origin_git_blob": "9249bbfd518b29a2ea5e770f05fa61ad10282e95",
+      "local_sha256": "35bb445453d5809e34d095d9cd6f041d97280d9e6d574eb621d1fca9c99d0779"
+    }
+  ]
+}

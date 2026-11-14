@@ -58,6 +58,50 @@ Bei der Umsetzung selbst festgelegt, weil die Vorgaben es offen ließen:
 | Klaviatur: Vorgabe | Eingeblendet; der Zustand wird mit dem Projekt gespeichert | Projekte aus 0.2.0 öffnen mit Klaviatur |
 | Oberton an der Abschaltgrenze (Review R07) | Seit 0.3.2 im Plugin linear ausgeblendet zwischen 0,20 und 0,25 der Abtastrate; Firmware vorerst unverändert | Billigste Lösung: keine Rechenlast pro Sample. Vom Nutzer so entschieden (2026-11-14). Noten 123–126 (48 kHz) klingen dadurch anders als in der Firmware |
 
+### Torus Classic
+
+Zweiter Port, Auftrag vom 2026-11-14
+([Buildauftrag](CLAUDE_BUILDAUFTRAG_TORUS_CLASSIC_0.1.0.md)). Version 0.1.0 lädt
+und spielt in Studio One (erster DAW-Test des Nutzers am 2026-11-14). Codex
+fand in 0.1.0 vier Fehler; sie sind seit 0.1.1 behoben. 0.2.0 bringt die
+Ergänzungen aus dem DAW-Test und ist gebaut und automatisch geprüft, in
+einer DAW aber noch nicht ausprobiert. Was sich wann geändert hat, steht im
+[Änderungsprotokoll](../instruments/torus-classic/CHANGELOG.md). Einzelheiten und Messwerte stehen im
+[Build-Bericht](../instruments/torus-classic/docs/BUILD_REPORT_0.1.0.md), die
+offene Abnahme in der
+[DAW-Prüfliste](../instruments/torus-classic/docs/DAW_TEST_0.1.0.md).
+
+Vorgegeben waren Umfang, Parameter-IDs, MIDI-Zuordnung, 48 kHz und 12 Samples
+intern sowie die Anschlagsregel. Bei der Umsetzung selbst festgelegt, weil der
+Auftrag es offen ließ:
+
+| Thema | Festlegung | Begründung |
+| --- | --- | --- |
+| Sampleratenwandlung | Eigener Kaiser-Fenster-Sinc mit 96 Abgriffen im Plugin, keine fremde Bibliothek | Das SDK enthält keinen Resampler. Rund 300 Zeilen, mit Messungen an 15 Raten geprüft (endliches Frequenzraster, keine Schranke für jede Zwischenfrequenz), keine neue Abhängigkeit und kein Download. Abweichung vom Wortlaut des Auftrags („kleine geeignete Abhängigkeit"); bei Bedarf austauschbar, die Schnittstelle des Adapters bleibt |
+| Latenz | 0 bei 48 kHz, sonst rund 1 ms (49/90/97/195 Samples bei 44,1/88,2/96/192 kHz) | Kleinste Verzögerung, bei der kein Ausgabe-Sample ein Quantum braucht, in das ein späterer Block noch Ereignisse legen könnte |
+| Parameterautomation | Jeder Punkt wirkt als Stufe am nächsten 12-Sample-Raster; keine Rampen zwischen Punkten | Die Engine glättet ohnehin über 5 ms; nur so ist das Ergebnis unabhängig von der Blockgröße |
+| Denormale Zahlen | Während des Renderns als null behandelt (FTZ/DAZ) | Gemessen: ausgeklungene Stimmen kosten sonst rund 39 % statt 0,9 % einer CPU. Unterschied zur Firmware-Arithmetik unter 1e-38 |
+| Gleitkomma-Modell | Eigener Code mit `/fp:precise`, nicht mit dem `/fp:fast` des SDK | Der NaN-Schutz der Ausgangsstufe und der bitgenaue Referenzvergleich brauchen IEEE-Verhalten |
+| Zufallsgenerator | Je Instanz ein eigener, bei jeder Aktivierung und jedem Laden auf denselben Startwert gesetzt | Instanzen stören sich nicht; ein Projekt rendert jedes Mal gleich |
+| Reset | Aktivierung und Laden eines Zustands: Stille, Zeit null, keine wartenden Noten | Vom Auftrag verlangt; `setProcessing` löst keinen Reset aus, damit ein Transport-Stopp keine Ausklänge kappt |
+| Bildschirm-Klaviatur | Noten, die nach 500 ms kein Audioblock abgeholt hat, verfallen | Tasten, die bei stehendem Audio geklickt werden, sollen nicht später losklingen |
+| Sechstes Modell | Anzeige „Stereo Strings" | Der Firmware-Name „String & Reverb" passt ohne Hall nicht mehr; die Synthese ist unverändert |
+| Zustandsprüfung | Werte außerhalb 0 bis 1 werden abgelehnt, nicht geklemmt | Ein solcher Zustand ist beschädigt; ein Teilzustand soll nie entstehen |
+| Überlast der Ereignis-Warteschlangen (seit 0.1.1, Codex-Befund TC-R03) | 1024 Noten und je Parameter 256 Automationspunkte warten höchstens. Weitere Noten werden verworfen. Ist die Warteschlange eines Parameters voll, weicht der jüngste wartende Punkt dem neuen | Nichts darf vor seinem Zeitpunkt wirken. So geht höchstens eine Zwischenstufe verloren; der letzte Wert kommt an, zu seiner Zeit |
+| Gemeinsamer Code | Nichts nach `common/` verschoben; Fenster- und Textcode sind Kopien aus Toy Piano Classic 0.3.2 | Toy Piano wurde parallel geändert. Kandidaten für später: Fenstergröße und -skalierung, strenge Texteingabe, Host-Doppel der Tests |
+
+Vom Nutzer nach dem ersten DAW-Test verlangt und in 0.2.0 umgesetzt; die
+Einzelheiten darin selbst festgelegt:
+
+| Thema | Festlegung | Begründung |
+| --- | --- | --- |
+| Damping | Höherer Wert dämpft stärker; die Engine bekommt das Spiegelbild. Zustände aus 0.1.x werden beim Laden umgerechnet, Automationsdaten in Projekten nicht | Vorgabe des Nutzers. Der Parameter behält seine ID; ein neuer Parameter hätte alte Projekte ohne Wert gelassen |
+| Tune | Klingt in Halbtonschritten; Schalter FREE (Parameter 110) gibt stufenloses Stimmen frei. Der Parameter 100 bleibt für den Host stufenlos, gerundet wird an der Engine | Vorgabe des Nutzers. So bleibt vorhandene Automation gültig, und die Stufenzahl eines Parameters muss sich nicht zur Laufzeit ändern |
+| Filter | Parameter 109, CC 74: Tiefpass 12 dB/Oktave ohne Resonanz, 100 Hz bis 20 kHz; ganz offen wirkungslos (exakt) | „Einfaches LP-Filtermodell" laut Vorgabe. Offen muss das Signal unverändert bleiben, sonst gälte der Referenzvergleich nie |
+| Limiter | Am Ende der Kette, nach Filter und Sampleratenwandlung; Decke −6 dBFS, beide Kanäle gemeinsam, sofortiger Zugriff, Erholung 0,15 s, kein Look-ahead | Vorgabe: einfacher Limiter gegen Übersteuerung. Die Decke ist eine Konstante im Quelltext (`OutputStage::kCeiling`) und bei Bedarf in einer Zeile zu ändern. Ohne Look-ahead keine Latenz; dafür kann ein sehr lauter Anschlag eine hörbare Kante bekommen |
+| MIDI aus der Bildschirm-Klaviatur | Event-Ausgang „MIDI Out"; Note-on beim Anschlag, Note-off beim Loslassen | Vorgabe des Nutzers. Ohne Note-off blieben aufgenommene Noten hängen; die Engine selbst kennt weiterhin kein Note-off |
+| Tests | Nur automatische Prüfungen des Verhaltens; keine Fenster- oder DAW-Tests der Ergänzungen | Der Nutzer prüft Optik, GUI und DAW selbst |
+
 ## Stand des Fahrplans
 
 | Schritt | Inhalt | Stand |
