@@ -74,7 +74,7 @@ Auftrag es offen ließ:
 
 | Thema | Festlegung | Begründung |
 | --- | --- | --- |
-| Sampleratenwandlung | Eigener Kaiser-Fenster-Sinc mit 96 Abgriffen im Plugin, keine fremde Bibliothek | Das SDK enthält keinen Resampler. Rund 300 Zeilen, vollständig getestet, keine neue Abhängigkeit und kein Download. Abweichung vom Wortlaut des Auftrags („kleine geeignete Abhängigkeit"); bei Bedarf austauschbar, die Schnittstelle des Adapters bleibt |
+| Sampleratenwandlung | Eigener Kaiser-Fenster-Sinc mit 96 Abgriffen im Plugin, keine fremde Bibliothek | Das SDK enthält keinen Resampler. Rund 300 Zeilen, mit Messungen an 15 Raten geprüft (endliches Frequenzraster, keine Schranke für jede Zwischenfrequenz), keine neue Abhängigkeit und kein Download. Abweichung vom Wortlaut des Auftrags („kleine geeignete Abhängigkeit"); bei Bedarf austauschbar, die Schnittstelle des Adapters bleibt |
 | Latenz | 0 bei 48 kHz, sonst rund 1 ms (49/90/97/195 Samples bei 44,1/88,2/96/192 kHz) | Kleinste Verzögerung, bei der kein Ausgabe-Sample ein Quantum braucht, in das ein späterer Block noch Ereignisse legen könnte |
 | Parameterautomation | Jeder Punkt wirkt als Stufe am nächsten 12-Sample-Raster; keine Rampen zwischen Punkten | Die Engine glättet ohnehin über 5 ms; nur so ist das Ergebnis unabhängig von der Blockgröße |
 | Denormale Zahlen | Während des Renderns als null behandelt (FTZ/DAZ) | Gemessen: ausgeklungene Stimmen kosten sonst rund 39 % statt 0,9 % einer CPU. Unterschied zur Firmware-Arithmetik unter 1e-38 |
@@ -84,6 +84,7 @@ Auftrag es offen ließ:
 | Bildschirm-Klaviatur | Noten, die nach 500 ms kein Audioblock abgeholt hat, verfallen | Tasten, die bei stehendem Audio geklickt werden, sollen nicht später losklingen |
 | Sechstes Modell | Anzeige „Stereo Strings" | Der Firmware-Name „String & Reverb" passt ohne Hall nicht mehr; die Synthese ist unverändert |
 | Zustandsprüfung | Werte außerhalb 0 bis 1 werden abgelehnt, nicht geklemmt | Ein solcher Zustand ist beschädigt; ein Teilzustand soll nie entstehen |
+| Überlast der Ereignis-Warteschlangen (seit 0.1.1, Codex-Befund TC-R03) | 1024 Noten und je Parameter 256 Automationspunkte warten höchstens. Weitere Noten werden verworfen. Ist die Warteschlange eines Parameters voll, weicht der jüngste wartende Punkt dem neuen | Nichts darf vor seinem Zeitpunkt wirken. So geht höchstens eine Zwischenstufe verloren; der letzte Wert kommt an, zu seiner Zeit |
 | Gemeinsamer Code | Nichts nach `common/` verschoben; Fenster- und Textcode sind Kopien aus Toy Piano Classic 0.3.2 | Toy Piano wurde parallel geändert. Kandidaten für später: Fenstergröße und -skalierung, strenge Texteingabe, Host-Doppel der Tests |
 
 ## Stand des Fahrplans

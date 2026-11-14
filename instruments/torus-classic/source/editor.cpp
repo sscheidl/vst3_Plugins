@@ -337,6 +337,14 @@ void PLUGIN_API Editor::close() {
         if(callbacks_.settled)
             callbacks_.settled();
     }
+    // A knob still held by the mouse, or within the pause that follows a turn
+    // of the wheel, has told the host that an edit began. Its view is about
+    // to go without a mouse-up; finish the edit here, once, while the frame
+    // can still pass it on.
+    if(frame)
+        for(const Knob& knob : knobs_)
+            while(knob.knob && knob.knob->isEditing())
+                knob.knob->endEdit();
     ForgetViews();
     if(frame) {
         frame->removeAll(true);
@@ -358,16 +366,6 @@ void Editor::valueChanged(CControl* control) {
     controller->performEdit(id, normalized);
 }
 
-void Editor::controlBeginEdit(CControl* control) {
-    if(controller && control)
-        controller->beginEdit(static_cast<ParamID>(control->getTag()));
-}
-
-void Editor::controlEndEdit(CControl* control) {
-    if(controller && control)
-        controller->endEdit(static_cast<ParamID>(control->getTag()));
-}
-
 void Editor::ChooseModel(int model) {
     if(!controller || model < 0 || model >= kModelCount)
         return;
@@ -380,6 +378,13 @@ void Editor::ChooseModel(int model) {
 
 int Editor::ShownModel() const {
     return model_selector_ ? model_selector_->Model() : -1;
+}
+
+CKnob* Editor::KnobOf(ParamID id) const {
+    for(const Knob& knob : knobs_)
+        if(knob.id == id)
+            return knob.knob;
+    return nullptr;
 }
 
 float Editor::ShownKnobValue(ParamID id) const {

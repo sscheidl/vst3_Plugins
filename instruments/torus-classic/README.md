@@ -1,15 +1,24 @@
 # Torus Classic
 
-VST3 instrument, version 0.1.0, Windows x64. The Rings/Torus keyboard engine
+VST3 instrument, version 0.1.1, Windows x64. The Rings/Torus keyboard engine
 of the Daisy Seed3 firmware *Physical Modeling*, without its reverb, inside a
 native plug-in: six synthesis models, four voices, dry stereo output.
 
 ![The plug-in window](docs/editor.png)
 
 **Status:** built and tested automatically on one machine; passes Steinberg's
-validator. **Not yet loaded in a DAW and not yet listened to.** What is
-verified and what is not: [build report](docs/BUILD_REPORT_0.1.0.md). The open
-checks in the DAWs: [DAW test list](docs/DAW_TEST_0.1.0.md).
+validator.
+
+* First DAW result, version 0.1.0 in Studio One on 2026-11-14: it loads and
+  is displayed correctly; screen keys, knobs, MIDI notes and the pitch wheel
+  work; saved settings come back; the CPU load is negligible. Waveform, Live
+  and the rest of the [DAW test list](docs/DAW_TEST_0.1.0.md) are open.
+* Codex reviewed 0.1.0 and found four defects
+  ([review](docs/CODEX_REVIEW_0.1.0.md)). They are fixed since 0.1.1
+  ([what was done](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)); the fixes have not
+  been re-reviewed.
+* The [build report](docs/BUILD_REPORT_0.1.0.md) describes 0.1.0: what was
+  verified then and what was not.
 
 ## Sound
 
@@ -111,8 +120,11 @@ positions give the same output for every block size.
 
 **At most four strikes per step.** More notes on one step start in the
 following steps, in the order they arrived: a nine-note chord is spread over
-0.5 ms. Up to 256 strikes can wait in the engine and 1024 events in front of
-it; beyond that notes are dropped. Parameter values are never dropped.
+0.5 ms. Up to 256 strikes can wait in the engine and 1024 notes in front of
+it; beyond that notes are dropped. Of each control 256 automation points can
+wait; beyond that the newest waiting point gives way to the next, so a step
+of the automation is lost while the latest value still arrives, at its own
+time. Nothing acts before its time, full queues or not.
 
 **Other sample rates add latency.** At 48 kHz the engine's samples go out
 unchanged. At any other rate they are converted by a 96-tap windowed-sinc
@@ -175,7 +187,7 @@ every time; two instances given the same notes sound identical.
 
 Nothing is installed automatically. Copy the bundle `Torus Classic.vst3`
 (the whole folder) from `build/windows-vs2026-x64/VST3/Release/`, or from
-`out/torus-classic-0.1.0/` after a release build was staged there, to a
+`out/torus-classic-<version>/` after a release build was staged there, to a
 VST3 folder, then let the DAW rescan: `%LOCALAPPDATA%\Programs\Common\VST3\`
 for the current user (no administrator rights; where Toy Piano Classic sits on
 the development machine) or `C:\Program Files\Common Files\VST3\` for all

@@ -21,12 +21,6 @@ class DenormalsAreZero {
     unsigned int saved_;
 };
 
-bool SameSlot(const EngineEvent& a, const EngineEvent& b) {
-    if(a.type != b.type || a.type == EngineEvent::kNoteOn)
-        return false;
-    return a.type != EngineEvent::kControl || a.index == b.index;
-}
-
 } // namespace
 
 bool StreamAdapter::Prepare(double host_rate) {
@@ -57,7 +51,9 @@ bool StreamAdapter::Prepare(double host_rate) {
     const std::size_t capacity = 2 * (window + kQuantum + static_cast<std::size_t>(step)) + 64;
     buffer_left_.assign(capacity, 0.0f);
     buffer_right_.assign(capacity, 0.0f);
-    pending_.assign(kEventCapacity, Pending{});
+    notes_.Allocate(kNoteCapacity);
+    for(Queue& queue : controls_)
+        queue.Allocate(kControlCapacity);
     Reset();
     return true;
 }
@@ -79,19 +75,42 @@ void StreamAdapter::Reset() {
         base_ = 0;
     std::fill(buffer_left_.begin(), buffer_left_.end(), 0.0f);
     std::fill(buffer_right_.begin(), buffer_right_.end(), 0.0f);
-    pending_count_ = 0;
+    notes_.Clear();
+    for(Queue& queue : controls_)
+        queue.Clear();
     dropped_notes_ = 0;
-    displaced_controls_ = 0;
+    dropped_control_points_ = 0;
+}
+
+int StreamAdapter::PendingEvents() const {
+    int count = notes_.count;
+    for(const Queue& queue : controls_)
+        count += queue.count;
+    return count;
 }
 
 std::size_t StreamAdapter::AllocatedBytes() const {
+    std::size_t waiting = notes_.items.capacity();
+    for(const Queue& queue : controls_)
+        waiting += queue.items.capacity();
     return (buffer_left_.capacity() + buffer_right_.capacity()) * sizeof(float)
-           + pending_.capacity() * sizeof(Pending) + kernel_.TableBytes();
+           + waiting * sizeof(Pending) + kernel_.TableBytes();
 }
 
 bool StreamAdapter::AddEvent(std::int32_t offset, const EngineEvent& event) {
-    if(pending_.empty())
+    if(notes_.items.empty())
         return false; // not prepared
+    Queue* queue = &notes_;
+    switch(event.type) {
+        case EngineEvent::kNoteOn: break;
+        case EngineEvent::kControl:
+            if(event.index >= kControlKinds)
+                return false;
+            queue = &controls_[event.index];
+            break;
+        case EngineEvent::kModel: queue = &controls_[kModelQueue]; break;
+        case EngineEvent::kPitchBend: queue = &controls_[kBendQueue]; break;
+    }
     if(offset < 0)
         offset = 0;
     // Internal time of the event, then the first quantum starting at or after it.
@@ -101,40 +120,30 @@ bool StreamAdapter::AddEvent(std::int32_t offset, const EngineEvent& event) {
     std::int64_t quantum = (first_sample + kQuantum - 1) / kQuantum;
     // Cannot be in the past for a valid offset; a bound in any case.
     quantum = std::max(quantum, rendered_ / kQuantum);
+    // Arrival order is kept within a queue: never before the one added last.
+    if(queue->count > 0)
+        quantum = std::max(quantum, queue->Last().quantum);
 
-    // After every waiting event of the same or an earlier quantum.
-    int at = pending_count_;
-    while(at > 0 && pending_[at - 1].quantum > quantum)
-        --at;
-    if(event.type != EngineEvent::kNoteOn) {
-        for(int i = at; i > 0 && pending_[i - 1].quantum == quantum; --i) {
-            if(SameSlot(pending_[i - 1].event, event)) {
-                pending_[i - 1].event = event; // the later value of one quantum wins
-                return true;
-            }
-        }
-    }
-    if(pending_count_ == kEventCapacity) {
-        if(event.type == EngineEvent::kNoteOn) {
+    if(event.type == EngineEvent::kNoteOn) {
+        if(queue->Full()) {
             ++dropped_notes_;
             return false;
         }
-        // The value must not be lost: it takes the place, and the time, of
-        // the newest waiting event of its kind, or acts at once.
-        ++displaced_controls_;
-        for(int i = pending_count_; i > 0; --i) {
-            if(SameSlot(pending_[i - 1].event, event)) {
-                pending_[i - 1].event = event;
-                return true;
-            }
-        }
-        engine_.HandleEvent(event);
+        queue->Push({quantum, event});
         return true;
     }
-    for(int i = pending_count_; i > at; --i)
-        pending_[i] = pending_[i - 1];
-    pending_[at] = {quantum, event};
-    ++pending_count_;
+    if(queue->count > 0 && queue->Last().quantum == quantum) {
+        queue->Last().event = event; // the later value of one quantum wins
+        return true;
+    }
+    if(queue->Full()) {
+        // The newest waiting point gives way to this one, which keeps its own,
+        // later time: a step of the automation is lost, nothing acts early.
+        ++dropped_control_points_;
+        queue->Last() = {quantum, event};
+        return true;
+    }
+    queue->Push({quantum, event});
     return true;
 }
 
@@ -151,15 +160,17 @@ void StreamAdapter::Compact(std::int64_t first_needed) {
 
 void StreamAdapter::RenderQuantum() {
     const std::int64_t quantum = rendered_ / kQuantum;
-    int fired = 0;
-    while(fired < pending_count_ && pending_[fired].quantum <= quantum) {
-        engine_.HandleEvent(pending_[fired].event);
-        ++fired;
-    }
-    if(fired > 0) {
-        for(int i = fired; i < pending_count_; ++i)
-            pending_[i - fired] = pending_[i];
-        pending_count_ -= fired;
+    // What belongs to this quantum: the controls first, then the notes in the
+    // order they came. (For the engine the two commute: it reads both when
+    // it renders.) Each loop ends with its queue, which is bounded.
+    for(Queue& queue : controls_)
+        while(queue.count > 0 && queue.First().quantum <= quantum) {
+            engine_.HandleEvent(queue.First().event);
+            queue.Pop();
+        }
+    while(notes_.count > 0 && notes_.First().quantum <= quantum) {
+        engine_.HandleEvent(notes_.First().event);
+        notes_.Pop();
     }
     if(count_ + kQuantum > static_cast<int>(buffer_left_.size()))
         Compact(pos_int_ - left_);

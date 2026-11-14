@@ -2,7 +2,7 @@
 
 #include "dry_engine.h"
 #include "engine_bridge.h"
-#include "latest_value.h"
+#include "parameter_state.h"
 #include "parameters.h"
 #include "spsc_queue.h"
 #include "stream_adapter.h"
@@ -12,7 +12,6 @@
 #include <array>
 #include <atomic>
 #include <chrono>
-#include <mutex>
 
 namespace torus_classic {
 
@@ -22,8 +21,8 @@ namespace torus_classic {
 // Threads. The engine and the adapter are touched by process() and, while the
 // host is not processing, by setupProcessing() and setActive(). Everything
 // that comes from other threads is handed over without locks on the audio
-// side: parameter values as atomics, a loaded state through LatestValue,
-// screen keyboard notes through a bounded queue.
+// side: parameter values and loaded states through ParameterState, screen
+// keyboard notes through a bounded queue.
 class Processor : public Steinberg::Vst::AudioEffect {
   public:
     Processor();
@@ -72,20 +71,15 @@ class Processor : public Steinberg::Vst::AudioEffect {
 
   private:
     using Clock = std::chrono::steady_clock;
-    struct LoadedState {
-        std::array<double, kSavedParamCount> values{};
-        Clock::time_point loaded_at{};
-    };
     struct KeyboardNote {
         std::uint8_t note = 0;
         std::uint8_t velocity = 0;
         Clock::time_point struck{};
     };
 
-    double Value(int index) const { return values_[index].load(std::memory_order_relaxed); }
-    // Engine and adapter from scratch, the parameters at their current values.
-    void Restart();
-    void ApplyLoadedState(const LoadedState& loaded);
+    // Engine and adapter from scratch, the parameters at the given values.
+    void Restart(const ParameterState::Values& values);
+    void ApplyLoadedState(const ParameterState::Loaded& loaded);
     void QueueParameter(Steinberg::int32 offset, Steinberg::Vst::ParamID id, double value);
     void ReadParameterChanges(Steinberg::Vst::IParameterChanges& changes,
                               Steinberg::int32 num_samples);
@@ -98,12 +92,9 @@ class Processor : public Steinberg::Vst::AudioEffect {
     StreamAdapter adapter_{bridge_};
     std::atomic<Steinberg::uint32> latency_{0};
 
-    // Normalized values of the parameters 100..108, for getState() and for a
-    // restart. Written by process() and by setState().
-    std::array<std::atomic<double>, kParamCount> values_;
-
-    std::mutex load_mutex_; // serialises setState() callers; never taken by process()
-    LatestValue<LoadedState> loaded_;
+    // The normalized values of the parameters 100..108 and the hand-over of
+    // loaded states, see parameter_state.h.
+    ParameterState state_;
 
     SpscQueue<KeyboardNote, kKeyboardQueueSize> keyboard_notes_;
     // Keyboard notes struck up to this moment belong to the time before the

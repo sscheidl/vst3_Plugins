@@ -76,9 +76,9 @@ The build defines `TEST` and `_USE_MATH_DEFINES` for this code, as the
 firmware's own host tests do: `TEST` selects stmlib's portable C++ in place
 of ARM assembly. No source change was needed for MSVC beyond the empty arrays.
 
-Other shared state was looked for and not found: the lookup tables in
-`resources.cpp` and `stmlib/dsp/units.cc` are `const`, and no function keeps
-a `static` local.
+Other shared state that changes was looked for and not found: the lookup
+tables in `resources.cpp` and `stmlib/dsp/units.cc` are `const`, and the
+only `static` local is the `std::once_flag` that guards the sine table.
 
 ## Changes to the firmware engine (`engine/`)
 

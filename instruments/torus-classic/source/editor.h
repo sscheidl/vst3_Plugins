@@ -142,6 +142,8 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // What the window currently shows; -1 while it is closed. For tests.
     int ShownModel() const;
     float ShownKnobValue(Steinberg::Vst::ParamID id) const;
+    // The knob of a parameter while the window is open, else nullptr. For tests.
+    VSTGUI::CKnob* KnobOf(Steinberg::Vst::ParamID id) const;
 
     // Called by the controller whenever a parameter changes, whatever the
     // source: this window, host automation or a MIDI controller.
@@ -151,9 +153,11 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
 
     bool PLUGIN_API open(void* parent, const VSTGUI::PlatformType& platformType) SMTG_OVERRIDE;
     void PLUGIN_API close() SMTG_OVERRIDE;
+    // A knob moved. The begin and the end of a knob edit reach the host
+    // through the frame (VSTGUIEditor::beginEdit/endEdit); the listener's
+    // controlBeginEdit/controlEndEdit are left alone, or the host would hear
+    // of every edit twice.
     void valueChanged(VSTGUI::CControl* control) SMTG_OVERRIDE;
-    void controlBeginEdit(VSTGUI::CControl* control) SMTG_OVERRIDE;
-    void controlEndEdit(VSTGUI::CControl* control) SMTG_OVERRIDE;
     VSTGUI::CMessageResult notify(VSTGUI::CBaseObject* sender, const char* message) SMTG_OVERRIDE;
     Steinberg::tresult PLUGIN_API getSize(Steinberg::ViewRect* size) SMTG_OVERRIDE;
     Steinberg::tresult PLUGIN_API onSize(Steinberg::ViewRect* newSize) SMTG_OVERRIDE;

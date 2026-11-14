@@ -1,5 +1,13 @@
 # Build report: Torus Classic 0.1.0
 
+> **Later than this report (2026-11-14):** Codex reviewed 0.1.0 and found four
+> functional defects ([CODEX_REVIEW_0.1.0.md](CODEX_REVIEW_0.1.0.md)); the
+> statement below that no defect is known no longer holds for 0.1.0. They are
+> fixed since 0.1.1, see
+> [CODEX_REVIEW_0.1.0_UMSETZUNG.md](CODEX_REVIEW_0.1.0_UMSETZUNG.md). A first
+> DAW result is recorded in [DAW_TEST_0.1.0.md](DAW_TEST_0.1.0.md). The rest
+> of this report is left as written.
+
 Date: 2026-11-14. Work order:
 [CLAUDE_BUILDAUFTRAG_TORUS_CLASSIC_0.1.0.md](../../../docs/CLAUDE_BUILDAUFTRAG_TORUS_CLASSIC_0.1.0.md).
 Built and tested by Claude (Fable 5.2) on the user's machine.

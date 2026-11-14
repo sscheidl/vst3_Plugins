@@ -15,6 +15,7 @@
 #include <array>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace torus_classic;
@@ -197,7 +198,10 @@ void TestEventTiming() {
             CHECK(fired == fired_by_variant.front()); // the block size does not matter
     }
 
-    // Controls of one quantum: the later value wins, one call reaches the engine.
+    // Within one quantum: the later value of a control wins and reaches the
+    // engine once; the controls arrive before the notes of that quantum; a
+    // note that names an earlier time than the note added before it is played
+    // with that note, not before it.
     CounterEngine engine;
     StreamAdapter adapter(engine);
     CHECK(adapter.Prepare(48000.0));
@@ -208,14 +212,17 @@ void TestEventTiming() {
     CHECK(adapter.AddEvent(2, NoteEvent(60, 100)));
     CHECK(adapter.AddEvent(-5, NoteEvent(61, 100))); // a negative offset counts as 0
     CHECK(adapter.PendingEvents() == 5);
+    EngineEvent unknown = ControlEvent(Control::Tune, 0.5f);
+    unknown.index = StreamAdapter::kControlKinds; // no queue for this control
+    CHECK(!adapter.AddEvent(0, unknown) && adapter.PendingEvents() == 5);
     float left[64], right[64];
     adapter.Process(left, right, 64);
     CHECK(engine.logged == 5);
-    CHECK(engine.log[0].quantum == 0 && engine.log[0].event.index == 61);
-    CHECK(engine.log[1].quantum == 1 && engine.log[1].event.type == EngineEvent::kControl
-          && engine.log[1].event.value == 0.2f);
-    CHECK(engine.log[2].quantum == 1 && engine.log[2].event.value == 0.7f);
-    CHECK(engine.log[3].quantum == 1 && engine.log[3].event.index == 60);
+    CHECK(engine.log[0].quantum == 1 && engine.log[0].event.type == EngineEvent::kControl
+          && engine.log[0].event.value == 0.2f);
+    CHECK(engine.log[1].quantum == 1 && engine.log[1].event.value == 0.7f);
+    CHECK(engine.log[2].quantum == 1 && engine.log[2].event.index == 60);
+    CHECK(engine.log[3].quantum == 1 && engine.log[3].event.index == 61);
     CHECK(engine.log[4].quantum == 2 && engine.log[4].event.value == 0.3f);
     std::printf("event timing: each event on the first quantum at or after its time, never "
                 "early, under 12 internal samples late, the same for every block size, at "
@@ -435,57 +442,133 @@ void TestLongRun() {
 // --- Queue limits and reset --------------------------------------------------
 
 void TestQueueLimits() {
-    CounterEngine engine;
-    StreamAdapter adapter(engine);
-    CHECK(adapter.Prepare(48000.0));
-    // Notes for a far quantum fill the queue.
-    for(int i = 0; i < StreamAdapter::kEventCapacity; ++i)
-        CHECK(adapter.AddEvent(1000, NoteEvent(static_cast<unsigned>(i % 128), 100)));
-    CHECK(adapter.PendingEvents() == StreamAdapter::kEventCapacity);
-    // The next note is refused and counted.
-    CHECK(!adapter.AddEvent(1000, NoteEvent(1, 100)) && adapter.DroppedNotes() == 1);
-    // A control still gets through: no waiting one of its kind, so at once.
-    CHECK(adapter.AddEvent(1000, ControlEvent(Control::Damping, 0.25f)));
-    CHECK(engine.logged == 1 && engine.log[0].event.value == 0.25f);
-    CHECK(adapter.DisplacedControls() == 1);
-    CHECK(adapter.PendingEvents() == StreamAdapter::kEventCapacity);
     float left[2048], right[2048];
-    adapter.Process(left, right, 2048);
-    CHECK(adapter.PendingEvents() == 0);
-    CHECK(engine.logged == 1u + StreamAdapter::kEventCapacity);
-    for(int i = 0; i < StreamAdapter::kEventCapacity; ++i) // order kept
-        CHECK(engine.log[1 + i].event.index == i % 128 && engine.log[1 + i].quantum == 84);
+    // Notes: kNoteCapacity wait; the next one is refused and counted.
+    {
+        CounterEngine engine;
+        StreamAdapter adapter(engine);
+        CHECK(adapter.Prepare(48000.0));
+        for(int i = 0; i < StreamAdapter::kNoteCapacity; ++i)
+            CHECK(adapter.AddEvent(1000, NoteEvent(static_cast<unsigned>(i % 128), 100)));
+        CHECK(adapter.PendingEvents() == StreamAdapter::kNoteCapacity);
+        CHECK(!adapter.AddEvent(1000, NoteEvent(1, 100)) && adapter.DroppedNotes() == 1);
+        // A control sent for the same sample still finds room, in a queue of
+        // its own, and waits for its time like everything else: with the
+        // notes' queue full, nothing reaches the engine early.
+        CHECK(adapter.AddEvent(1000, ControlEvent(Control::Damping, 0.25f)));
+        CHECK(engine.logged == 0 && adapter.DroppedControlPoints() == 0);
+        CHECK(adapter.PendingEvents() == StreamAdapter::kNoteCapacity + 1);
+        adapter.Process(left, right, 996); // up to the quantum before the events'
+        CHECK(engine.logged == 0);
+        adapter.Process(left, right, 2048 - 996);
+        CHECK(adapter.PendingEvents() == 0);
+        CHECK(engine.logged == 1u + StreamAdapter::kNoteCapacity);
+        CHECK(engine.log[0].event.type == EngineEvent::kControl && engine.log[0].quantum == 84
+              && engine.log[0].event.value == 0.25f);
+        for(int i = 0; i < StreamAdapter::kNoteCapacity; ++i) // order kept
+            CHECK(engine.log[1 + i].event.index == i % 128 && engine.log[1 + i].quantum == 84);
+    }
 
-    // A full queue holding a control of the same kind: the new value takes its place.
-    adapter.Reset();
-    engine.logged = 0;
-    CHECK(adapter.DroppedNotes() == 0 && adapter.DisplacedControls() == 0);
-    CHECK(adapter.AddEvent(500, ControlEvent(Control::Damping, 0.5f)));
-    for(int i = 0; i < StreamAdapter::kEventCapacity - 1; ++i)
-        CHECK(adapter.AddEvent(1000, NoteEvent(60, 100)));
-    CHECK(adapter.AddEvent(1500, ControlEvent(Control::Damping, 0.75f)));
-    CHECK(engine.logged == 0 && adapter.DisplacedControls() == 1);
-    adapter.Process(left, right, 2048);
-    CHECK(engine.logged == static_cast<std::size_t>(StreamAdapter::kEventCapacity));
-    CHECK(engine.log[0].event.type == EngineEvent::kControl && engine.log[0].event.value == 0.75f);
+    // One control with more points waiting than its queue holds, each for a
+    // quantum of its own; the value of a point names that quantum. The
+    // newest waiting point gives way to the next: steps are lost, but no
+    // value arrives before its quantum, and the last arrives at its own.
+    const int points = StreamAdapter::kControlCapacity + 44;
+    std::vector<std::pair<std::int64_t, float>> overloaded, unhurried;
+    {
+        CounterEngine engine;
+        StreamAdapter adapter(engine);
+        CHECK(adapter.Prepare(48000.0));
+        for(int i = 1; i <= points; ++i)
+            CHECK(adapter.AddEvent(12 * i, ControlEvent(Control::Tune, static_cast<float>(i))));
+        CHECK(adapter.DroppedControlPoints() == 44);
+        CHECK(adapter.PendingEvents() == StreamAdapter::kControlCapacity && engine.logged == 0);
+        adapter.Process(left, right, 2048);
+        adapter.Process(left, right, 2048);
+        CHECK(engine.logged == static_cast<std::size_t>(StreamAdapter::kControlCapacity));
+        for(std::size_t k = 0; k < engine.logged; ++k) {
+            const auto sent_for = static_cast<std::int64_t>(engine.log[k].event.value);
+            CHECK(engine.log[k].quantum == sent_for); // on time: not early, not late
+            overloaded.emplace_back(engine.log[k].quantum, engine.log[k].event.value);
+        }
+        CHECK(overloaded.back().second == static_cast<float>(points)); // the latest value
+        CHECK(overloaded[StreamAdapter::kControlCapacity - 2].second
+              == static_cast<float>(StreamAdapter::kControlCapacity - 1));
+    }
+    // The same points sent block by block, where the queue never fills: all
+    // arrive. What arrived under overload is a part of that, at the same
+    // quanta; the difference is exactly what was counted as dropped.
+    {
+        CounterEngine engine;
+        StreamAdapter adapter(engine);
+        CHECK(adapter.Prepare(48000.0));
+        int next = 1;
+        for(int start = 0; start < 4096; start += 64) {
+            for(; next <= points && 12 * next < start + 64; ++next)
+                CHECK(adapter.AddEvent(12 * next - start,
+                                       ControlEvent(Control::Tune, static_cast<float>(next))));
+            adapter.Process(left, right, 64);
+        }
+        CHECK(adapter.DroppedControlPoints() == 0 && engine.logged == static_cast<std::size_t>(points));
+        for(std::size_t k = 0; k < engine.logged; ++k)
+            unhurried.emplace_back(engine.log[k].quantum, engine.log[k].event.value);
+        std::size_t found = 0;
+        for(const auto& arrived : overloaded)
+            found += std::find(unhurried.begin(), unhurried.end(), arrived) != unhurried.end();
+        CHECK(found == overloaded.size() && unhurried.size() - overloaded.size() == 44);
+    }
+
+    // A full queue of one control does not touch another control or the notes.
+    {
+        CounterEngine engine;
+        StreamAdapter adapter(engine);
+        CHECK(adapter.Prepare(48000.0));
+        for(int i = 1; i <= points; ++i)
+            CHECK(adapter.AddEvent(12 * i, ControlEvent(Control::Tune, static_cast<float>(i))));
+        CHECK(adapter.AddEvent(24, ControlEvent(Control::Damping, 0.5f)));
+        CHECK(adapter.AddEvent(24, ModelEvent(3)) && adapter.AddEvent(24, BendEvent(100)));
+        CHECK(adapter.AddEvent(24, NoteEvent(60, 100)));
+        adapter.Process(left, right, 36); // quanta 0, 1, 2
+        CHECK(engine.logged == 6); // Tune for quanta 1 and 2, and the four at quantum 2
+        std::size_t at_two = 0;
+        for(std::size_t k = 0; k < engine.logged; ++k)
+            at_two += engine.log[k].quantum == 2;
+        CHECK(at_two == 5 && engine.log[0].quantum == 1);
+    }
 
     // Parameter flushes without audio: values pile up on one quantum and
-    // replace each other; the queue does not grow.
-    adapter.Reset();
-    engine.logged = 0;
-    for(int i = 0; i < 100000; ++i) {
-        CHECK(adapter.AddEvent(0, ControlEvent(Control::Tune, static_cast<float>(i % 100) / 100.0f)));
-        CHECK(adapter.AddEvent(0, BendEvent(static_cast<unsigned>(i % 16384))));
-        CHECK(adapter.AddEvent(0, ModelEvent(static_cast<unsigned>(i % 6))));
+    // replace each other; the queues do not grow.
+    {
+        CounterEngine engine;
+        StreamAdapter adapter(engine);
+        CHECK(adapter.Prepare(48000.0));
+        for(int i = 0; i < 100000; ++i) {
+            CHECK(adapter.AddEvent(0, ControlEvent(Control::Tune, static_cast<float>(i % 100) / 100.0f)));
+            CHECK(adapter.AddEvent(0, BendEvent(static_cast<unsigned>(i % 16384))));
+            CHECK(adapter.AddEvent(0, ModelEvent(static_cast<unsigned>(i % 6))));
+        }
+        CHECK(adapter.PendingEvents() == 3 && adapter.DroppedControlPoints() == 0);
+        adapter.Process(left, right, 1);
+        CHECK(engine.logged == 3);
+        CHECK(engine.log[0].event.value == 0.99f && engine.log[1].event.index == 99999 % 6
+              && engine.log[2].event.data == 99999 % 16384);
     }
-    CHECK(adapter.PendingEvents() == 3 && adapter.DisplacedControls() == 0);
-    adapter.Process(left, right, 1);
-    CHECK(engine.logged == 3);
-    CHECK(engine.log[0].event.value == 0.99f && engine.log[1].event.data == 99999 % 16384
-          && engine.log[2].event.index == 99999 % 6);
-    std::printf("queue limits: %d events wait at most; further notes are refused and counted, "
-                "controls are never lost, repeated flushes do not pile up\n",
-                StreamAdapter::kEventCapacity);
+
+    // Points of one control that come out of order: the later one acts with
+    // the earlier one, not before it.
+    {
+        CounterEngine engine;
+        StreamAdapter adapter(engine);
+        CHECK(adapter.Prepare(48000.0));
+        CHECK(adapter.AddEvent(500, ControlEvent(Control::Damping, 0.5f)));
+        CHECK(adapter.AddEvent(100, ControlEvent(Control::Damping, 0.6f)));
+        adapter.Process(left, right, 1024);
+        CHECK(engine.logged == 1 && engine.log[0].quantum == 42 && engine.log[0].event.value == 0.6f);
+    }
+    std::printf("queue limits: %d notes and %d points per control wait at most; further notes "
+                "are refused and counted, a full control queue loses steps but nothing acts "
+                "before its time, repeated flushes do not pile up\n",
+                StreamAdapter::kNoteCapacity, StreamAdapter::kControlCapacity);
 }
 
 void TestResetAndRates() {

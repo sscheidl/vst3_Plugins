@@ -1,9 +1,28 @@
 # DAW test list: Torus Classic 0.1.0
 
-Nothing on this list has been done yet. The automatic tests and Steinberg's
-validator cannot answer these questions: they need the three hosts and ears.
-The earlier Studio One result in this repository belongs to Toy Piano
-Classic, not to this plug-in.
+The automatic tests and Steinberg's validator cannot answer these questions:
+they need the three hosts and ears.
+
+## Results so far
+
+**2026-11-14, version 0.1.0, Studio One** (reported by the user; the host is
+identified from a picture of its performance monitor, its version and the
+sample rate were not stated):
+
+* The plug-in loads and is displayed correctly (1.1).
+* Screen keys and knobs work (1.10, 2.1); MIDI works, the pitch wheel
+  included (1.2, 2.6).
+* After saving, the plug-in loads again with the saved settings (3.1; window
+  size and keyboard were not mentioned).
+* The CPU load is negligible: the host's monitor shows 02 for the instrument.
+* The monitor shows a plug-in latency of 1.1 ms, which is the 49 samples the
+  plug-in reports at 44.1 kHz (5.3, in part).
+
+Not reported yet: each of the six models by itself, automation (2.4, 2.5),
+the CCs (2.7), several instances, export, resizing and display scales, and
+everything in Waveform and Live. Version 0.1.0 told the host of every knob
+edit twice (fixed in 0.1.1); recording automation by moving a knob (2.4) is
+worth trying again with a later build.
 
 Hosts: **Studio One 7**, **Tracktion Waveform 14**, **Ableton Live 12 Lite**.
 Note per item and host: ok, or what happened. A crash or a hang ends the test

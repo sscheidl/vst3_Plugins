@@ -8,6 +8,7 @@
 
 #include "controller.h"
 #include "editor.h"
+#include "parameter_state.h"
 #include "parameters.h"
 #include "processor.h"
 #include "reference_api.h"
@@ -23,6 +24,7 @@
 #include "pluginterfaces/gui/iplugview.h"
 #include "pluginterfaces/vst/ivsteditcontroller.h"
 #include "vstgui/lib/cframe.h"
+#include "vstgui/lib/controls/cknob.h"
 
 #include <windows.h>
 #include <xmmintrin.h>
@@ -710,6 +712,94 @@ std::vector<char> MakeState(int32 version, const std::vector<double>& values) {
     return bytes;
 }
 
+// The parameter values between the threads, step by step: the orderings a
+// test cannot force on real threads (review finding TC-R01 and the
+// setActive path).
+void TestParameterState() {
+    const auto is = [](const ParameterState::Values& values, double all, double bend) {
+        for(int i = 0; i < kSavedParamCount; ++i)
+            if(values[i] != all)
+                return false;
+        return values[kParamPitchBend - kFirstParam] == bend;
+    };
+    const auto saved = [](double value) {
+        std::array<double, kSavedParamCount> values;
+        values.fill(value);
+        return values;
+    };
+    ParameterState state;
+    ParameterState::Values current = state.Current();
+    for(int i = 0; i < kParamCount; ++i)
+        CHECK(current[i] == kDefaults[i]);
+    ParameterState::Loaded loaded;
+    CHECK(!state.TakeLoaded(loaded));
+
+    // Automation before any state was loaded counts.
+    state.Write(3, 0.25);
+    state.Write(8, 0.9);
+    CHECK(state.Current()[3] == 0.25 && state.Current()[8] == 0.9 && state.Current()[0] == 0.5);
+
+    // A loaded state replaces everything at once, at once: the automation
+    // before it is history, the pitch wheel is back in its centre.
+    state.Load(saved(0.1));
+    CHECK(is(state.Current(), 0.1, kDefaultPitchBend));
+
+    // Automation of a block that was already running when the state came:
+    // the audio thread has not taken the state yet, so the value belongs to
+    // the old one and must not show.
+    state.Write(2, 0.77);
+    state.Write(8, 0.3);
+    CHECK(is(state.Current(), 0.1, kDefaultPitchBend));
+
+    // The audio thread takes the state: complete in itself, once.
+    CHECK(state.TakeLoaded(loaded) && is(loaded.values, 0.1, kDefaultPitchBend));
+    CHECK(!state.TakeLoaded(loaded));
+    state.Adopt(loaded.generation);
+    CHECK(is(state.Current(), 0.1, kDefaultPitchBend)); // the old values stay history
+    // From now on its automation counts.
+    state.Write(2, 0.66);
+    current = state.Current();
+    CHECK(current[2] == 0.66 && current[1] == 0.1 && current[3] == 0.1);
+
+    // Two states before the audio thread looks again: it gets the newest, and
+    // what it wrote meanwhile belongs to neither.
+    state.Load(saved(0.2));
+    state.Load(saved(0.3));
+    state.Write(4, 0.99);
+    CHECK(is(state.Current(), 0.3, kDefaultPitchBend));
+    CHECK(state.TakeLoaded(loaded) && is(loaded.values, 0.3, kDefaultPitchBend));
+    CHECK(!state.TakeLoaded(loaded));
+    // Still not adopted (as in setActive before the restart): the loaded state alone.
+    CHECK(is(state.Current(), 0.3, kDefaultPitchBend));
+    state.Adopt(loaded.generation);
+    state.Write(4, 0.5);
+    CHECK(state.Current()[4] == 0.5 && state.Current()[5] == 0.3);
+    state.Write(-1, 0.7); // no such parameters
+    state.Write(kParamCount, 0.7);
+    CHECK(state.Current()[0] == 0.3);
+
+    // One thread writing, one reading: a read always returns a pair that was
+    // written, never half of one.
+    std::atomic<bool> stop{false};
+    std::thread writer([&] {
+        double value = 0.0;
+        while(!stop.load()) {
+            value = value >= 0.999 ? 0.0 : value + 0.001;
+            for(int i = 0; i < kSavedParamCount; ++i)
+                state.Write(i, value);
+        }
+    });
+    for(int i = 0; i < 200000; ++i) {
+        current = state.Current();
+        for(int k = 0; k < kSavedParamCount; ++k)
+            CHECK(current[k] >= 0.0 && current[k] <= 1.0);
+    }
+    stop.store(true);
+    writer.join();
+    std::printf("parameter state: a loaded state replaces everything at once; automation "
+                "counts only for the state the audio thread has taken\n");
+}
+
 void TestKeyboardQueue() {
     PluginHost host({48000.0, 2048, false, kRealtime});
     Processor& processor = *host.processor;
@@ -811,7 +901,7 @@ void TestPauseAndFlush() {
         flushed.Process(0);
     }
     CHECK(processor.Adapter().PendingEvents() == 5); // the latest of each, nothing piled up
-    CHECK(processor.Adapter().DisplacedControls() == 0);
+    CHECK(processor.Adapter().DroppedControlPoints() == 0);
     CHECK(processor.Engine().ControlValue(Control::Tune) == 0.5f); // not yet applied
     const auto saved = SavedState(processor);
     double tune = 0.0;
@@ -986,8 +1076,79 @@ void TestState() {
     CHECK(host.Stereo() == fresh.Stereo() && Energy(fresh.Stereo()) > 0.001);
     CHECK(host.allocations == 0);
 
-    // States arriving from another thread while audio runs: every block is
-    // rendered from a complete set of values, and the last state wins.
+    // A state loaded while the plug-in is inactive, after automation: the
+    // restart at activation begins from the loaded state.
+    {
+        PluginHost inactive({48000.0, 2048, false, kRealtime});
+        inactive.AddScore({Param(0, kParamDamping, 0.7), Param(0, kParamPitchBend, 0.9)});
+        inactive.Run(4800); // long enough for the 5 ms smoothing to land on the value
+        CHECK(inactive.processor->Engine().ControlValue(Control::Damping) == 0.7f);
+        CHECK(inactive.processor->setActive(false) == kResultOk);
+        CHECK(LoadState(*inactive.processor, MakeState(kStateVersion, next)) == kResultOk);
+        CHECK(inactive.processor->setActive(true) == kResultOk);
+        CHECK(inactive.processor->Engine().ControlValue(Control::Damping) == 0.6f);
+        CHECK(inactive.processor->Engine().PitchOffset() == 0.0f);
+        CHECK(SavedState(*inactive.processor) == MakeState(kStateVersion, next));
+    }
+
+    // Two complete states loaded in turn from a second thread while audio
+    // runs in blocks of one sample. After every block the engine holds one of
+    // them whole, never a mixture (review finding TC-R01), and getState()
+    // returns the state that was just loaded, whatever the audio thread does.
+    {
+        PluginHost live({48000.0, 2048, false, kRealtime});
+        const std::vector<double> low(kSavedParamCount, 0.1), high(kSavedParamCount, 0.9);
+        std::atomic<bool> stop{false};
+        std::atomic<int> loads{0};
+        std::thread loader([&] {
+            bool flip = false;
+            while(!stop.load()) {
+                std::vector<double> state = flip ? high : low;
+                flip = !flip;
+                CHECK(LoadState(*live.processor, MakeState(kStateVersion, state)) == kResultOk);
+                state[kParamModel - kFirstParam] = ModelNormalized(ModelIndex(state[6]));
+                CHECK(SavedState(*live.processor) == MakeState(kStateVersion, state));
+                loads.fetch_add(1);
+            }
+        });
+        const DryEngine& engine = live.processor->Engine();
+        const auto all = [&](float value, float excitation, float volume) {
+            return engine.ControlValue(Control::Tune) == value
+                   && engine.ControlValue(Control::Structure) == value
+                   && engine.ControlValue(Control::Brightness) == value
+                   && engine.ControlValue(Control::Damping) == value
+                   && engine.ControlValue(Control::Position) == value
+                   && engine.ControlValue(Control::Excitation) == excitation
+                   && engine.ControlValue(Control::Volume) == volume;
+        };
+        int low_blocks = 0, high_blocks = 0, switches = 0, last = -1;
+        for(int block = 0; block < 2000000 && (switches < 2000 || block < 100000); ++block) {
+            live.Process(1);
+            const bool is_low = all(0.1f, 0.1f, 0.1f), is_high = all(0.9f, 0.9f, 0.9f);
+            // Before the first state arrives: the defaults, also complete.
+            CHECK(is_low || is_high || all(0.5f, 0.8f, 1.0f));
+            CHECK(!is_low || engine.Model() == 0);
+            CHECK(!is_high || engine.Model() == 5);
+            low_blocks += is_low;
+            high_blocks += is_high;
+            const int now = is_low ? 0 : (is_high ? 1 : -1);
+            switches += now != last;
+            last = now;
+            if(block % 4096 == 0) {
+                live.Clear();
+                std::this_thread::yield();
+            }
+        }
+        stop.store(true);
+        loader.join();
+        CHECK(low_blocks > 0 && high_blocks > 0 && live.allocations == 0);
+        std::printf("  %d states loaded in turn during %d one-sample blocks: %d blocks on the "
+                    "one, %d on the other, %d changes seen, never a mixture\n",
+                    loads.load(), low_blocks + high_blocks, low_blocks, high_blocks, switches);
+    }
+
+    // Random and damaged states from another thread while a performance
+    // plays: nothing fails, and the last state wins.
     {
         // Two seconds of notes and automation, then audio without events, so
         // that the last check sees the loaded values untouched.
@@ -1577,6 +1738,36 @@ void TestEditorInWindow() {
     CHECK(handler.edits.size() == 3);
     handler.edits.clear();
 
+    // A knob, moved the way VSTGUI moves it: the host hears begin, perform
+    // and end exactly once each (review finding TC-R02), also for nested
+    // edits such as a wheel turn during a drag.
+    const auto kinds = [&] {
+        std::string text;
+        for(const auto& edit : handler.edits)
+            text += edit.kind;
+        return text;
+    };
+    VSTGUI::CKnob* knob = editor->KnobOf(kParamBrightness);
+    CHECK(knob != nullptr && editor->KnobOf(kParamModel) == nullptr);
+    knob->beginEdit();
+    knob->setValue(0.3f);
+    knob->valueChanged();
+    knob->endEdit();
+    CHECK(kinds() == "bpe");
+    for(const auto& edit : handler.edits)
+        CHECK(edit.id == kParamBrightness);
+    CHECK(handler.edits[1].value == static_cast<double>(0.3f));
+    CHECK(controller->getParamNormalized(kParamBrightness) == static_cast<double>(0.3f));
+    handler.edits.clear();
+    knob->beginEdit();
+    knob->beginEdit();
+    knob->setValue(0.4f);
+    knob->valueChanged();
+    knob->endEdit();
+    knob->endEdit();
+    CHECK(kinds() == "bpe");
+    handler.edits.clear();
+
     // KEYS off, host agrees: the window changes only once the host has agreed.
     int requests = host.requests;
     editor->SetKeyboardVisible(false);
@@ -1660,8 +1851,18 @@ void TestEditorInWindow() {
         CHECK(processor->setActive(false) == kResultOk);
     }
 
-    // The first is closed properly, the second stays and still follows.
+    // A knob still held when its window is closed: the host hears the end of
+    // that edit, once (review finding TC-R04). Here with removed().
+    editor->KnobOf(kParamDamping)->beginEdit();
+    editor->KnobOf(kParamDamping)->beginEdit(); // and a wheel turn on top
+    editor->KnobOf(kParamTune)->beginEdit();
+    CHECK(handler.edits.size() == 2);
     CHECK(view->removed() == kResultOk);
+    CHECK(handler.edits.size() == 4 && handler.edits[2].kind == 'e' && handler.edits[3].kind == 'e');
+    // One end for each of the two knobs, in the order the window holds them.
+    CHECK(handler.edits[2].id == kParamTune && handler.edits[3].id == kParamDamping);
+    handler.edits.clear();
+    // The first is closed properly, the second stays and still follows.
     CHECK(controller->OpenEditorCount() == 1 && ChildWindows(parent) == 0);
     view = nullptr;
     CHECK(controller->setParamNormalized(kParamTune, 0.6) == kResultOk);
@@ -1685,8 +1886,13 @@ void TestEditorInWindow() {
     CHECK(editor->ShownKnobValue(kParamTune) == 0.6f);
 
     // A host that drops a window without removed(): the controller forgets
-    // it, its native window goes, and later changes do not reach it.
+    // it, its native window goes, and later changes do not reach it. A knob
+    // held at that moment still ends its edit.
+    editor->KnobOf(kParamVolume)->beginEdit();
     view = nullptr;
+    CHECK(handler.edits.size() == 2 && handler.edits[0].kind == 'b' && handler.edits[1].kind == 'e');
+    CHECK(handler.edits[1].id == kParamVolume);
+    handler.edits.clear();
     CHECK(controller->OpenEditorCount() == 1 && ChildWindows(parent) == 0);
     CHECK(controller->setParamNormalized(kParamVolume, 0.3) == kResultOk);
     CHECK(second_editor->ShownKnobValue(kParamVolume) == 0.3f);
@@ -1738,6 +1944,7 @@ int main() {
     TestNoteHandling();
     TestSampleRates();
     TestInstances();
+    TestParameterState();
     TestKeyboardQueue();
     TestPauseAndFlush();
     TestActivationAndRateChange();

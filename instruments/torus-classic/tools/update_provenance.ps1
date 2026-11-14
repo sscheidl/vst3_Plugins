@@ -82,6 +82,10 @@ $daisyDirty = [bool](& git -C $daisy status --porcelain -- $originRoot)
 $sdkCommit = (& git -C (Join-Path $plugin '..\..\external\vst3sdk') rev-parse HEAD 2>$null)
 $version = ([regex]'FULL_VERSION_STR "([^"]+)"').Match(
     [IO.File]::ReadAllText((Join-Path $plugin 'source/version.h'))).Groups[1].Value
+$engineVersion = ([regex]'kEngineVersion = "([^"]+)"').Match(
+    [IO.File]::ReadAllText((Join-Path $plugin 'engine/dry_engine.h'))).Groups[1].Value
+$adapterVersion = ([regex]'kAdapterVersion = "([^"]+)"').Match(
+    [IO.File]::ReadAllText((Join-Path $plugin 'adapter/stream_adapter.h'))).Groups[1].Value
 
 $manifest = [ordered]@{
     schema = 1
@@ -97,13 +101,13 @@ $manifest = [ordered]@{
             license = 'MIT (Emilie Gillet; DaisyExamples contributors; TAUREON)'
         },
         [ordered]@{
-            id = 'torus-classic.engine'; path = 'engine/'; layer = 2; version = '0.1.0'
+            id = 'torus-classic.engine'; path = 'engine/'; layer = 2; version = $engineVersion
             description = 'Dry four-voice instrument: note FIFO, triggers, parameter smoothing, model changes, output stage; no reverb'
             interface = 'engine/dry_engine.h'; depends_on = @('torus-classic.core')
             license = 'MIT (TAUREON)'
         },
         [ordered]@{
-            id = 'torus-classic.adapter'; path = 'adapter/'; layer = 3; version = '0.1.0'
+            id = 'torus-classic.adapter'; path = 'adapter/'; layer = 3; version = $adapterVersion
             description = 'Streaming adapter: host sample rate, 12-sample quanta, event time, latency'
             interface = 'adapter/stream_adapter.h'; depends_on = @()
             license = 'MIT (TAUREON)'

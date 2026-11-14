@@ -40,8 +40,6 @@ bool ControlOf(int index, Control& control) {
 
 Processor::Processor() {
     setControllerClass(kControllerUID);
-    for(int i = 0; i < kParamCount; ++i)
-        values_[i].store(kDefaults[i]);
 }
 
 tresult PLUGIN_API Processor::initialize(FUnknown* context) {
@@ -52,7 +50,7 @@ tresult PLUGIN_API Processor::initialize(FUnknown* context) {
     addEventInput(STR16("MIDI In"), 16);
     // Usable before the host has named a sample rate.
     adapter_.Prepare(StreamAdapter::kInternalRate);
-    Restart();
+    Restart(state_.Current());
     return kResultOk;
 }
 
@@ -89,17 +87,19 @@ uint32 PLUGIN_API Processor::getLatencySamples() {
     return latency_.load();
 }
 
-void Processor::Restart() {
+void Processor::Restart(const ParameterState::Values& values) {
+    // Everything comes from the one set of values handed in: a state that is
+    // loaded meanwhile cannot mix into it.
     adapter_.Reset();
     engine_.Reset(DryEngine::kDefaultSeed);
     for(int i = 0; i < kParamCount; ++i) {
         Control control;
         if(ControlOf(i, control))
-            engine_.JumpControl(control, static_cast<float>(Value(i)));
+            engine_.JumpControl(control, static_cast<float>(values[i]));
     }
-    engine_.JumpModel(static_cast<unsigned>(ModelIndex(Value(kParamModel - kFirstParam))));
+    engine_.JumpModel(static_cast<unsigned>(ModelIndex(values[kParamModel - kFirstParam])));
     engine_.JumpPitchBend(
-        static_cast<unsigned>(PitchBendRaw(Value(kParamPitchBend - kFirstParam))));
+        static_cast<unsigned>(PitchBendRaw(values[kParamPitchBend - kFirstParam])));
 }
 
 tresult PLUGIN_API Processor::setActive(TBool state) {
@@ -111,29 +111,26 @@ tresult PLUGIN_API Processor::setActive(TBool state) {
         const double rate = processSetup.sampleRate;
         if(rate > 0.0 && rate != adapter_.HostRate() && adapter_.Prepare(rate))
             latency_.store(static_cast<uint32>(adapter_.LatencySamples()));
-        // A state loaded since the last block is applied here instead of in
-        // process(): its values again, in case automation of a block that was
-        // running during setState() wrote over them.
-        LoadedState pending;
-        bool loaded = false;
-        while(loaded_.Take(pending))
-            loaded = true;
-        if(loaded)
-            ApplyLoadedState(pending);
-        else
-            Restart();
+        // A state loaded since the last block is taken over here instead of in
+        // process(). Either way the restart begins from the current state:
+        // the last loaded one plus the automation that came after it.
+        ParameterState::Loaded pending;
+        while(state_.TakeLoaded(pending)) {
+            state_.Adopt(pending.generation);
+            keyboard_valid_after_ = pending.loaded_at;
+        }
+        Restart(state_.Current());
     }
     return AudioEffect::setActive(state);
 }
 
-void Processor::ApplyLoadedState(const LoadedState& loaded) {
-    // Also puts the values back in case automation of an earlier block wrote
-    // over them between setState() and now.
-    for(int i = 0; i < kSavedParamCount; ++i)
-        values_[i].store(loaded.values[i]);
-    values_[kParamPitchBend - kFirstParam].store(kDefaultPitchBend);
+void Processor::ApplyLoadedState(const ParameterState::Loaded& loaded) {
+    // The engine starts from this snapshot alone, pitch wheel centred. From
+    // here on automation belongs to this state; what an earlier block wrote
+    // belongs to the one before and no longer counts.
+    state_.Adopt(loaded.generation);
     keyboard_valid_after_ = loaded.loaded_at;
-    Restart();
+    Restart(loaded.values);
 }
 
 void Processor::QueueParameter(int32 offset, ParamID id, double value) {
@@ -141,7 +138,7 @@ void Processor::QueueParameter(int32 offset, ParamID id, double value) {
         return;
     const int index = static_cast<int>(id - kFirstParam);
     value = Clamp01(value);
-    values_[index].store(value);
+    state_.Write(index, value);
     Control control;
     if(ControlOf(index, control))
         adapter_.AddEvent(offset, ControlEvent(control, static_cast<float>(value)));
@@ -254,8 +251,8 @@ void Processor::Render(ProcessData& data) {
 }
 
 tresult PLUGIN_API Processor::process(ProcessData& data) {
-    LoadedState loaded;
-    if(loaded_.Take(loaded))
+    ParameterState::Loaded loaded;
+    if(state_.TakeLoaded(loaded))
         ApplyLoadedState(loaded);
 
     const int32 num_samples = std::max<int32>(data.numSamples, 0);
@@ -278,9 +275,11 @@ tresult PLUGIN_API Processor::process(ProcessData& data) {
 tresult PLUGIN_API Processor::getState(IBStream* state) {
     if(!state)
         return kInvalidArgument;
+    // One complete state: the last loaded one with the automation since.
+    const ParameterState::Values current = state_.Current();
     SavedValues values;
     for(int i = 0; i < kSavedParamCount; ++i)
-        values[i] = Value(i);
+        values[i] = current[i];
     return WriteSavedValues(state, values) ? kResultOk : kResultFalse;
 }
 
@@ -288,20 +287,14 @@ tresult PLUGIN_API Processor::setState(IBStream* state) {
     if(!state)
         return kInvalidArgument;
     // Read and check everything first; a damaged state changes nothing.
-    LoadedState loaded;
-    if(!ReadSavedValues(state, loaded.values))
+    SavedValues saved;
+    if(!ReadSavedValues(state, saved))
         return kResultFalse;
-
-    const std::lock_guard<std::mutex> lock(load_mutex_);
-    for(int i = 0; i < kSavedParamCount; ++i)
-        values_[i].store(loaded.values[i]);
-    // The pitch wheel is not part of a patch: back to the centre.
-    values_[kParamPitchBend - kFirstParam].store(kDefaultPitchBend);
-    // The running sound is not part of a patch either. The audio thread
-    // restarts the engine with these values at its next block; if the plug-in
-    // is inactive, setActive() does.
-    loaded.loaded_at = Clock::now();
-    loaded_.Publish(loaded);
+    // The values count for getState() at once. The running sound is not part
+    // of a patch: the audio thread restarts the engine from this state at its
+    // next block; if the plug-in is inactive, setActive() does. The pitch
+    // wheel is not part of a patch either and returns to its centre.
+    state_.Load(saved);
     return kResultOk;
 }
 

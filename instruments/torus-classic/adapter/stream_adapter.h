@@ -13,17 +13,25 @@
 // than 12 internal samples late, never early. Positions are kept as exact
 // fractions, so the result depends on the absolute positions only, not on how
 // the host cuts its blocks.
+//
+// Overload. Waiting events are bounded: kNoteCapacity notes, and
+// kControlCapacity points for each control, for the model and for the pitch
+// bend. A note that finds its queue full is dropped. A control point that
+// finds its queue full takes the place of the newest waiting point of the
+// same control: one step of the automation is lost, the latest value arrives,
+// at its own time. Nothing ever acts before its time, full queues or not.
 #pragma once
 
 #include "sinc_kernel.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
 
 namespace torus_classic {
 
-constexpr const char* kAdapterVersion = "0.1.0";
+constexpr const char* kAdapterVersion = "0.1.1";
 
 struct EngineEvent {
     enum Type : std::uint8_t { kNoteOn, kControl, kModel, kPitchBend };
@@ -47,7 +55,9 @@ class StreamAdapter {
   public:
     static constexpr int kQuantum = 12;
     static constexpr double kInternalRate = 48000.0;
-    static constexpr int kEventCapacity = 1024; // events waiting for their quantum
+    static constexpr int kNoteCapacity = 1024;   // notes waiting for their quantum
+    static constexpr int kControlKinds = 14;     // control events with index 0..13
+    static constexpr int kControlCapacity = 256; // waiting points per control, model, bend
 
     explicit StreamAdapter(QuantumEngine& engine) : engine_(engine) {}
 
@@ -68,11 +78,17 @@ class StreamAdapter {
     const RateRatio& Ratio() const { return ratio_; }
 
     // Queues an event `offset` host samples after the start of the next
-    // Process() call; negative offsets count as 0. A control or bend that
-    // meets a waiting one of the same kind in the same quantum replaces its
-    // value. If kEventCapacity events already wait: a note is dropped and
-    // false returned; a control, model or bend replaces the newest waiting
-    // one of its kind or, failing that, goes to the engine at once (true).
+    // Process() call; negative offsets count as 0. Events of one queue (the
+    // notes; each control; the model; the bend) keep the order in which they
+    // were added: one that names an earlier time than its predecessor acts
+    // together with it, not before. A control, model or bend that meets a
+    // waiting point of its queue in the same quantum replaces its value.
+    //
+    // False if the event was not taken: a note with kNoteCapacity notes
+    // waiting (counted in DroppedNotes()), or a control index of
+    // kControlKinds or more. A control point that finds its queue full is
+    // taken (true): it replaces the newest waiting point of that queue, which
+    // is counted in DroppedControlPoints().
     bool AddEvent(std::int32_t offset, const EngineEvent& event);
 
     // The next `frames` host samples. Does not allocate or lock.
@@ -81,9 +97,9 @@ class StreamAdapter {
     // For tests and diagnostics.
     std::uint64_t HostPosition() const { return host_pos_; }
     std::int64_t RenderedSamples() const { return rendered_; }
-    int PendingEvents() const { return pending_count_; }
+    int PendingEvents() const;
     std::uint64_t DroppedNotes() const { return dropped_notes_; }
-    std::uint64_t DisplacedControls() const { return displaced_controls_; }
+    std::uint64_t DroppedControlPoints() const { return dropped_control_points_; }
     std::size_t AllocatedBytes() const;
 
   private:
@@ -91,6 +107,35 @@ class StreamAdapter {
         std::int64_t quantum = 0;
         EngineEvent event;
     };
+    // Waiting events of one kind in the order of their quanta: a ring of
+    // fixed size, allocated by Prepare().
+    struct Queue {
+        std::vector<Pending> items;
+        int head = 0, count = 0;
+
+        void Allocate(int capacity) {
+            items.assign(static_cast<std::size_t>(capacity), Pending{});
+            head = count = 0;
+        }
+        void Clear() { head = count = 0; }
+        bool Full() const { return count == static_cast<int>(items.size()); }
+        const Pending& First() const { return items[static_cast<std::size_t>(head)]; }
+        Pending& Last() {
+            return items[static_cast<std::size_t>((head + count - 1) % static_cast<int>(items.size()))];
+        }
+        void Push(const Pending& pending) {
+            items[static_cast<std::size_t>((head + count) % static_cast<int>(items.size()))] = pending;
+            ++count;
+        }
+        void Pop() {
+            head = (head + 1) % static_cast<int>(items.size());
+            --count;
+        }
+    };
+    static constexpr int kModelQueue = kControlKinds;
+    static constexpr int kBendQueue = kControlKinds + 1;
+    static constexpr int kControlQueues = kControlKinds + 2;
+
     void RenderQuantum();
     void Compact(std::int64_t first_needed);
 
@@ -117,10 +162,9 @@ class StreamAdapter {
     std::int64_t base_ = 0;
     int count_ = 0;
 
-    // Waiting events, ordered by quantum, then by arrival.
-    std::vector<Pending> pending_;
-    int pending_count_ = 0;
-    std::uint64_t dropped_notes_ = 0, displaced_controls_ = 0;
+    Queue notes_;
+    std::array<Queue, kControlQueues> controls_;
+    std::uint64_t dropped_notes_ = 0, dropped_control_points_ = 0;
 };
 
 } // namespace torus_classic
