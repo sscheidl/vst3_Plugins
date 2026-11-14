@@ -36,6 +36,15 @@ float Approach(float current, float target, float coefficient, float snap) {
 
 } // namespace
 
+float HarmonicWeight(float increment) {
+    if(increment <= kHarmonicFadeStart)
+        return toy_piano::kSecondHarmonic; // exactly the firmware's weight
+    if(increment >= toy_piano::kMaxHarmonicIncrement)
+        return 0.0f;
+    return toy_piano::kSecondHarmonic * (toy_piano::kMaxHarmonicIncrement - increment)
+           / (toy_piano::kMaxHarmonicIncrement - kHarmonicFadeStart);
+}
+
 void Engine::Init(float sample_rate) {
     piano_.Init(sample_rate);
     glide_coefficient_ =
@@ -90,8 +99,10 @@ void Engine::ApplyPitch() {
             ratio = kHeldIncrement / base;
             level = 0.0f;
         }
-        // Modulate() drops the second harmonic by itself once it would alias.
-        piano_.Modulate(voice, ratio, level, toy_piano::kSecondHarmonic, kLevelRamp);
+        // The firmware switches the harmonic off at a quarter of the sample
+        // rate in one step, which clicks when a glide crosses it. Fading it
+        // out before that point keeps every glide smooth.
+        piano_.Modulate(voice, ratio, level, HarmonicWeight(base * ratio), kLevelRamp);
     }
 }
 

@@ -6,4 +6,4 @@
 
 #define stringPluginName "Toy Piano Classic"
 
-#define FULL_VERSION_STR "0.3.1"
+#define FULL_VERSION_STR "0.3.2"

@@ -815,7 +815,7 @@ void TestTypedValues() {
         CHECK(ParseTypedNumber(text, unit, value) && value == expected);
     }
     for(const char* text : {"", "   ", "foo", "12junk", "nan", "inf", "-inf", "1,2,3", "ms",
-                            "5 s", "--5", "+"}) {
+                            "5 s", "--5", "+", "+-5", "++5", "-+5", "+-5 ms", "+ 5"}) {
         value = 7.0;
         CHECK(!ParseTypedNumber(text, "ms", value));
         CHECK(value == 7.0); // untouched on failure
@@ -834,8 +834,8 @@ void TestTypedValues() {
     };
     for(const ParamID id :
         {kParamMasterPitch, kParamAttack, kParamDecay, kParamVolume, kParamPitchBend})
-        for(const char* text : {"", "foo", "12junk", "nan", "+inf"})
-            CHECK(refused(id, text));
+        for(const char* text : {"", "foo", "12junk", "nan", "+inf", "+-5", "+-5 dB", "++5"})
+            CHECK(refused(id, text)); // "+-5": Codex re-check, R03-N1
     ParamValue normalized = 0.0;
     CHECK(typed(kParamDecay, "500", normalized) && std::fabs(DecaySeconds(normalized) - 0.5f) < 1e-4f);
     CHECK(typed(kParamAttack, "10 ms", normalized)
@@ -894,6 +894,85 @@ void TestGlidesReachTarget() {
     for(int i = 0; i < 4800; ++i)
         CHECK(moved.Process() == still.Process());
     std::printf("glides: volume and pitch land exactly on target at 8..192 kHz\n");
+}
+
+// The second harmonic fades out below its cut-off instead of switching off
+// (review R07, fixed in the plug-in only).
+void TestHarmonicFade() {
+    using toy_piano::kSecondHarmonic;
+    CHECK(HarmonicWeight(0.01f) == kSecondHarmonic && HarmonicWeight(0.2f) == kSecondHarmonic);
+    CHECK(HarmonicWeight(0.25f) == 0.0f && HarmonicWeight(0.49f) == 0.0f);
+    CHECK(std::fabs(HarmonicWeight(0.225f) - kSecondHarmonic / 2.0f) < 1e-6f);
+    float previous = kSecondHarmonic;
+    for(float increment = 0.0f; increment < 0.5f; increment += 0.0005f) {
+        const float weight = HarmonicWeight(increment);
+        CHECK(weight <= previous && weight >= 0.0f);
+        previous = weight;
+    }
+
+    // Codex's case: note 115, then Master Pitch to +24 and back. The voice
+    // crosses 12 kHz on the way. In 0.3.1 its harmonic jumped from 12 % to 0
+    // in one step; now it passes through the band in steps. A jump of two
+    // octaves crosses the band within a few glide updates (every 16 samples),
+    // so the steps stay at up to a third of the old jump there.
+    constexpr std::size_t voice = toy_piano::kNumKeys; // the first MIDI voice
+    Engine engine;
+    engine.Init(48000.0f);
+    engine.NoteOn(115, 127, toy_piano::kAttackMin, toy_piano::kDecayMax);
+    for(int i = 0; i < 4800; ++i)
+        engine.Process();
+    for(const float target : {24.0f, 0.0f}) {
+        engine.SetPitch(target);
+        float last = engine.Piano().VoiceHarmonic(voice), largest_step = 0.0f;
+        int between = 0;
+        for(int i = 0; i < 9600; ++i) {
+            engine.Process();
+            const float weight = engine.Piano().VoiceHarmonic(voice);
+            const float increment = engine.Piano().VoiceIncrement(voice);
+            CHECK(weight == HarmonicWeight(increment)); // follows the pitch exactly
+            largest_step = std::max(largest_step, std::fabs(weight - last));
+            between += weight > 0.0f && weight < kSecondHarmonic;
+            last = weight;
+        }
+        CHECK(largest_step <= kSecondHarmonic / 3.0f); // was the full 0.12
+        CHECK(between >= 3);                            // it did pass through the band
+    }
+    CHECK(engine.Piano().VoiceHarmonic(voice) == kSecondHarmonic);
+
+    // The pitch wheel moves slowly through the band: very small steps. Note 125,
+    // bent from -2 to +2, crosses the whole band (notes 123 to 127).
+    Engine bent;
+    bent.SetPitch(-2.0f);
+    bent.Init(48000.0f);
+    bent.NoteOn(125, 127, toy_piano::kAttackMin, toy_piano::kDecayMax); // 123 -> 127
+    bent.SetPitch(2.0f);
+    float last = bent.Piano().VoiceHarmonic(voice), largest_step = 0.0f;
+    for(int i = 0; i < 9600; ++i) {
+        bent.Process();
+        largest_step = std::max(largest_step, std::fabs(bent.Piano().VoiceHarmonic(voice) - last));
+        last = bent.Piano().VoiceHarmonic(voice);
+    }
+    std::printf("  pitch wheel through the band: largest step %.4f\n", largest_step);
+    CHECK(last == 0.0f && largest_step <= kSecondHarmonic / 15.0f);
+
+    // Where the plug-in and the firmware still agree: at Master Pitch 0 every
+    // note below the band sounds bit for bit like the firmware. Only notes in
+    // the band (123 to 126 at 48 kHz) have a quieter harmonic.
+    for(int note = 0; note <= 127; ++note) {
+        Engine plugin;
+        toy_piano::ToyPiano firmware;
+        plugin.Init(48000.0f);
+        firmware.Init(48000.0f);
+        plugin.NoteOn(static_cast<std::uint8_t>(note), 127, toy_piano::kAttackMin, 1.0f);
+        firmware.NoteOn(static_cast<std::uint8_t>(note), 127, toy_piano::kAttackMin, 1.0f);
+        bool same = true;
+        for(int i = 0; i < 512; ++i)
+            same = same && plugin.Process() == firmware.Process();
+        const bool in_band = note >= 123 && note <= 126;
+        CHECK(same == !in_band);
+    }
+    std::printf("harmonic: fades out between 0.20 and 0.25 fs, glides cross it in small steps, "
+                "firmware sound kept below the band\n");
 }
 
 // A full keyboard queue refuses further notes and says so; one block empties it.
@@ -1075,6 +1154,7 @@ int main() {
     TestKeyboardLayout();
     TestScreenKeyboardNotes();
     TestTypedValues();
+    TestHarmonicFade();
     TestGlidesReachTarget();
     TestKeyboardQueueLimit();
     TestEditorInWindow();

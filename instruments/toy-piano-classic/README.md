@@ -1,6 +1,6 @@
 # Toy Piano Classic
 
-VST3 instrument, version 0.3.1. First test object of this repository: the
+VST3 instrument, version 0.3.2. First test object of this repository: the
 sound engine of the Daisy Seed3 firmware *Toy Piano*, running unchanged inside
 a native Windows plug-in.
 
@@ -10,7 +10,8 @@ a native Windows plug-in.
 0.1.0 loaded in Studio One and its knobs responded there; 0.2.0 added the
 resizable window, 0.3.0 the screen keyboard and smoother resizing, 0.3.1 the
 fixes from an independent code review ([review](docs/CODEX_REVIEW_0.3.0.md),
-[what was done](docs/CODEX_REVIEW_0.3.0_UMSETZUNG.md)). None of these has been
+[what was done](docs/CODEX_REVIEW_0.3.0_UMSETZUNG.md)), 0.3.2 a fade of the
+second harmonic. None of these has been
 in a DAW, and nobody has listened to any version yet, see
 [Still to be checked](#still-to-be-checked).
 
@@ -18,6 +19,13 @@ in a DAW, and nobody has listened to any version yet, see
 
 A sine with a quiet second harmonic (12 %), struck with a one-shot
 attack/decay envelope. 16 voices. Releasing a key does not stop a note.
+
+The harmonic would alias above a quarter of the sample rate, so it fades out
+before: from 0.20 of the sample rate on (9.6 kHz at 48 kHz) it gets quieter,
+from 0.25 (12 kHz) it is gone. The firmware switches it off at 12 kHz at once,
+which clicks when the pitch glides across. Below the fade the plug-in sounds
+exactly like the firmware; in it, that is notes 123 to 126 at 48 kHz without
+transposition, the harmonic is quieter than in the firmware.
 
 | Control | Range | Default | Notes |
 | --- | --- | --- | --- |
@@ -118,7 +126,8 @@ and `core/config.h` are byte-identical to the firmware sources;
 short header for the one DaisySP function the engine calls.
 
 **The plug-in's output equals the engine's, bit for bit.** With Master Pitch 0,
-Volume 0 dB and the pitch wheel centred, a performance of 90 notes rendered
+Volume 0 dB and the pitch wheel centred, and for every note below the harmonic
+fade (up to note 122 at 48 kHz), a performance of 90 notes rendered
 through the plug-in matches the bare engine sample for sample, at host block
 sizes of 1, 16, 48, 64, 333, 1024 and 2048 samples and with 32- and 64-bit
 processing.
@@ -134,6 +143,11 @@ processing.
   sample rate. From a phase increment of 1 on, the engine's phase wrap would
   read past its sine table. Such voices are held below Nyquist and muted. This
   is the one real hazard the port uncovered.
+* *A fade of the second harmonic.* The firmware switches it off in one step,
+  which a glide turns into a click (found in review, R07). The plug-in passes
+  a pitch-dependent weight through `Modulate` instead; the firmware files stay
+  unchanged. It costs nothing per sample: the weight is computed only when the
+  pitch changes.
 
 **The firmware's MIDI queue carries the screen keyboard.** Notes from the
 window travel as a VST3 message from the controller to the processor, and from
@@ -169,7 +183,9 @@ recorded with GCC and glibc.
 | Bit-exact against the engine, 7 block sizes, each in 32 and 64 bit | passed |
 | A4 = 440 Hz at 44.1, 88.2, 96 and 192 kHz | within 0.05 Hz |
 | Master Pitch −24 to +24, pitch wheel ±2 | frequencies within 0.01 % |
-| Volume change, and a Master Pitch glide by an octave on A3, while the note sounds | no jump in the waveform (but see R07 under limits) |
+| Volume change, and a Master Pitch glide by an octave on A3, while the note sounds | no jump in the waveform |
+| Second harmonic across its cut-off: fade from 0.20 to 0.25 fs, weight follows the pitch exactly | largest step per glide update: pitch wheel 6 %, Master Pitch jump of two octaves 19 to 38 % of the old one-step switch |
+| Plug-in against firmware at Master Pitch 0, all 128 notes at 48 kHz | bit-exact except notes 123 to 126 (the fade) |
 | Volume and pitch glides at 8 to 192 kHz, both directions, up to +24 dB | land exactly on the target; afterwards bit-exact again |
 | Notes above Nyquist at 8, 22.05, 44.1, 48 kHz | muted, bounded, no table overrun |
 | State save and load; damaged state | identical round trip; rejected |
@@ -189,7 +205,7 @@ recorded with GCC and glibc.
 Everything but the last row is automated or was captured by script. The
 `editorhost` captures and the resize timings were taken with 0.3.0; for
 0.3.1 the window was captured again (default size, KEYS off and on, 920 × 544,
-and a forced 300 × 100), not timed again. All of it
+and a forced 300 × 100), not timed again; 0.3.2 changed only the sound. All of it
 ran on one machine: Windows 11 x64, MSVC 19.51 (Visual Studio
 Build Tools 2026) and MSVC 19.44 (Build Tools 2022).
 
@@ -217,11 +233,13 @@ Build Tools 2026) and MSVC 19.44 (Build Tools 2022).
   size and then smoothed over about 5 ms.
 * Attack and decay are read at the strike. Automating them does not bend notes
   that already sound, as in the firmware.
-* Moving the pitch across a quarter of the sample rate (about 12 kHz at
-  48 kHz, so only very high notes with Master Pitch or the pitch wheel)
-  switches the 12 % second harmonic on or off at once: a small step in the
-  waveform. This is the firmware engine's behaviour (`core/`, review finding
-  R07); its fix belongs in Daisy-Seed.
+* The harmonic fade is done in steps, one per glide update (16 samples). A
+  Master Pitch jump of two octaves crosses the fade within a few updates;
+  there the steps reach a third of the firmware's old switch, about −64 dBFS.
+  A wider fade would make them smaller but change more notes against the
+  firmware.
+* The firmware itself still switches the harmonic at once; plug-in and
+  firmware differ for the notes in the fade until the firmware gets the same.
 * No presets.
 * Screen keyboard: one fixed velocity; notes start at the next audio block, so
   they are up to one block late (at 512 samples and 48 kHz, 11 ms); MIDI notes

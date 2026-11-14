@@ -13,7 +13,7 @@ prove and records what was learned.
 
 | Project | Kind | Status |
 | --- | --- | --- |
-| [Toy Piano Classic](instruments/toy-piano-classic/) | Instrument | 0.3.1: builds, validated, tested and code-reviewed; 0.1.0 loads in Studio One, not yet listened to |
+| [Toy Piano Classic](instruments/toy-piano-classic/) | Instrument | 0.3.2: builds, validated, tested and code-reviewed; 0.1.0 loads in Studio One, not yet listened to |
 
 ## Layout
 

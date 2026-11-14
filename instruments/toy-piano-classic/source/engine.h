@@ -1,6 +1,7 @@
 // Everything the plug-in adds to the firmware sound engine: a pitch offset
-// (master pitch plus pitch bend), a volume in front of the limiter, and a guard
-// for pitches the firmware never had to handle. Free of VST3 types.
+// (master pitch plus pitch bend), a volume in front of the limiter, a guard
+// for pitches the firmware never had to handle, and a fade of the second
+// harmonic below its cut-off. Free of VST3 types.
 #pragma once
 
 #include "toy_piano.h"
@@ -8,6 +9,13 @@
 #include <cstdint>
 
 namespace taureon::toy_piano_classic {
+
+// The second harmonic fades out linearly between these two phase increments
+// (0.20 and 0.25 of the sample rate: 9.6 and 12 kHz at 48 kHz). Below, it has
+// the firmware's 12 %; from 0.25 on, where it would alias, it is gone, as in
+// the firmware. The firmware switches at 0.25 in one step instead.
+constexpr float kHarmonicFadeStart = 0.20f;
+float HarmonicWeight(float increment);
 
 class Engine {
   public:

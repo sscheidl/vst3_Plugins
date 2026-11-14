@@ -52,12 +52,16 @@ inline bool EqualsIgnoringCase(std::string_view a, std::string_view b) {
 
 // One finite number and nothing else, apart from blanks and the unit: "500",
 // " 500 ms", "+2.5", "2,5". Rejects empty text, other words, trailing rest
-// ("12junk"), and infinity or NaN. Independent of the C locale. `value` is
-// only written on success.
+// ("12junk"), two signs ("+-5"), and infinity or NaN. Independent of the C
+// locale. `value` is only written on success.
 inline bool ParseTypedNumber(std::string_view text, std::string_view unit, double& value) {
     std::string number(StripUnit(text, unit));
-    if(!number.empty() && number.front() == '+')
+    if(!number.empty() && number.front() == '+') {
         number.erase(0, 1);
+        // One sign only: from_chars would read "+-5" as "-5" once the "+" is gone.
+        if(!number.empty() && (number.front() == '-' || number.front() == '+'))
+            return false;
+    }
     if(number.find('.') == std::string::npos) {
         const std::size_t comma = number.find(',');
         if(comma != std::string::npos && number.find(',', comma + 1) == std::string::npos)
