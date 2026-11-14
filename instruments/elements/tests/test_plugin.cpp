@@ -71,12 +71,14 @@ struct HostConfig {
     double rate = 48000.0;
     int max_block = 2048;
     bool double_precision = false;
+    int out_events = 256; // room in the host's list for the plug-in's MIDI output
 };
 
 class PluginHost {
   public:
     explicit PluginHost(const HostConfig& config, HostScore score = {})
-    : config_(config), score_(std::move(score)), events_(4096), out_events_(256), changes_(kParamCount) {
+    : config_(config), score_(std::move(score)), events_(4096), out_events_(config.out_events),
+      changes_(kParamCount) {
         processor = owned(new Processor());
         CHECK(processor->initialize(nullptr) == kResultOk);
         Setup(config.rate);
@@ -108,6 +110,8 @@ class PluginHost {
     }
 
     void AddScore(const HostScore& more) { score_.insert(score_.end(), more.begin(), more.end()); }
+    // Blocks without a list for the plug-in's MIDI output, as some hosts call.
+    void DetachOutputEvents(bool detached) { data_.outputEvents = detached ? nullptr : &out_events_; }
 
     // One process() call of `frames` samples, with the score's events of
     // that span. `frames` may be 0: a parameter flush.
@@ -755,6 +759,86 @@ void TestKeyboardAndStatus() {
                 reported_latency);
 }
 
+// The screen keyboard under load (review findings EL-R01, EL-R02): no
+// release is lost, neither on the way in nor on the way out to the host.
+void TestKeyboardLimits() {
+    // A release that finds the keyboard queue full is kept and played after
+    // everything queued before it.
+    {
+        PluginHost host({48000.0});
+        CHECK(SendNote(*host.processor, 60) == kResultOk);
+        host.Process(64);
+        std::string expected = "N60 ";
+        int held = 60;
+        // A glide over 32 keys before the next block: 64 notes, the queue's size.
+        for(int i = 0; i < 32; ++i, ++held) {
+            CHECK(SendNote(*host.processor, held, 0) == kResultOk);
+            CHECK(SendNote(*host.processor, held + 1) == kResultOk);
+            expected += "F" + std::to_string(held) + " N" + std::to_string(held + 1) + " ";
+        }
+        CHECK(SendNote(*host.processor, 100) != kResultOk); // a strike that does not fit is refused
+        CHECK(SendNote(*host.processor, held, 0) == kResultOk);
+        expected += "F" + std::to_string(held) + " ";
+        host.Run(48000);
+        CHECK(host.midi_out == expected);
+        CHECK(!host.processor->SynthEngine().Gate() && host.processor->SynthEngine().HeldCount() == 0);
+        // Everything goes on as before.
+        CHECK(SendNote(*host.processor, held) == kResultOk);
+        host.Process(64);
+        CHECK(host.processor->SynthEngine().Gate() && host.midi_out == expected + "N" + std::to_string(held) + " ");
+        CHECK(host.allocations == 0);
+    }
+    // The host's list for the MIDI output holds a single event.
+    {
+        HostConfig config;
+        config.out_events = 1;
+        PluginHost host(config);
+        CHECK(SendNote(*host.processor, 60) == kResultOk && SendNote(*host.processor, 60, 0) == kResultOk);
+        host.Process(64);
+        CHECK(host.midi_out == "N60 "); // the note-off did not fit
+        host.Process(64);
+        CHECK(host.midi_out == "N60 F60 "); // it goes out in the next block
+        // Struck again while its note-off is owed: no second note-on before it.
+        CHECK(SendNote(*host.processor, 61) == kResultOk && SendNote(*host.processor, 61, 0) == kResultOk
+              && SendNote(*host.processor, 61) == kResultOk);
+        host.Run(640);
+        CHECK(host.midi_out == "N60 F60 N61 F61 ");
+        CHECK(host.processor->SynthEngine().Gate()); // the engine plays the third note
+        CHECK(SendNote(*host.processor, 61, 0) == kResultOk);
+        host.Run(640);
+        CHECK(host.midi_out == "N60 F60 N61 F61 " && !host.processor->SynthEngine().Gate());
+        // A block without a list: the note-off is owed until the next one has one.
+        CHECK(SendNote(*host.processor, 62) == kResultOk);
+        host.Process(64);
+        CHECK(SendNote(*host.processor, 62, 0) == kResultOk);
+        host.DetachOutputEvents(true);
+        host.Process(64);
+        host.DetachOutputEvents(false);
+        host.Process(64);
+        CHECK(host.midi_out == "N60 F60 N61 F61 N62 F62 ");
+        CHECK(host.allocations == 0);
+    }
+    std::printf("screen keyboard limits: a release that finds the queue full and a note-off the "
+                "host's list cannot take are delivered later, in order\n");
+}
+
+// The plug-in's output stays within +-1 at every host rate, also where the
+// sinc converter would overshoot (review finding EL-R03; the patch is the
+// review's, 1.24 at 44.1 kHz before).
+void TestOutputBound() {
+    const std::vector<double> loud = {1, 1, 0, 1, 0, 0, 0, 0.923, 1, 0.5, 0.5, 0, 1, 1, 1, 0, 0, 1, 1};
+    for(const double rate : {44100.0, 48000.0, 88200.0, 96000.0, 192000.0}) {
+        PluginHost host({rate}, {NoteOn(0, 78, 127)});
+        CHECK(LoadState(*host.processor, MakeState(1, loud)) == kResultOk);
+        host.Run(static_cast<std::int64_t>(19200 * rate / 44100.0), 48);
+        const float peak = std::max(Peak(host.left), Peak(host.right));
+        CHECK(peak <= 1.0f);
+        if(rate == 44100.0)
+            CHECK(peak == 1.0f); // the case is reached: the limit acts
+        std::printf("output bound at %.1f kHz: peak %.6f\n", rate / 1000.0, peak);
+    }
+}
+
 // The parameter values between the threads (after Torus Classic): a loaded
 // state replaces everything; automation written for an older state does not
 // leak into a newer one.
@@ -792,6 +876,8 @@ int main() {
     TestAutomation();
     TestState();
     TestKeyboardAndStatus();
+    TestKeyboardLimits();
+    TestOutputBound();
     TestBlockSizesAndRates();
     std::printf("PASS\n");
     return 0;

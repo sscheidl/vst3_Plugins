@@ -101,10 +101,18 @@ void Processor::SendStatus() {
 }
 
 tresult PLUGIN_API Processor::setActive(TBool state) {
-    // Not called while process() runs. Screen keys pressed while the audio
-    // was off are not played later.
+    // Not called while process() runs, and on the UI thread, which also puts
+    // the screen keyboard's notes into the queue. Screen keys pressed while
+    // the audio was off are not played later; releases are not needed after
+    // the restart below.
     KeyboardNote stale;
-    while(keyboard_notes_.Pop(stale)) {}
+    while(keyboard_notes_.Pop(stale))
+        keyboard_taken_ = stale.sequence;
+    releases_overflowed_.store(false, std::memory_order_relaxed);
+    for(auto& slot : overflowed_releases_)
+        slot.store(0, std::memory_order_relaxed);
+    late_releases_.fill(0);
+    late_release_count_ = 0;
     if(state) {
         const double rate = processSetup.sampleRate;
         if(rate > 0.0 && rate != adapter_.HostRate() && adapter_.Prepare(rate))
@@ -169,13 +177,9 @@ void Processor::ReadParameterChanges(IParameterChanges& changes, int32 num_sampl
     }
 }
 
-void Processor::SendKey(IEventList* output, int note, int velocity) {
-    if(velocity > 0)
-        held_keys_.set(static_cast<std::size_t>(note));
-    else
-        held_keys_.reset(static_cast<std::size_t>(note));
+bool Processor::SendToHost(IEventList* output, int note, int velocity) {
     if(!output)
-        return;
+        return false;
     Event event{};
     event.busIndex = 0;
     event.sampleOffset = 0;
@@ -190,17 +194,74 @@ void Processor::SendKey(IEventList* output, int note, int velocity) {
         event.noteOff.pitch = static_cast<int16>(note);
         event.noteOff.noteId = -1;
     }
-    output->addEvent(event);
+    // The host's list can be full: then the event did not go out.
+    return output->addEvent(event) == kResultOk;
+}
+
+void Processor::ReleaseToHost(IEventList* output, int note) {
+    const auto key = static_cast<std::size_t>(note);
+    if(!host_keys_.test(key))
+        return; // its note-on never went out
+    if(SendToHost(output, note, 0)) {
+        host_keys_.reset(key);
+        owed_releases_.reset(key);
+    } else {
+        owed_releases_.set(key);
+    }
+}
+
+void Processor::StrikeToHost(IEventList* output, int note, int velocity) {
+    const auto key = static_cast<std::size_t>(note);
+    if(host_keys_.test(key)) // pressed again without a release in between
+        ReleaseToHost(output, note);
+    if(host_keys_.test(key))
+        return; // the host still holds the key: no second note-on before its note-off
+    if(SendToHost(output, note, velocity))
+        host_keys_.set(key);
+}
+
+void Processor::ReleaseKey(IEventList* output, int note) {
+    // The engine ignores the release of a key it does not hold.
+    adapter_.AddEvent(0, NoteOffEvent(static_cast<unsigned>(note)));
+    ReleaseToHost(output, note);
+}
+
+void Processor::TakeLateReleases(IEventList* output) {
+    if(late_release_count_ == 0)
+        return;
+    for(int note = 0; note < 128; ++note) {
+        const std::uint64_t after = late_releases_[static_cast<std::size_t>(note)];
+        if(after == 0 || after - 1 > keyboard_taken_)
+            continue;
+        late_releases_[static_cast<std::size_t>(note)] = 0;
+        --late_release_count_;
+        ReleaseKey(output, note);
+    }
 }
 
 void Processor::ReadKeyboard(IEventList* output) {
     // After an activation: keys the host still believes held are released.
     if(release_held_keys_) {
         release_held_keys_ = false;
-        for(int note = 0; note < 128 && held_keys_.any(); ++note)
-            if(held_keys_.test(static_cast<std::size_t>(note)))
-                SendKey(output, note, 0);
+        owed_releases_ |= host_keys_;
     }
+    // Note-offs the host's list did not take before go out first.
+    for(int note = 0; note < 128 && owed_releases_.any(); ++note)
+        if(owed_releases_.test(static_cast<std::size_t>(note)))
+            ReleaseToHost(output, note);
+    // Releases that found the queue full.
+    if(releases_overflowed_.exchange(false, std::memory_order_acquire)) {
+        for(std::size_t note = 0; note < 128; ++note) {
+            const std::uint64_t after =
+                overflowed_releases_[note].exchange(0, std::memory_order_relaxed);
+            if(after == 0)
+                continue;
+            if(late_releases_[note] == 0)
+                ++late_release_count_;
+            late_releases_[note] = std::max(late_releases_[note], after);
+        }
+    }
+    TakeLateReleases(output);
     // Screen keyboard notes start with the block: they come from the UI and
     // have no sample position. At most one queue's worth per call, so the work
     // stays bounded even if the UI keeps adding notes meanwhile. Each key
@@ -209,26 +270,28 @@ void Processor::ReadKeyboard(IEventList* output) {
     Clock::time_point now{};
     bool have_time = false;
     for(std::size_t i = 0; i < kKeyboardQueueSize && keyboard_notes_.Pop(key); ++i) {
-        if(key.velocity == 0) {
-            // The engine ignores the release of a key it does not hold.
-            adapter_.AddEvent(0, NoteOffEvent(key.note));
-            if(held_keys_.test(key.note)) // only for a key that went out
-                SendKey(output, key.note, 0);
-            continue;
-        }
-        if(!have_time) {
-            now = Clock::now();
-            have_time = true;
-        }
-        if(now - key.struck > kKeyboardNoteLifetime)
-            continue; // struck while nobody was rendering
-        if(key.struck <= keyboard_valid_after_)
-            continue; // struck before the state that was loaded since
-        if(held_keys_.test(key.note)) // pressed again without a release in between
-            SendKey(output, key.note, 0);
-        adapter_.AddEvent(0, NoteOnEvent(key.note, key.velocity));
-        SendKey(output, key.note, key.velocity);
+        keyboard_taken_ = key.sequence;
+        PlayKeyboardNote(output, key, now, have_time);
+        TakeLateReleases(output);
     }
+}
+
+void Processor::PlayKeyboardNote(IEventList* output, const KeyboardNote& key,
+                                 Clock::time_point& now, bool& have_time) {
+    if(key.velocity == 0) {
+        ReleaseKey(output, key.note);
+        return;
+    }
+    if(!have_time) {
+        now = Clock::now();
+        have_time = true;
+    }
+    if(now - key.struck > kKeyboardNoteLifetime)
+        return; // struck while nobody was rendering
+    if(key.struck <= keyboard_valid_after_)
+        return; // struck before the state that was loaded since
+    adapter_.AddEvent(0, NoteOnEvent(key.note, key.velocity));
+    StrikeToHost(output, key.note, key.velocity);
 }
 
 void Processor::ReadEvents(IEventList& events, int32 num_samples) {
@@ -278,6 +341,14 @@ void Processor::Render(ProcessData& data) {
     for(int32 done = 0; done < data.numSamples; done += kChunk) {
         const int32 frames = std::min<int32>(kChunk, data.numSamples - done);
         adapter_.Process(chunk_left_.data(), chunk_right_.data(), frames);
+        // The engine's output stays within +-1, but the sinc converter can
+        // overshoot that by a few decibels when it is fully driven (EL-R03).
+        // The last stage: clip there. At 48 kHz nothing is converted and this
+        // changes nothing.
+        for(int32 i = 0; i < frames; ++i) {
+            chunk_left_[i] = std::clamp(chunk_left_[i], -1.0f, 1.0f);
+            chunk_right_[i] = std::clamp(chunk_right_[i], -1.0f, 1.0f);
+        }
         for(int32 channel = 0; channel < channels; ++channel) {
             // Left, right, and silence on anything beyond stereo.
             const float* source =
@@ -360,10 +431,20 @@ tresult PLUGIN_API Processor::notify(IMessage* message) {
         return kInvalidArgument;
     if(note < 0 || note > 127 || velocity < 0 || velocity > 127)
         return kInvalidArgument; // velocity 0 is the release of the key
-    // A full queue drops the note and says so.
-    if(!keyboard_notes_.Push({static_cast<std::uint8_t>(note),
-                              static_cast<std::uint8_t>(velocity), Clock::now()}))
+    const std::uint64_t sequence = keyboard_pushed_ + 1;
+    if(keyboard_notes_.Push({static_cast<std::uint8_t>(note), static_cast<std::uint8_t>(velocity),
+                             Clock::now(), sequence})) {
+        keyboard_pushed_ = sequence;
+        return kResultOk;
+    }
+    // A full queue drops a strike and says so: nothing sounds that should not.
+    if(velocity > 0)
         return kResultFalse;
+    // A release is kept aside, to be played after everything queued before
+    // it. Every later note waits for room in the queue and so comes after it.
+    overflowed_releases_[static_cast<std::size_t>(note)].store(keyboard_pushed_ + 1,
+                                                               std::memory_order_relaxed);
+    releases_overflowed_.store(true, std::memory_order_release);
     return kResultOk;
 }
 

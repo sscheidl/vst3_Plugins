@@ -50,6 +50,17 @@ void Resonator::Init(const SampleRate* sample_rate) {
     f_[i].Init();
     mode_gain_[i] = 1.0f;
   }
+  if (!sample_rate->reference()) {
+    // Svf::Init() leaves every mode at 0.01 of the sample rate with a
+    // resonance of 100, and half of the modes above the 25th keep that until
+    // the second block. The same start filter as at 32 kHz, in time.
+    const Mode start = ConvertMode(
+        OnePole::tan<FREQUENCY_DIRTY>(0.01f), 100.0f, sample_rate->ratio());
+    for (size_t i = 0; i < kMaxModes; ++i) {
+      f_[i].set_g_q(start.g, start.resonance);
+      mode_gain_[i] = start.gain;
+    }
+  }
 
   for (size_t i = 0; i < kMaxBowedModes; ++i) {
     f_bow_[i].Init();
@@ -70,6 +81,67 @@ void Resonator::Init(const SampleRate* sample_rate) {
   lfo_phase_ = 0.0f;
   set_modulation_frequency(0.0f);
   set_modulation_offset(0.0f);
+}
+
+namespace {
+
+// The ringing of an Svf band-pass: its poles are rho * e^(+-j phi), and after
+// the first sample its answer to a pulse of 1 is
+// amplitude * rho^n * sin(n phi + phase). For the filter with g and
+// r = 1 / Q the transfer function is
+//   g (1 - z^-2) / ((1 + r g + g^2) - 2 (1 - g^2) z^-1 + (1 - r g + g^2) z^-2),
+// and the residue of its pole p gives
+//   amplitude = g |p^2 - 1| / ((1 + r g + g^2) rho^2 sin(phi)),
+//   |p^2 - 1| = sqrt((1 - rho^2)^2 + 4 rho^2 sin(phi)^2).
+inline float RingingAmplitude(
+    float g, float r, float rho2, float one_minus_rho2, float sin_phi) {
+  const float distance = sqrtf(
+      one_minus_rho2 * one_minus_rho2 + 4.0f * rho2 * sin_phi * sin_phi);
+  return g * distance / ((1.0f + r * g + g * g) * rho2 * sin_phi);
+}
+
+}  // namespace
+
+// The filter is the bilinear image of s / (s^2 + s / Q + 1) at g, with poles
+// p = (1 + g u) / (1 - g u), u = -1 / (2 Q) + j sqrt(1 - 1 / (4 Q^2)), |u| = 1.
+// With x = g r / (1 + g^2) that gives
+//   rho^2 = (1 - x) / (1 + x),  ln(rho^2) = -2 atanh(x),
+//   phi = atan2(2 g Im(u), 1 - g^2).
+// The same ringing at `ratio` times the rate has the pole p^(1 / ratio):
+// ln(rho^2) and phi divided by the ratio. The filter with that pole follows
+// from g u = (p - 1) / (p + 1), with |u| = 1:
+//   g = sqrt((1 - rho^2)^2 + 4 rho^2 sin(phi)^2) / (1 + 2 rho cos(phi) + rho^2),
+//   Q = sqrt((1 - rho^2)^2 + 4 rho^2 sin(phi)^2) / (2 (1 - rho^2)).
+// 1 - rho^2 is taken with expm1, so that high resonances keep their
+// precision. For a high Q this is the conversion of the first port, which
+// kept the decay per sample sin(angle) / (2 Q) per second.
+Resonator::Mode Resonator::ConvertMode(float g32, float q32, float ratio) {
+  const float inv_ratio = 1.0f / ratio;
+  const float r32 = 1.0f / q32;
+  const float x = g32 * r32 / (1.0f + g32 * g32);
+  const float one_minus_rho2_32 = 2.0f * x / (1.0f + x);
+  const float rho2_32 = 1.0f - one_minus_rho2_32;
+  const float half_r = 0.5f * r32;
+  const float u_imaginary = sqrtf(max(0.0f, 1.0f - half_r * half_r));
+  const float phi_32 = atan2f(2.0f * g32 * u_imaginary, 1.0f - g32 * g32);
+
+  const float one_minus_rho2 = -expm1f(-2.0f * atanhf(x) * inv_ratio);
+  const float rho2 = 1.0f - one_minus_rho2;
+  const float rho = sqrtf(rho2);
+  const float phi = phi_32 * inv_ratio;
+  const float sin_phi = sinf(phi);
+  const float distance = sqrtf(
+      one_minus_rho2 * one_minus_rho2 + 4.0f * rho2 * sin_phi * sin_phi);
+
+  Mode mode;
+  mode.g = distance / (1.0f + 2.0f * rho * cosf(phi) + rho2);
+  mode.resonance = distance / (2.0f * one_minus_rho2);
+  // A pulse of the same area is 1 / ratio as high.
+  mode.gain = RingingAmplitude(g32, r32, rho2_32, one_minus_rho2_32,
+                               sinf(phi_32)) /
+      (ratio * RingingAmplitude(mode.g, 1.0f / mode.resonance, rho2,
+                                one_minus_rho2, sin_phi));
+  return mode;
 }
 
 size_t Resonator::ComputeFilters() {
@@ -110,32 +182,37 @@ size_t Resonator::ComputeFilters() {
       // highest modes flat; the resonance grows with the frequency.
       float g = stmlib::OnePole::tan<FREQUENCY_FAST>(partial_frequency);
       float resonance = 1.0f + partial_frequency * q;
+      float g_bow = g;
       float bow_resonance = 1.0f + partial_frequency * 1500.0f;
       size_t period = 1.0f / partial_frequency;
       while (period >= kMaxBowedPeriod) period >>= 1;
       if (!reference && g > 0.0f) {
-        // The same mode at this rate. Its frequency is that of the original
-        // mode, flatness included: the same angle per second. A filter of
-        // this kind with resonance Q decays by sin(angle) / (2 Q) per sample
-        // and answers a pulse of one sample with sin(angle); at resonance its
-        // gain is Q. With Q and the output scaled by k and 1 / k, k being the
-        // ratio of the two sines per second, decay, answer to a pulse and
-        // gain at resonance are all as at 32 kHz.
+        // The same mode at this rate: frequency, flatness included, decay
+        // and level of its ringing as at 32 kHz (see ConvertMode).
         const float g32 = g;
-        g = tanf(atanf(g32) * inv_ratio);
-        const float k = ratio * (g * (1.0f + g32 * g32)) /
-            (g32 * (1.0f + g * g));
-        resonance *= k;
-        bow_resonance *= k;
-        mode_gain_[i] = 1.0f / k;
-        // The delay of a bowed mode lasts as long as at 32 kHz, to the
-        // nearest sample.
-        period = sample_rate_->Samples(period);
+        const Mode mode = ConvertMode(g32, resonance, ratio);
+        g = mode.g;
+        resonance = mode.resonance;
+        mode_gain_[i] = mode.gain;
+        if (i < kMaxBowedModes) {
+          // A bowed mode is a band-pass in a delay loop, normalized to a gain
+          // of 1 at its centre. What counts there is that centre, which must
+          // stay on the comb of the delay, and the width of the band: the
+          // same angle per second, and Q scaled by k, the ratio of the sines
+          // of the two angles per second, which keeps the band as wide in
+          // hertz. The delay lasts as long as at 32 kHz, to the nearest
+          // sample.
+          g_bow = tanf(atanf(g32) * inv_ratio);
+          const float k = ratio * (g_bow * (1.0f + g32 * g32)) /
+              (g32 * (1.0f + g_bow * g_bow));
+          bow_resonance *= k;
+          period = sample_rate_->Samples(period);
+        }
       }
       f_[i].set_g_q(g, resonance);
       if (i < kMaxBowedModes) {
         d_bow_[i].set_delay(period);
-        f_bow_[i].set_g_q(g, bow_resonance);
+        f_bow_[i].set_g_q(g_bow, bow_resonance);
       }
     }
     stretch_factor += stiffness;

@@ -14,8 +14,10 @@
 #include "reference_api.h"
 
 #include "elements/dsp/part.h"
+#include "elements/dsp/resonator.h"
 
 #include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <cstdarg>
 #include <cstring>
@@ -282,6 +284,163 @@ void Report(const char* format, ...) {
     std::printf("%s\n", line);
     if(g_report)
         std::fprintf(g_report, "%s\n", line);
+}
+
+// The answer of stmlib's Svf band-pass to one pulse, computed in double.
+std::vector<double> SvfPulse(double g, double resonance, double height, int length) {
+    const double r = 1.0 / resonance, h = 1.0 / (1.0 + r * g + g * g);
+    double s1 = 0.0, s2 = 0.0;
+    std::vector<double> out(static_cast<std::size_t>(length));
+    for(int n = 0; n < length; ++n) {
+        const double in = n == 0 ? height : 0.0;
+        const double hp = (in - r * s1 - g * s1 - s2) * h;
+        const double bp = g * hp + s1;
+        s1 = g * hp + bp;
+        const double lp = g * bp + s2;
+        s2 = g * bp + lp;
+        out[static_cast<std::size_t>(n)] = bp;
+    }
+    return out;
+}
+
+// The ringing of that band-pass after a pulse of `height`: the pole
+// rho e^(j phi) as frequency in Hz and decay rate per second, from the roots
+// of its denominator (1 + r g + g^2) z^2 - 2 (1 - g^2) z + (1 - r g + g^2), and
+// the amplitude A of its answer A rho^n sin(n phi + phase), read from the
+// computed answer.
+struct Ringing {
+    double hz = 0.0, decay = 0.0, amplitude = 0.0;
+};
+
+Ringing SvfRinging(double g, double resonance, double height, double rate) {
+    const double r = 1.0 / resonance, a0 = 1.0 + r * g + g * g;
+    const double phi = std::atan2(g * std::sqrt(4.0 - r * r), 1.0 - g * g);
+    const double log_rho2 = std::log1p(-2.0 * r * g / a0);
+    const double rho = std::exp(0.5 * log_rho2);
+    Ringing ringing;
+    ringing.hz = phi * rate / (2.0 * test_support::kPi);
+    ringing.decay = -0.5 * log_rho2 * rate;
+    const int from = 5;
+    const std::vector<double> x = SvfPulse(g, resonance, height, from + 2);
+    const double h0 = x[from], h1 = x[from + 1];
+    const double quadrature = (h1 / rho - h0 * std::cos(phi)) / std::sin(phi);
+    ringing.amplitude = std::sqrt(h0 * h0 + quadrature * quadrature) / std::pow(rho, from);
+    return ringing;
+}
+
+// A resonator mode at 48 and 96 kHz (Resonator::ConvertMode) against the
+// original's at 32 kHz: the same frequency of its ringing, the same decay per
+// second and, for a pulse of the same area, the same amplitude, at every
+// resonance the resonator makes, down to 1. Also shows how far the first
+// port's conversion was off at low resonance.
+void TestModeConversion() {
+    double worst_hz = 0.0, worst_decay = 0.0, worst_amplitude = 0.0, old_decay = 0.0;
+    for(const double ratio : {1.5, 3.0}) {
+        for(const float f : {0.0005f, 0.002f, 0.01f, 0.05f, 0.1f, 0.2f, 0.25f, 0.3f, 0.4f, 0.49f}) {
+            for(const float q : {1.0f, 1.25f, 2.0f, 5.0f, 20.0f, 100.0f, 1000.0f, 20000.0f}) {
+                const float g32 = stmlib::OnePole::tan<stmlib::FREQUENCY_FAST>(f);
+                const elements::Resonator::Mode mode =
+                    elements::Resonator::ConvertMode(g32, q, static_cast<float>(ratio));
+                CHECK(mode.g > 0.0f && mode.resonance >= 0.5f && mode.gain > 0.0f);
+                CHECK(std::isfinite(mode.g) && std::isfinite(mode.resonance) && std::isfinite(mode.gain));
+                const Ringing original = SvfRinging(g32, q, 1.0, 32000.0);
+                const Ringing port = SvfRinging(mode.g, mode.resonance, mode.gain, 32000.0 * ratio);
+                worst_hz = std::max(worst_hz, std::fabs(port.hz / original.hz - 1.0));
+                worst_decay = std::max(worst_decay, std::fabs(port.decay / original.decay - 1.0));
+                // A pulse of 1 at the higher rate has 1 / ratio of the area.
+                worst_amplitude = std::max(
+                    worst_amplitude, std::fabs(port.amplitude * ratio / original.amplitude - 1.0));
+                // The first port: angle kept, Q scaled by k.
+                const double g_old = std::tan(std::atan(static_cast<double>(g32)) / ratio);
+                const double k = ratio * (g_old * (1.0 + g32 * g32)) / (g32 * (1.0 + g_old * g_old));
+                const Ringing old = SvfRinging(g_old, q * k, 1.0 / k, 32000.0 * ratio);
+                old_decay = std::max(old_decay, std::fabs(old.decay / original.decay - 1.0));
+            }
+        }
+    }
+    // The case the review found (EL-R04): T60 0.392982 ms at 32 kHz.
+    const float g32 = 1.00083756f;
+    const elements::Resonator::Mode mode = elements::Resonator::ConvertMode(g32, 1.0f, 1.5f);
+    const Ringing original = SvfRinging(g32, 1.0, 1.0, 32000.0);
+    const Ringing port = SvfRinging(mode.g, mode.resonance, mode.gain, 48000.0);
+    const double t60_original = 1000.0 * std::log(1000.0) / original.decay;
+    const double t60_port = 1000.0 * std::log(1000.0) / port.decay;
+    CHECK(std::fabs(t60_original - 0.392982) < 1e-4);
+    CHECK(std::fabs(t60_port / t60_original - 1.0) < 1e-4);
+
+    Report("");
+    Report("### A single resonator mode (Resonator::ConvertMode)");
+    Report("");
+    Report("Frequency and decay of the ringing and its amplitude after a pulse of the");
+    Report("same area, port at 48 and 96 kHz against the original at 32 kHz; 10");
+    Report("frequencies from 16 Hz to 15.7 kHz, resonance 1 to 20000.");
+    Report("");
+    Report("| | largest relative deviation |");
+    Report("| --- | --- |");
+    Report("| Frequency | %.1e |", worst_hz);
+    Report("| Decay rate | %.1e |", worst_decay);
+    Report("| Amplitude | %.1e |", worst_amplitude);
+    Report("| Decay rate, conversion of the first commit | %.1e |", old_decay);
+    Report("");
+    Report("The mode of review finding EL-R04 (resonance 1 at 8 kHz): T60 %.6f ms at", t60_original);
+    Report("32 kHz, %.6f ms at 48 kHz.", t60_port);
+    // Float precision: the conversion itself is exact.
+    CHECK(worst_hz < 1e-5 && worst_decay < 1e-5 && worst_amplitude < 1e-5);
+}
+
+// The filters a resonator starts with (Svf::Init(): 0.01 of the rate,
+// resonance 100) sound in the first block for the modes above the 25th that
+// are not computed until the second (EL-R05). At other rates they must be the
+// 32 kHz start filter converted like any other mode, which TestModeConversion
+// shows to ring as at 32 kHz. Two resonators that differ only by mode 27
+// (index 26) leave that mode alone in the difference of their outputs.
+void TestStartFilters() {
+    const float g_start = stmlib::OnePole::tan<stmlib::FREQUENCY_DIRTY>(0.01f);
+    double scale = 0.0; // the position's weight of that mode, read at 32 kHz
+    double worst = 0.0, unconverted = 0.0;
+    for(const float hz : {32000.0f, 48000.0f, 96000.0f}) {
+        elements::SampleRate rate;
+        CHECK(rate.Init(hz));
+        const std::size_t block = rate.block_size();
+        std::vector<float> center[2];
+        for(int which = 0; which < 2; ++which) {
+            auto resonator = std::make_unique<elements::Resonator>();
+            resonator->Init(&rate);
+            resonator->set_frequency(0.002f);
+            resonator->set_geometry(0.0f);
+            resonator->set_position(0.0f);
+            resonator->set_resolution(26 + static_cast<std::size_t>(which));
+            std::vector<float> bow(block, 0.0f), in(block, 0.0f), sides(block);
+            in[0] = 1.0f;
+            center[which].assign(block, 0.0f);
+            resonator->Process(bow.data(), in.data(), center[which].data(), sides.data(), block);
+        }
+        const elements::Resonator::Mode mode =
+            hz == 32000.0f ? elements::Resonator::Mode{g_start, 100.0f, 1.0f}
+                           : elements::Resonator::ConvertMode(g_start, 100.0f, hz / 32000.0f);
+        // The resonator scales its input by 0.125.
+        const std::vector<double> expected =
+            SvfPulse(mode.g, mode.resonance, 0.125 * mode.gain, static_cast<int>(block));
+        const std::vector<double> as_init = SvfPulse(g_start, 100.0, 0.125, static_cast<int>(block));
+        if(hz == 32000.0f)
+            scale = (static_cast<double>(center[1][0]) - center[0][0]) / expected[0];
+        double peak = 0.0, deviation = 0.0, from_init = 0.0;
+        for(std::size_t i = 0; i < block; ++i) {
+            const double difference = static_cast<double>(center[1][i]) - center[0][i];
+            peak = std::max(peak, std::fabs(scale * expected[i]));
+            deviation = std::max(deviation, std::fabs(difference - scale * expected[i]));
+            from_init = std::max(from_init, std::fabs(difference - scale * as_init[i]));
+        }
+        worst = std::max(worst, deviation / peak);
+        if(hz != 32000.0f)
+            unconverted = std::max(unconverted, from_init / peak);
+    }
+    Report("");
+    Report("The start filter of a mode not yet computed in the first block (EL-R05): within");
+    Report("%.1e of the converted 32 kHz start filter at 48 and 96 kHz; the unconverted", worst);
+    Report("filter of the first commit would be %.0f %% off.", 100.0 * unconverted);
+    CHECK(worst < 1e-3);
+    CHECK(unconverted > 0.1); // the comparison can tell the two apart
 }
 
 struct Take {
@@ -783,6 +942,8 @@ int main(int argc, char** argv) {
     Report("");
     TestTables();
     TestBitExactAt32k();
+    TestModeConversion();
+    TestStartFilters();
 #ifdef _DEBUG
     // The measurements render some twenty minutes of sound; an unoptimized
     // build leaves them to the optimized one.

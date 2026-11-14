@@ -1,5 +1,14 @@
 # Build report: Mendelejew 0.1.0 (project Elements, phase 1)
 
+> **Since then:** Codex reviewed 0.1.0
+> ([CODEX_REVIEW_0.1.0.md](CODEX_REVIEW_0.1.0.md)) and found three faults
+> and two DSP deviations; 0.1.1 fixes all five
+> ([what was done](CODEX_REVIEW_0.1.0_UMSETZUNG.md), measurements of 0.1.1 in
+> [DSP_MEASUREMENTS_0.1.1.md](DSP_MEASUREMENTS_0.1.1.md)). This report stays
+> the record of 0.1.0; where it says a mode keeps its decay exactly, or that
+> the plug-in's output stays within ±1, that held for 0.1.0 only at high
+> resonance and at a 48 kHz host.
+
 Date: 2026-11-14. Work order: "Phase 1 – Mutable Instruments Elements als
 natives VST3" (handed over in the session; its requirements are summarised
 in the pull request).

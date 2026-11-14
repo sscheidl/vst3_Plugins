@@ -107,9 +107,13 @@ Einzelheiten darin selbst festgelegt:
 ### Mendelejew (Projektname Elements)
 
 Dritter Port, Auftrag vom 2026-11-14 („Phase 1 – Mutable Instruments Elements
-als natives VST3"). Version 0.1.0 ist gebaut, vom validator geprüft und
-automatisch getestet; in einer DAW geladen, angehört und von Codex geprüft ist
-sie noch nicht. Messwerte und Testprotokoll stehen im
+als natives VST3"). Version 0.1.0 ist gebaut, vom validator geprüft,
+automatisch getestet und von Codex geprüft
+([Review](../instruments/elements/docs/CODEX_REVIEW_0.1.0.md)); 0.1.1 behebt
+dessen fünf Befunde
+([Umsetzung](../instruments/elements/docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)),
+die Nachprüfung steht aus. In einer DAW gespielt und angehört ist das Plugin
+noch nicht. Messwerte und Testprotokoll stehen im
 [Build-Bericht](../instruments/elements/docs/BUILD_REPORT_0.1.0.md), die
 offene Abnahme in der
 [DAW-Prüfliste](../instruments/elements/docs/DAW_TEST_0.1.0.md), Herkunft und
@@ -126,7 +130,7 @@ weil der Auftrag es offen ließ:
 | --- | --- | --- |
 | Name | Das Plugin heißt „Mendelejew" (Anzeigename, Bundle, Fenstertitel). „Elements" bleibt interner Projektname: Verzeichnis, Branch, Build-Targets, Namensräume, Testnamen | **Entscheidung des Nutzers vom 2026-11-14,** nach dem ersten Build unter dem Arbeitstitel „Elements": benannt nach Dmitri Mendelejew, in deutscher Schreibweise, nur der Produktname. Mutable Instruments empfiehlt, Modulnamen für abgeleitete Werke nicht beizubehalten. Die Klassen-IDs sind die des ersten Builds |
 | Abtastrate des Kerns | Zur Laufzeit 32, 48 oder 96 kHz; Blockgröße 16, 24 oder 48 Samples, immer 0,5 ms | Bei 32 kHz muss der Port das Original sein: Nur so lässt sich bitgenau prüfen, dass kein Patch den Klang ändert. Mit der mitwachsenden Blockgröße bleiben Hüllkurventabelle und alles, was Blöcke zählt, unverändert |
-| Was „gleiches Instrument bei 48 kHz" heißt | Jedes Teil verhält sich in Zeit und Frequenz wie bei 32 kHz: Moden behalten Frequenz, Ausklang und Pegel, Verzögerungen ihre Dauer, der Tiefpass der Erreger seinen Verlauf bis 16 kHz | Die naheliegende Umrechnung (gleiche Grenzfrequenzen, Güte mal Ratenverhältnis) ergab messbar ein anderes Instrument: obere Teiltöne bis 170 Cent anders gestimmt, kürzer ausklingend und bei hellen Klängen bis 12 dB lauter. Die genaue Umrechnung ist ableitbar und einzeln gemessen; sie ist keine Klangkorrektur nach Gehör |
+| Was „gleiches Instrument bei 48 kHz" heißt | Jedes Teil verhält sich in Zeit und Frequenz wie bei 32 kHz: Moden behalten Frequenz, Ausklang und Pegel ihres Ausschwingens (seit 0.1.1 über die Pole, bei jeder Güte; 0.1.0 traf das nur bei hoher Güte, Review-Befund EL-R04), Verzögerungen ihre Dauer, der Tiefpass der Erreger seinen Verlauf bis 16 kHz | Die naheliegende Umrechnung (gleiche Grenzfrequenzen, Güte mal Ratenverhältnis) ergab messbar ein anderes Instrument: obere Teiltöne bis 170 Cent anders gestimmt, kürzer ausklingend und bei hellen Klängen bis 12 dB lauter. Die genaue Umrechnung ist ableitbar und einzeln gemessen; sie ist keine Klangkorrektur nach Gehör |
 | Mehr Bandbreite | Keine zusätzlichen Moden oberhalb der 15,7 kHz des Originals | Sonst hätten hohe Töne Teiltöne, die das Original nie hatte |
 | Abtastrate im Plugin | Engine immer 48 kHz; jede andere Host-Rate über den Sinc-Wandler aus Torus Classic | Vorgabe: bei 44,1 kHz saubere Wandlung, keine ungetestete Umschaltung. Bei 96-kHz-Hosts deshalb vorerst ebenfalls 48 kHz plus Wandlung |
 | 96 kHz | **HOLD.** Der Kern rechnet bei 96 kHz und besteht dort dieselben Messungen; das Plugin nutzt es nicht | Fertig erst, wenn Plugin-Tests und ein Hörvergleich bei 96 kHz vorliegen |
@@ -141,7 +145,7 @@ weil der Auftrag es offen ließ:
 | Stimme | Monophon, letzte Note zählt; jede Taste schlägt an (das Gate schließt dafür 0,5 ms); Loslassen fällt ohne Anschlag auf die zuletzt gehaltene Taste zurück | So verhält sich die Hardware an einem MIDI-Interface mit Retrigger |
 | Pitch-Rad | ±2 Halbtöne, über den FM-Eingang der Engine | Wie bei den beiden anderen Plugins |
 | MIDI-Controller | 21 Geometry, 22 Brightness, 23 Damping, 24 Position, 33 Volume (Nummern wie bei Torus Classic), 91 Space | Gleiche Bedeutung, gleiche Nummer |
-| Ausgang | Wandlerkennlinie der Hardware ohne 16-Bit-Rundung (halber Pegel, weich begrenzt, bei Vollaussteuerung abgeschnitten), danach Volume | Pegel wie am Gerät; kein Sample über 0 dBFS. Kein zusätzlicher Limiter und kein Filter wie bei Torus Classic |
+| Ausgang | Wandlerkennlinie der Hardware ohne 16-Bit-Rundung (halber Pegel, weich begrenzt, bei Vollaussteuerung abgeschnitten), danach Volume; hinter der Ratenwandlung seit 0.1.1 hart auf ±1 begrenzt | Pegel wie am Gerät; kein Sample über 0 dBFS. Der Sinc-Wandler überschwingt bei voll ausgesteuerten, hellen Klängen; in den Läufen des Reviews um bis zu 1,9 dB (Befund EL-R03); bei 48 kHz wird nichts gewandelt, dort wirkt die Begrenzung nie. Kein zusätzlicher Limiter und kein Filter wie bei Torus Classic |
 | Schutz | Liefert die DSP je ein nicht endliches Sample: Stille, DSP neu, Tasten los | Ein Filter oder der Hall käme aus NaN nicht von selbst heraus |
 | Gemeinsamer Code | Adapter, Parameterübergabe, Texteingabe und Fenster sind Kopien aus Torus Classic 0.2.0 im eigenen Namensraum; nichts nach `common/` verschoben | Verschieben hätte Torus Classic geändert, dessen Prüfung noch läuft. Kandidaten für `common/` stehen dort im README |
 | Tests | Bitgenauer Vergleich bei 32 kHz, Messungen bei 48 und 96 kHz gegen das Original, Engine- und Plugin-Tests; keine Fenstertests | Der Nutzer prüft Optik, GUI und DAW selbst |

@@ -1,11 +1,14 @@
-# DAW-Prüfliste: Mendelejew 0.1.0 (Projekt Elements)
+# DAW-Prüfliste: Mendelejew 0.1.1 (Projekt Elements)
+
+Gilt für 0.1.1, die Fassung mit den Korrekturen aus dem Codex-Review; der
+Dateiname bleibt der der ersten Fassung.
 
 Was automatisch nicht prüfbar ist und in der DAW (Studio One) noch aussteht.
 Ergebnisse bitte hier eintragen: PASS, FAIL mit kurzer Beschreibung, oder
 offen.
 
 Installation: den Ordner `Mendelejew.vst3` aus
-`build\windows-vs2026-x64\VST3\Release\` (oder aus `out\elements-0.1.0\`) nach
+`build\windows-vs2026-x64\VST3\Release\` (oder aus `out\elements-0.1.1\`) nach
 `%LOCALAPPDATA%\Programs\Common\VST3\` kopieren, DAW neu scannen lassen. Eine
 dort liegende Kopie unter dem Arbeitstitel (`Elements.vst3`) vorher entfernen:
 Beide haben dieselben Klassen-IDs.
@@ -24,6 +27,7 @@ Beide haben dieselben Klassen-IDs.
 | 8 | Pitch-Rad verstimmt um ±2 Halbtöne und kehrt zurück | offen |
 | 9 | Bildschirm-Klaviatur spielt; Taste KEYS blendet sie aus und ein | offen |
 | 10 | Legato (zweite Taste bei gehaltener erster): neuer Anschlag; Loslassen der zweiten: Rückfall auf die erste ohne Anschlag | offen |
+| 10a | Neu in 0.1.1: mit gedrückter Maus schnell über viele Tasten der Bildschirm-Klaviatur fahren, dann loslassen: kein Ton bleibt hängen, auch nicht in einer mitlaufenden MIDI-Aufnahme | offen |
 
 ## Klang
 
@@ -43,7 +47,7 @@ Beide haben dieselben Klassen-IDs.
 | Nr. | Prüfung | Ergebnis |
 | --- | --- | --- |
 | 19 | Statuszeile im Fenster zeigt die Raten: bei 48 kHz „no conversion", bei 44,1 kHz „converted, latency 49 samples" | offen |
-| 20 | Projekt mit 44,1 kHz und mit 96 kHz: spielt, Tonhöhe stimmt | offen |
+| 20 | Projekt mit 44,1 kHz und mit 96 kHz: spielt, Tonhöhe stimmt. Neu in 0.1.1: sehr laute, helle Einstellungen werden dort hinter der Ratenwandlung bei 0 dBFS hart begrenzt; darauf achten, ob das hörbar zerrt | offen |
 | 21 | Automation eines Reglers aufzeichnen und abspielen | offen |
 | 22 | Projekt speichern, schließen, öffnen: alle Regler wie zuvor | offen |
 | 23 | Preset der DAW speichern und laden | offen |

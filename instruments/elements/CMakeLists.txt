@@ -10,7 +10,7 @@
 #
 # Its own version; moduleinfo.json takes it from here. Keep it equal to
 # FULL_VERSION_STR in source/version.h.
-project(Elements VERSION 0.1.0 LANGUAGES CXX)
+project(Elements VERSION 0.1.1 LANGUAGES CXX)
 
 # The SDK compiles everything with /fp:fast. The DSP, the engine, the adapter
 # and their tests use /fp:precise instead: the engine's guard against

@@ -79,6 +79,8 @@ class Processor : public Steinberg::Vst::AudioEffect {
         std::uint8_t note = 0;
         std::uint8_t velocity = 0;
         Clock::time_point struck{};
+        // Counts the notes put into the queue, from 1.
+        std::uint64_t sequence = 0;
     };
 
     // Engine and adapter from scratch, the parameters at the given values.
@@ -88,8 +90,18 @@ class Processor : public Steinberg::Vst::AudioEffect {
     void ReadParameterChanges(Steinberg::Vst::IParameterChanges& changes,
                               Steinberg::int32 num_samples);
     void ReadKeyboard(Steinberg::Vst::IEventList* output);
-    // A screen key to the host's MIDI output; velocity 0 is its release.
-    void SendKey(Steinberg::Vst::IEventList* output, int note, int velocity);
+    // Releases that did not fit into the queue, once the notes queued before
+    // them have been taken.
+    void TakeLateReleases(Steinberg::Vst::IEventList* output);
+    void ReleaseKey(Steinberg::Vst::IEventList* output, int note);
+    void PlayKeyboardNote(Steinberg::Vst::IEventList* output, const KeyboardNote& key,
+                          Clock::time_point& now, bool& have_time);
+    // A screen key to the host's MIDI output. A note-off the host's list does
+    // not take is owed and sent again in later blocks; until it is through,
+    // the key gets no new note-on there.
+    bool SendToHost(Steinberg::Vst::IEventList* output, int note, int velocity);
+    void StrikeToHost(Steinberg::Vst::IEventList* output, int note, int velocity);
+    void ReleaseToHost(Steinberg::Vst::IEventList* output, int note);
     // Tells the controller the rates in use, for its status line.
     void SendStatus();
     void ReadEvents(Steinberg::Vst::IEventList& events, Steinberg::int32 num_samples);
@@ -105,12 +117,30 @@ class Processor : public Steinberg::Vst::AudioEffect {
     ParameterState state_;
 
     SpscQueue<KeyboardNote, kKeyboardQueueSize> keyboard_notes_;
+    // The sequence number of the last note put into the queue. Owned by the
+    // UI thread, the queue's one producer.
+    std::uint64_t keyboard_pushed_ = 0;
+    // A release that finds the queue full is not dropped: its key's slot
+    // holds 1 + the sequence number of the last note queued before it, and it
+    // is played once that note has been taken. Strikes that do not fit are
+    // dropped; they leave nothing sounding. Written by the UI thread, taken
+    // by the audio thread.
+    std::array<std::atomic<std::uint64_t>, 128> overflowed_releases_{};
+    std::atomic<bool> releases_overflowed_{false};
+    static_assert(std::atomic<std::uint64_t>::is_always_lock_free, "needs lock-free atomics");
+    // The same, taken over by the audio thread, which owns these.
+    std::array<std::uint64_t, 128> late_releases_{};
+    int late_release_count_ = 0;
+    // The sequence number of the last note taken from the queue.
+    std::uint64_t keyboard_taken_ = 0;
     // Keyboard notes struck up to this moment belong to the time before the
     // last loaded state and are not played. Owned by the audio thread.
     Clock::time_point keyboard_valid_after_{};
-    // Screen keys the host has a note-on for and no note-off yet. Owned by
+    // Screen keys the host has a note-on for and no note-off yet, and of
+    // those the ones whose note-off is due but did not get through. Owned by
     // the audio thread.
-    std::bitset<128> held_keys_;
+    std::bitset<128> host_keys_;
+    std::bitset<128> owed_releases_;
     bool release_held_keys_ = false;
 
     // process() renders through these in pieces, then converts to the host's

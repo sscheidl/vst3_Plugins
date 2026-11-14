@@ -9,4 +9,4 @@
 #define stringPluginName "Mendelejew"
 
 // Keep equal to the version in ../CMakeLists.txt.
-#define FULL_VERSION_STR "0.1.0"
+#define FULL_VERSION_STR "0.1.1"

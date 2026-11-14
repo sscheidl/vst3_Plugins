@@ -99,6 +99,21 @@ class Resonator {
     modulation_offset_ = modulation_offset;
   }
   
+  // A normal mode as the original makes it at 32 kHz, the band-pass output of
+  // stmlib's Svf with g32 and resonance q32 (q32 >= 1), made at `ratio` times
+  // that rate. Its poles are the original's carried over in time: the same
+  // frequency of the free ringing and the same decay per second, at any
+  // resonance. `gain` scales its output so that it answers a pulse of the
+  // same area with a ringing of the same amplitude. What differs is the zero
+  // at half the sample rate, which lies higher, and with it the phase at
+  // which the ringing starts. Public for the tests.
+  struct Mode {
+    float g;
+    float resonance;
+    float gain;
+  };
+  static Mode ConvertMode(float g32, float q32, float ratio);
+
   inline float BowTable(float x, float velocity) const {
     x = 0.13f * velocity - x;
     float bow = x;

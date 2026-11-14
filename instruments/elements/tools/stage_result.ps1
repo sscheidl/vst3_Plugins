@@ -40,7 +40,8 @@ foreach ($entry in $licenses) {
     Copy-Item $entry[0] (Join-Path $target "licenses\$($entry[1])") -Force
 }
 foreach ($document in 'README.md', 'CHANGELOG.md', 'UPSTREAM.md', 'SHA256SUMS.upstream',
-    'docs\BUILD_REPORT_0.1.0.md', 'docs\DSP_MEASUREMENTS_0.1.0.md', 'docs\DAW_TEST_0.1.0.md') {
+    'docs\BUILD_REPORT_0.1.0.md', 'docs\DSP_MEASUREMENTS_0.1.1.md', 'docs\DAW_TEST_0.1.0.md',
+    'docs\CODEX_REVIEW_0.1.0.md', 'docs\CODEX_REVIEW_0.1.0_UMSETZUNG.md') {
     $source = Join-Path $plugin $document
     if (Test-Path $source) { Copy-Item $source (Join-Path $target (Split-Path $document -Leaf)) -Force }
 }
