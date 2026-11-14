@@ -47,10 +47,12 @@ die Reproduktionen des Reviews, denen sie folgen.
   zur Kenntnis genommen, nicht geändert.
 * **Zustand:** zusätzliche Bytes am Ende werden nicht geprüft; kein Befund,
   nicht geändert.
-* **Torus Classic** hat dieselbe Klaviatur-Queue und dieselbe Buchführung
-  der MIDI-Ausgabe (`processor.cpp`, aus 0.2.0 übernommen). EL-R01 und
-  EL-R02 treffen dort vermutlich ebenso zu; geprüft und geändert ist das
-  nicht, Torus Classic ist in diesem Branch unverändert.
+* **Torus Classic**: Der Code hier stammt aus Torus Classic 0.2.0. Torus
+  Classic 0.2.1 (`697b33d` auf `torus-classic-0.1.0`, aus einer anderen
+  Sitzung) behandelt Loslassen und MIDI-Ausgabe inzwischen auf eigene Weise
+  (`release_due_`, Note-Off erst nach erfolgreichem `addEvent`). Dieser
+  Branch enthält 0.2.1 nicht und ändert an Torus Classic nichts; die beiden
+  Lösungen sind nicht aufeinander abgestimmt.
 * **Build-Bericht 0.1.0** bleibt als Dokument seines Stands; ein Hinweis am
   Anfang verweist auf den Review und diese Umsetzung. Die Messungen von
   0.1.0 bleiben in [DSP_MEASUREMENTS_0.1.0.md](DSP_MEASUREMENTS_0.1.0.md).
