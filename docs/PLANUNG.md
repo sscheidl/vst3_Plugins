@@ -2,7 +2,9 @@
 
 Stand: 2026-11-14. Das erste Testobjekt, Toy Piano Classic 0.3.2, ist gebaut
 und automatisch geprüft. In Studio One lädt es, die Regler reagieren. Angehört
-wurde es noch nicht; Waveform und Live stehen aus.
+wurde es noch nicht; Waveform und Live stehen aus. Dazugekommen sind Torus
+Classic und, als dritter Port, Mendelejew (Projekt Elements); ihr Stand steht in den
+Abschnitten unten.
 
 ## Entscheidungen
 
@@ -101,6 +103,52 @@ Einzelheiten darin selbst festgelegt:
 | Limiter | Am Ende der Kette, nach Filter und Sampleratenwandlung; Decke −6 dBFS, beide Kanäle gemeinsam, sofortiger Zugriff, Erholung 0,15 s, kein Look-ahead | Vorgabe: einfacher Limiter gegen Übersteuerung. Die Decke ist eine Konstante im Quelltext (`OutputStage::kCeiling`) und bei Bedarf in einer Zeile zu ändern. Ohne Look-ahead keine Latenz; dafür kann ein sehr lauter Anschlag eine hörbare Kante bekommen |
 | MIDI aus der Bildschirm-Klaviatur | Event-Ausgang „MIDI Out"; Note-on beim Anschlag, Note-off beim Loslassen | Vorgabe des Nutzers. Ohne Note-off blieben aufgenommene Noten hängen; die Engine selbst kennt weiterhin kein Note-off |
 | Tests | Nur automatische Prüfungen des Verhaltens; keine Fenster- oder DAW-Tests der Ergänzungen | Der Nutzer prüft Optik, GUI und DAW selbst |
+
+### Mendelejew (Projektname Elements)
+
+Dritter Port, Auftrag vom 2026-11-14 („Phase 1 – Mutable Instruments Elements
+als natives VST3"). Version 0.1.0 ist gebaut, vom validator geprüft,
+automatisch getestet und von Codex geprüft
+([Review](../instruments/elements/docs/CODEX_REVIEW_0.1.0.md)); 0.1.1 behebt
+dessen fünf Befunde
+([Umsetzung](../instruments/elements/docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)),
+die Nachprüfung steht aus. In einer DAW gespielt und angehört ist das Plugin
+noch nicht. Messwerte und Testprotokoll stehen im
+[Build-Bericht](../instruments/elements/docs/BUILD_REPORT_0.1.0.md), die
+offene Abnahme in der
+[DAW-Prüfliste](../instruments/elements/docs/DAW_TEST_0.1.0.md), Herkunft und
+Patches in [UPSTREAM.md](../instruments/elements/UPSTREAM.md).
+
+Vorgegeben waren: Original-DSP unter MIT, DSP-Kern ohne Plugin-Framework,
+echte 48 kHz intern (kein 32-kHz-Kern mit Upsampling), monophon, Vergleich mit
+dem Original bei 32 kHz, 96 kHz mit eigenem Status. Abweichend vom Wortlaut
+des Auftrags gibt es im Repository kein JUCE: Das Plugin sitzt wie die beiden
+anderen direkt auf dem Steinberg-SDK. Bei der Umsetzung selbst festgelegt,
+weil der Auftrag es offen ließ:
+
+| Thema | Festlegung | Begründung |
+| --- | --- | --- |
+| Name | Das Plugin heißt „Mendelejew" (Anzeigename, Bundle, Fenstertitel). „Elements" bleibt interner Projektname: Verzeichnis, Branch, Build-Targets, Namensräume, Testnamen | **Entscheidung des Nutzers vom 2026-11-14,** nach dem ersten Build unter dem Arbeitstitel „Elements": benannt nach Dmitri Mendelejew, in deutscher Schreibweise, nur der Produktname. Mutable Instruments empfiehlt, Modulnamen für abgeleitete Werke nicht beizubehalten. Die Klassen-IDs sind die des ersten Builds |
+| Abtastrate des Kerns | Zur Laufzeit 32, 48 oder 96 kHz; Blockgröße 16, 24 oder 48 Samples, immer 0,5 ms | Bei 32 kHz muss der Port das Original sein: Nur so lässt sich bitgenau prüfen, dass kein Patch den Klang ändert. Mit der mitwachsenden Blockgröße bleiben Hüllkurventabelle und alles, was Blöcke zählt, unverändert |
+| Was „gleiches Instrument bei 48 kHz" heißt | Jedes Teil verhält sich in Zeit und Frequenz wie bei 32 kHz: Moden behalten Frequenz, Ausklang und Pegel ihres Ausschwingens (seit 0.1.1 über die Pole, bei jeder Güte; 0.1.0 traf das nur bei hoher Güte, Review-Befund EL-R04), Verzögerungen ihre Dauer, der Tiefpass der Erreger seinen Verlauf bis 16 kHz | Die naheliegende Umrechnung (gleiche Grenzfrequenzen, Güte mal Ratenverhältnis) ergab messbar ein anderes Instrument: obere Teiltöne bis 170 Cent anders gestimmt, kürzer ausklingend und bei hellen Klängen bis 12 dB lauter. Die genaue Umrechnung ist ableitbar und einzeln gemessen; sie ist keine Klangkorrektur nach Gehör |
+| Mehr Bandbreite | Keine zusätzlichen Moden oberhalb der 15,7 kHz des Originals | Sonst hätten hohe Töne Teiltöne, die das Original nie hatte |
+| Abtastrate im Plugin | Engine immer 48 kHz; jede andere Host-Rate über den Sinc-Wandler aus Torus Classic | Vorgabe: bei 44,1 kHz saubere Wandlung, keine ungetestete Umschaltung. Bei 96-kHz-Hosts deshalb vorerst ebenfalls 48 kHz plus Wandlung |
+| 96 kHz | **HOLD.** Der Kern rechnet bei 96 kHz und besteht dort dieselben Messungen; das Plugin nutzt es nicht | Fertig erst, wenn Plugin-Tests und ein Hörvergleich bei 96 kHz vorliegen |
+| Zufallsgenerator | Je Instanz ein eigener mit dem Startwert des Originals | Das Original hat einen für das ganze Programm: zwei Instanzen würden sich stören und aus zwei Threads in eine Variable schreiben |
+| Nicht übernommen | Saitenmodelle und „Ominous Voice" der späteren Firmware, Audio-Eingänge, die „Signatur" aus der Seriennummer | Nicht Teil von Phase 1; die Saitenmodelle bräuchten eine eigene Ratenanpassung. Im Testbezug sind sie unverändert vorhanden |
+| Regler | Die Potis der Hardware als Parameter 0 bis 1; Abschwächer und CV-Eingänge entfallen | Es gibt nichts zu patchen; zusätzliche Modulation ist nicht Teil von Phase 1 |
+| Glättung | Wie der Regler-Leser der Hardware: 1 % des Wegs je halbe Millisekunde, Position und Space zusätzlich | Ohne sie knackt Automation; mit den Werten des Originals verhält sich das Plugin wie das Gerät |
+| Damping | Höherer Wert klingt länger, wie an der Hardware | Vorgabe „Originalparameter". **Bei Torus Classic ist es seit 0.2.0 auf Wunsch des Nutzers umgekehrt;** ob Mendelejew folgen soll, ist offen |
+| Coarse, Fine | ±30 Halbtöne in ganzen Schritten, ±2 Halbtöne stufenlos | Umfang der Hardware-Potis (5 Oktaven, ±2 Halbtöne), um die gespielte Note zentriert |
+| Freeze | Eigener Schalter | An der Hardware nur mit Steuerspannung auf SPACE erreichbar |
+| Velocity | Regler 0 bis 100 %, Vorgabe 50 %: Anschlag bewegt STRENGTH um die Ruhelage der Hardware, bei 100 % ±15 dB | Bei 0 % ist jede Note so laut wie an der unbeschalteten Hardware; damit bleibt der Vergleich mit dem Original einfach |
+| Stimme | Monophon, letzte Note zählt; jede Taste schlägt an (das Gate schließt dafür 0,5 ms); Loslassen fällt ohne Anschlag auf die zuletzt gehaltene Taste zurück | So verhält sich die Hardware an einem MIDI-Interface mit Retrigger |
+| Pitch-Rad | ±2 Halbtöne, über den FM-Eingang der Engine | Wie bei den beiden anderen Plugins |
+| MIDI-Controller | 21 Geometry, 22 Brightness, 23 Damping, 24 Position, 33 Volume (Nummern wie bei Torus Classic), 91 Space | Gleiche Bedeutung, gleiche Nummer |
+| Ausgang | Wandlerkennlinie der Hardware ohne 16-Bit-Rundung (halber Pegel, weich begrenzt, bei Vollaussteuerung abgeschnitten), danach Volume; hinter der Ratenwandlung seit 0.1.1 hart auf ±1 begrenzt | Pegel wie am Gerät; kein Sample über 0 dBFS. Der Sinc-Wandler überschwingt bei voll ausgesteuerten, hellen Klängen; in den Läufen des Reviews um bis zu 1,9 dB (Befund EL-R03); bei 48 kHz wird nichts gewandelt, dort wirkt die Begrenzung nie. Kein zusätzlicher Limiter und kein Filter wie bei Torus Classic |
+| Schutz | Liefert die DSP je ein nicht endliches Sample: Stille, DSP neu, Tasten los | Ein Filter oder der Hall käme aus NaN nicht von selbst heraus |
+| Gemeinsamer Code | Adapter, Parameterübergabe, Texteingabe und Fenster sind Kopien aus Torus Classic 0.2.0 im eigenen Namensraum; nichts nach `common/` verschoben | Verschieben hätte Torus Classic geändert, dessen Prüfung noch läuft. Kandidaten für `common/` stehen dort im README |
+| Tests | Bitgenauer Vergleich bei 32 kHz, Messungen bei 48 und 96 kHz gegen das Original, Engine- und Plugin-Tests; keine Fenstertests | Der Nutzer prüft Optik, GUI und DAW selbst |
 
 ## Stand des Fahrplans
 
