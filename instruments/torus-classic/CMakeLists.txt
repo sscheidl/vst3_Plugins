@@ -8,7 +8,7 @@
 #
 # Its own version; moduleinfo.json takes it from here. Keep it equal to
 # FULL_VERSION_STR in source/version.h and to components.json.
-project(TorusClassic VERSION 0.1.1 LANGUAGES CXX)
+project(TorusClassic VERSION 0.2.0 LANGUAGES CXX)
 
 # The SDK compiles everything with /fp:fast. The DSP, the adapter and their
 # tests use /fp:precise instead: the engine's guard against non-finite samples
@@ -73,6 +73,8 @@ set_target_properties(torus_classic_engine PROPERTIES FOLDER "Torus Classic")
 # Sample rate conversion, the 12-sample quantum FIFO and event time. Knows the
 # engine only as the QuantumEngine interface declared in its own header.
 add_library(torus_classic_adapter STATIC
+    adapter/output_stage.cpp
+    adapter/output_stage.h
     adapter/sinc_kernel.cpp
     adapter/sinc_kernel.h
     adapter/stream_adapter.cpp
@@ -90,6 +92,7 @@ add_library(torus_classic_shell STATIC
     source/editor.h
     source/engine_bridge.h
     source/latest_value.h
+    source/parameter_state.h
     source/parameters.h
     source/plugin_ids.h
     source/processor.cpp

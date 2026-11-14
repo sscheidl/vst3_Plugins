@@ -7,4 +7,4 @@
 #define stringPluginName "Torus Classic"
 
 // Keep equal to the version in ../CMakeLists.txt and ../components.json.
-#define FULL_VERSION_STR "0.1.1"
+#define FULL_VERSION_STR "0.2.0"

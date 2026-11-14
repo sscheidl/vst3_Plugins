@@ -47,13 +47,14 @@ class ParameterState {
 
     // --- Any thread but the audio thread -----------------------------------
 
-    // A state was loaded: the eight saved values, the pitch wheel back in
-    // its centre. Becomes the current state at once and waits for the audio
+    // A state was loaded: the saved values (in the order of kSavedIndex),
+    // the pitch wheel back in its centre. Becomes the current state at once and waits for the audio
     // thread to take it.
     void Load(const std::array<double, kSavedParamCount>& saved) {
         const std::lock_guard<std::mutex> lock(mutex_);
         for(int i = 0; i < kSavedParamCount; ++i)
-            base_[i] = saved[i];
+            base_[static_cast<std::size_t>(kSavedIndex[static_cast<std::size_t>(i)])] =
+                saved[static_cast<std::size_t>(i)];
         base_[kParamPitchBend - kFirstParam] = kDefaultPitchBend;
         ++generation_;
         Loaded loaded;

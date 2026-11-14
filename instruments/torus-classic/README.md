@@ -1,8 +1,9 @@
 # Torus Classic
 
-VST3 instrument, version 0.1.1, Windows x64. The Rings/Torus keyboard engine
+VST3 instrument, version 0.2.0, Windows x64. The Rings/Torus keyboard engine
 of the Daisy Seed3 firmware *Physical Modeling*, without its reverb, inside a
-native plug-in: six synthesis models, four voices, dry stereo output.
+native plug-in: six synthesis models, four voices, dry stereo output, with a
+low-pass and a limiter at the end.
 
 ![The plug-in window](docs/editor.png)
 
@@ -17,8 +18,15 @@ validator.
   ([review](docs/CODEX_REVIEW_0.1.0.md)). They are fixed since 0.1.1
   ([what was done](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)); the fixes have not
   been re-reviewed.
+* 0.2.0 adds what the first DAW test asked for: Damping the other way round,
+  Tune in semitones with a switch for free tuning, a low-pass, a limiter, and
+  MIDI notes from the screen keys. None of that has been in a DAW yet. See
+  the [change log](CHANGELOG.md).
 * The [build report](docs/BUILD_REPORT_0.1.0.md) describes 0.1.0: what was
   verified then and what was not.
+
+The picture above shows 0.1.0; 0.2.0 has an eighth knob (FILTER) and a small
+FREE switch beside TUNE.
 
 ## Sound
 
@@ -47,29 +55,49 @@ reverb or dry/wet control. Add one in the DAW if wanted.
 
 | Control | Range | Default | Notes |
 | --- | --- | --- | --- |
-| Tune | −24 to +24 semitones, continuous | 0 | Sounding notes follow |
+| Tune | −24 to +24 semitones | 0 | In whole semitones; continuous with FREE on. Sounding notes follow |
+| FREE (switch beside Tune) | off, on | off | Free tuning: Tune no longer snaps to semitones |
 | Structure | 0 to 1 | 0.5 | Meaning depends on the model; chord in Western Chords |
 | Brightness | 0 to 1 | 0.5 | |
-| Damping | 0 to 1 | 0.5 | Decay time; 1 sustains |
+| Damping | 0 to 1 | 0.5 | More is shorter: 1 damps most, 0 sustains |
 | Position | 0 to 1 | 0.5 | Excitation position; stereo mix in Stereo Strings |
 | Excitation | 0 to 1 | 0.8 | Multiplied by the velocity at the strike |
+| Filter | 100 Hz to 20 kHz, then off | off | Low-pass over the whole output, 12 dB per octave |
 | Model | six models | Modal Resonator | A change fades out, switches, fades in: about 8 ms |
-| Volume | 0 to 100 % | 100 % | The firmware's master, in front of the limiter |
+| Volume | 0 to 100 % | 100 % | The firmware's master, in front of the output stages |
 
-Controls take effect within about 5 ms, the firmware's smoothing. Ctrl+click
-resets a knob; the mouse wheel moves it in small steps, Tune in semitones.
-Typed values accept one number and optionally the unit: `-7.5`, `-7.5 st`,
-`50 %`, `2,5`; the model its name or its number 1 to 6. Anything else is
-refused.
+Controls take effect within about 5 ms. Ctrl+click resets a knob; the mouse
+wheel moves it in small steps, Tune in semitones. Typed values accept one
+number and optionally the unit: `-7`, `-7.5 st` (rounded unless FREE is on),
+`50 %`, `1000 Hz` or `off` for the filter, `2,5`; the model its name or its
+number 1 to 6. Anything else is refused.
+
+**Damping** runs the other way round than in 0.1.x and on the Daisy kit, where
+the knob follows Rings and a higher value sustains. Projects saved with 0.1.x
+are converted when loaded and sound as before.
+
+**Tune** with FREE off sounds, reads and types in whole semitones, also when a
+host automates it or CC 20 moves it: the nearest semitone counts. The
+parameter itself stays continuous for the host, so existing automation keeps
+its meaning once FREE is on.
 
 ### Level
 
-Volume acts in front of the firmware's output stage: gain 0.8, linear up to
-0.6 of full scale, then a soft knee that stays below 0.8 (−1.9 dBFS). 100 % is
-the firmware's level; there is no gain above it. At 48 kHz no sample exceeds
-0.8. At other sample rates the curve between the engine's samples can run a
-little higher.
+The signal passes three stages on its way out:
 
+1. The firmware's output stage, at 48 kHz: Volume times 0.8, linear up to 0.6
+   of full scale, then a soft knee that stays below 0.8.
+2. The **filter**, at the host's sample rate: a 12 dB per octave low-pass
+   without resonance. Fully open (the default) it does nothing at all.
+3. A **limiter**, last in the chain: no sample leaves the plug-in above 0.5 of
+   full scale (−6 dBFS), at any sample rate. When a peak exceeds that, both
+   channels are turned down together at once and recover over about 0.15 s.
+   Below −6 dBFS it does nothing at all. It has no look-ahead and adds no
+   delay; a sudden loud attack is caught by an abrupt gain change, which can
+   be heard as a slight edge on very loud strikes.
+
+The ceiling is a constant (`OutputStage::kCeiling`). 100 % Volume is the
+firmware's level; there is no gain above it.
 ## MIDI
 
 | MIDI | Effect |
@@ -80,25 +108,33 @@ little higher.
 | CC 20, 21, 22, 23, 24, 25 | Tune, Structure, Brightness, Damping, Position, Excitation |
 | CC 28 | Model: the value range in six equal parts |
 | CC 33 | Volume |
+| CC 74 | Filter |
 
-These are the firmware's controller numbers. Its reverb controllers (26, 27,
-30, 31, 32) and its polyphony controller (29) are not assigned. No MPE, no
+CC 20 to 33 are the firmware's controller numbers; its reverb controllers (26,
+27, 30, 31, 32) and its polyphony controller (29) are not assigned. Two things
+differ from the firmware: CC 23 now damps more with higher values, and CC 20
+moves Tune in semitones unless FREE is on. CC 74 is new. No MPE, no
 aftertouch.
 
 VST3 hosts do not pass MIDI controllers through. The plug-in tells the host
 which controller belongs to which parameter; whether pitch wheel and CCs
-arrive is up to the host and still to be tried.
+arrive is up to the host. In Studio One the pitch wheel does.
 
 ### Screen keyboard
 
 25 keys, C4 to C6, velocity 100. A click strikes a key; dragging strikes each
-new key. **KEYS** shows and hides the keyboard. Screen keys do not go through
-the host's MIDI and are not recorded. They sound from the next audio block
-on. A key clicked while the host renders no audio is dropped after half a
-second instead of sounding later, and so is a key clicked before a state is
-loaded. If the host offers no messages between the
-two halves of a plug-in, screen keys play nothing.
+new key. **KEYS** shows and hides the keyboard.
 
+The screen keys also leave the plug-in as MIDI, on its event output "MIDI
+Out": a note-on for each strike, a note-off when the key is let go. A host can
+record them or route them to another track, for a step sequencer or a quick
+test. How to pick an instrument's MIDI output as a source differs from host
+to host, and not every host offers it.
+
+Screen keys sound from the next audio block on. A key clicked while the host
+renders no audio is dropped after half a second instead of sounding later, and
+so is a key clicked before a state is loaded. If the host offers no messages
+between the two halves of a plug-in, screen keys do nothing.
 ### Window
 
 Resizable between 50 % and 200 %, aspect ratio kept, drawn as vectors; on top
@@ -150,16 +186,23 @@ end: resonators can ring without end, and the plug-in reports an infinite
 tail.
 
 Parameter automation is applied point by point, as steps that the engine's
-5 ms smoothing rounds off; ramps between points are not interpolated.
+5 ms smoothing rounds off; ramps between points are not interpolated. The
+filter follows the same rule; its change lands at or just after the sample it
+was sent for, by at most the 0.25 ms step plus the latency.
 
 ## State
 
-The project stores the eight controls (version 1: eight normalized values).
-The pitch wheel is not stored and returns to its centre on loading. Sounding
-notes are not stored either: **loading a state silences the instrument** and
-restarts it with the loaded values, as does activating the plug-in. A damaged
-state (wrong version, cut short, values that are not numbers from 0 to 1) is
-refused whole and changes nothing.
+The project stores ten values: the seven knobs of the sound, the model, the
+filter and the FREE switch (state version 2). The pitch wheel is not stored
+and returns to its centre on loading. Sounding notes are not stored either:
+**loading a state silences the instrument** and restarts it with the loaded
+values, as does activating the plug-in. A damaged state (unknown version, cut
+short, values that are not numbers from 0 to 1) is refused whole and changes
+nothing.
+
+States of version 1, saved by 0.1.x, still load: Damping is mirrored, the
+filter is open, and FREE is on exactly if the saved Tune was not a whole
+semitone. An old project sounds as it did, except for the limiter.
 
 Every instance has its own noise source, started from the same seed at every
 activation and every loaded state. A project therefore renders the same way
@@ -169,20 +212,25 @@ every time; two instances given the same notes sound identical.
 
 * No reverb, and so no default 25 % wet signal: the plug-in sounds drier than
   the Daisy kit at its defaults.
-* With the firmware's Dry/Wet at exactly 0, the plug-in at 48 kHz delivers the
-  firmware engine's output sample for sample, given events on the same
-  12-sample steps. This is tested against a pinned copy of the firmware
-  engine, compiled by the same compiler; it says nothing about ARM builds.
+* A low-pass and a limiter follow the firmware's output stage; the firmware
+  has neither. Loud passages, above −6 dBFS, are therefore quieter than the
+  kit's.
+* Damping runs the other way round, and Tune moves in semitones unless FREE
+  is on.
+* With the firmware's Dry/Wet at exactly 0, the filter open and the level
+  below the limiter's ceiling, the plug-in at 48 kHz delivers the firmware
+  engine's output sample for sample, given the same events on the same
+  12-sample steps and the two mappings above. This is tested against a pinned
+  copy of the firmware engine, compiled by the same compiler; it says nothing
+  about ARM builds.
 * Denormal numbers count as zero while the plug-in renders: without that a
   decayed tail costs about forty times the computing time. Tails therefore end
-  in exact silence; in the test runs the difference to the firmware's float
-  mode stayed near 1e-39.
+  in exact silence.
 * No hardware keys, pots or switches. Host parameters replace them; a model
   change needs no 20 ms debounce.
 * The pitch wheel arrives as a host parameter and is mapped back to the
   firmware's 14-bit curve.
 * Each instance has its own noise generator; the firmware has one.
-
 ## Install
 
 Nothing is installed automatically. Copy the bundle `Torus Classic.vst3`
@@ -222,7 +270,7 @@ through a small header.
 | --- | --- | --- | --- |
 | 1 | [`core/`](core/) | Torus headers | Vendored Torus DSP and stmlib parts, patched for the desktop |
 | 2 | [`engine/`](engine/) | `dry_engine.h` | Dry instrument: notes, voices, parameters, output stage |
-| 3 | [`adapter/`](adapter/) | `stream_adapter.h` | Sample rate, 12-sample steps, event time, latency |
+| 3 | [`adapter/`](adapter/) | `stream_adapter.h` | Sample rate, 12-sample steps, event time, latency; the output stage with low-pass and limiter |
 | 4 | [`source/`](source/) | VST3 | Processor, controller, state, editor |
 
 Versions and origins of all parts: [`components.json`](components.json).

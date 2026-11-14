@@ -42,7 +42,8 @@ vier sind bestätigt und behoben, jeweils mit einem Test, der den Fehler in
 
 VS 2026 Release (MSVC 19.51): Build beider Plugins, Validator je 47 bestanden
 und 0 fehlgeschlagen, CTest 6 von 6. Debug, VS 2022 und AddressSanitizer
-wurden für 0.1.1 nicht erneut ausgeführt; sie laufen über den nächsten Stand.
+wurden für 0.1.1 nicht erneut ausgeführt; sie liefen danach über 0.2.0, das
+diese Korrekturen enthält (siehe [CHANGELOG](../CHANGELOG.md)).
 
 ## Nachprüfung
 

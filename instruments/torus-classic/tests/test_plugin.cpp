@@ -222,7 +222,11 @@ struct VaryingBlocks {
 // A performance in host samples at `rate`: notes on and around block and
 // quantum boundaries, chords denser than four per quantum, every parameter
 // moving, bends and model changes, note-offs in between.
-HostScore Performance(double rate, std::int64_t total, std::uint32_t seed) {
+// max_volume caps the Volume moves (the firmware comparison keeps the output
+// below the limiter's ceiling with it); with_filter adds moves of the
+// output filter, which the firmware does not have.
+HostScore Performance(double rate, std::int64_t total, std::uint32_t seed,
+                      double max_volume = 1.0, bool with_filter = true) {
     HostScore score;
     Lcg random(seed);
     const auto scaled = [rate](std::int64_t at_48k) {
@@ -250,9 +254,17 @@ HostScore Performance(double rate, std::int64_t total, std::uint32_t seed) {
             static constexpr ParamID kMoving[] = {kParamTune,     kParamStructure, kParamBrightness,
                                                   kParamDamping,  kParamPosition,  kParamExcitation,
                                                   kParamVolume};
-            score.push_back(Param(t, kMoving[random.Below(7)], random.Unit()));
+            const ParamID moved = kMoving[random.Below(7)];
+            const double value = random.Unit();
+            score.push_back(Param(t, moved, moved == kParamVolume ? value * max_volume : value));
         } else if(kind < 11) {
-            score.push_back(Param(t, kParamPitchBend, random.Unit()));
+            const std::uint32_t which = random.Below(4);
+            if(which == 0)
+                score.push_back(Param(t, kParamTuneFree, random.Below(2) ? 1.0 : 0.0));
+            else if(which == 1 && with_filter)
+                score.push_back(Param(t, kParamFilter, random.Unit()));
+            else
+                score.push_back(Param(t, kParamPitchBend, random.Unit()));
         } else if(random.Below(3) == 0) {
             score.push_back(Param(t, kParamModel, random.Unit()));
         }
@@ -262,9 +274,12 @@ HostScore Performance(double rate, std::int64_t total, std::uint32_t seed) {
 
 // --- The processor against the firmware engine, at 48 kHz --------------------
 //
-// At 48 kHz the adapter is a FIFO, so the plug-in must deliver the firmware
-// engine's dry output with every event applied on the first quantum at or
-// after its sample. The firmware engine is prepared as in the engine test
+// At 48 kHz the adapter converts nothing. With the output filter open and the
+// level below the limiter's ceiling, the output stage passes every sample as
+// it came, so the plug-in must deliver the firmware engine's dry output with
+// every event applied on the first quantum at or after its sample. The
+// plug-in's own mappings apply on the way in: Damping is mirrored, and Tune
+// is rounded to semitones unless free tuning is on. The firmware engine is prepared as in the engine test
 // (Dry/Wet set to 0, then silence until its smoothing has reached exactly 0);
 // the plug-in renders the same span of silence.
 //
@@ -300,6 +315,11 @@ std::vector<float> RenderFirmware(const HostScore& score, std::int64_t total, bo
     CHECK(firmware.Current(kWet) == 0.0f);
     std::vector<float> left, right;
     std::size_t next = 0;
+    float tune = static_cast<float>(kDefaultTune);
+    bool tune_free = false;
+    const auto set_tune = [&] {
+        firmware.Set(kFrequency, static_cast<float>(TuneSounding(tune, tune_free)));
+    };
     for(std::int64_t quantum = 0; quantum * kQ < total; ++quantum) {
         // The events of this quantum: those at samples (quantum-1)*12+1 .. quantum*12.
         for(; next < score.size() && (score[next].sample + kQ - 1) / kQ <= quantum; ++next) {
@@ -310,10 +330,19 @@ std::vector<float> RenderFirmware(const HostScore& score, std::int64_t total, bo
             } else if(ev.kind == Ev::kParam) {
                 const auto value = static_cast<float>(ev.value);
                 switch(ev.a) {
-                    case kParamTune: firmware.Set(kFrequency, value); break;
+                    case kParamTune:
+                        tune = value;
+                        set_tune();
+                        break;
+                    case kParamTuneFree:
+                        tune_free = IsOn(ev.value);
+                        set_tune();
+                        break;
                     case kParamStructure: firmware.Set(kStructure, value); break;
                     case kParamBrightness: firmware.Set(kBrightness, value); break;
-                    case kParamDamping: firmware.Set(kDamping, value); break;
+                    case kParamDamping:
+                        firmware.Set(kDamping, static_cast<float>(EngineDamping(ev.value)));
+                        break;
                     case kParamPosition: firmware.Set(kPosition, value); break;
                     case kParamExcitation: firmware.Set(kExcitation, value); break;
                     case kParamVolume: firmware.Set(kMaster, value); break;
@@ -347,9 +376,11 @@ void TestAgainstFirmware() {
 #else
         const std::int64_t total = 3 * 48000;
 #endif
-        HostScore score = Performance(48000.0, total, seed);
+        // Volume at most 50 %, so that the limiter has nothing to do.
+        HostScore score = Performance(48000.0, total, seed, 0.5, false);
         // One model each as the starting point, so all six are covered.
         score.insert(score.begin(), Param(0, kParamModel, ModelNormalized(static_cast<int>(seed) * 2 - 1)));
+        score.insert(score.begin(), Param(0, kParamVolume, 0.5));
         HostScore shifted = score; // the plug-in plays it after the warm-up
         for(Ev& ev : shifted)
             ev.sample += warm_up;
@@ -360,7 +391,7 @@ void TestAgainstFirmware() {
         host.Run(total, VaryingBlocks{});
         const auto plugin = host.Stereo();
         CHECK(Energy(plugin) > 1.0);
-        CHECK(Peak(plugin) < 0.8f);
+        CHECK(Peak(plugin) < OutputStage::kCeiling); // the limiter did not act
 
         const auto firmware = RenderFirmware(score, total, true);
         CHECK(plugin.size() == firmware.size());
@@ -407,6 +438,8 @@ void TestBlockSizes() {
                 if(reference.empty()) {
                     reference = out;
                     CHECK(Energy(reference) > 1.0);
+                    // Loud passages are in it; the limiter holds every sample.
+                    CHECK(Peak(reference) <= OutputStage::kCeiling);
                 }
                 CHECK(out == reference);
                 ++variants;
@@ -514,8 +547,11 @@ void TestSampleRates() {
             const auto at = [rate](double seconds) {
                 return static_cast<std::int64_t>(std::llround(seconds * rate));
             };
+            // Half volume keeps the level below the limiter's ceiling: its gain
+            // changes would not be the same at two sample rates.
             HostScore score = {Param(0, kParamModel, ModelNormalized(model)),
-                               Param(0, kParamDamping, 0.7), Param(0, kParamBrightness, 0.6)};
+                               Param(0, kParamDamping, 0.3), Param(0, kParamBrightness, 0.6),
+                               Param(0, kParamVolume, 0.5), Param(0, kParamTuneFree, 1.0)};
             for(int pitch : {45, 52, 57, 61})
                 score.push_back(NoteOn(at(0.02), pitch, 110));
             score.push_back(Param(at(0.3), kParamPitchBend, 0.85));
@@ -524,6 +560,7 @@ void TestSampleRates() {
             const auto latency = static_cast<std::int64_t>(host.processor->getLatencySamples());
             CHECK(latency == host.processor->Adapter().LatencySamples());
             host.Run(at(1.0) + latency, VaryingBlocks{});
+            CHECK(Peak(host.left) < OutputStage::kCeiling && Peak(host.right) < OutputStage::kCeiling);
             const auto from = static_cast<std::size_t>(at(0.1) + latency);
             const auto to = static_cast<std::size_t>(at(0.9) + latency);
             std::vector<double> amplitudes;
@@ -717,8 +754,8 @@ std::vector<char> MakeState(int32 version, const std::vector<double>& values) {
 // setActive path).
 void TestParameterState() {
     const auto is = [](const ParameterState::Values& values, double all, double bend) {
-        for(int i = 0; i < kSavedParamCount; ++i)
-            if(values[i] != all)
+        for(const int index : kSavedIndex)
+            if(values[static_cast<std::size_t>(index)] != all)
                 return false;
         return values[kParamPitchBend - kFirstParam] == bend;
     };
@@ -823,7 +860,8 @@ void TestKeyboardQueue() {
 
     // Messages that are not keyboard notes, or carry nonsense, are refused.
     CHECK(SendNote(processor, 128) != kResultOk && SendNote(processor, -1) != kResultOk);
-    CHECK(SendNote(processor, 60, 0) != kResultOk && SendNote(processor, 60, 128) != kResultOk);
+    CHECK(SendNote(processor, 60, 128) != kResultOk && SendNote(processor, 60, -1) != kResultOk);
+    CHECK(SendNote(processor, 60, 0) == kResultOk); // the release of a key: no strike
     CHECK(SendNote(processor, 60, 100, "SomethingElse") != kResultOk);
     CHECK(processor.notify(nullptr) != kResultOk);
     host.Run(480);
@@ -870,6 +908,75 @@ void TestKeyboardQueue() {
                 static_cast<long long>(Processor::kKeyboardNoteLifetime.count()));
 }
 
+// The screen keyboard's notes also leave the plug-in as MIDI, for the host to
+// record or pass on: a note-on for a strike, a note-off when the key is let go.
+void TestKeyboardMidiOut() {
+    IPtr<Processor> processor = owned(new Processor());
+    CHECK(processor->initialize(nullptr) == kResultOk);
+    CHECK(processor->getBusCount(kEvent, kOutput) == 1 && processor->getBusCount(kEvent, kInput) == 1);
+    CHECK(processor->getBusCount(kAudio, kOutput) == 1 && processor->getBusCount(kAudio, kInput) == 0);
+    ProcessSetup setup{kRealtime, kSample32, 64, 48000.0};
+    CHECK(processor->setupProcessing(setup) == kResultOk);
+    CHECK(processor->setActive(true) == kResultOk);
+    HostProcessData data;
+    CHECK(data.prepare(*processor.get(), 64, kSample32));
+    EventList out(64);
+    data.outputEvents = &out;
+    data.numSamples = 64;
+    // What one block sends: 'N' and the pitch for a note-on, 'F' for a note-off.
+    const auto block = [&] {
+        out.clear();
+        CHECK(processor->process(data) == kResultOk);
+        std::string sent;
+        for(int32 i = 0; i < out.getEventCount(); ++i) {
+            Event event{};
+            CHECK(out.getEvent(i, event) == kResultOk);
+            CHECK(event.busIndex == 0 && event.sampleOffset == 0);
+            if(event.type == Event::kNoteOnEvent) {
+                CHECK(std::fabs(event.noteOn.velocity - kKeyboardVelocity / 127.0f) < 1e-6f);
+                sent += "N" + std::to_string(event.noteOn.pitch) + " ";
+            } else {
+                CHECK(event.type == Event::kNoteOffEvent);
+                sent += "F" + std::to_string(event.noteOff.pitch) + " ";
+            }
+        }
+        return sent;
+    };
+    CHECK(block().empty());
+    CHECK(SendNote(*processor, 64) == kResultOk);
+    CHECK(block() == "N64 " && processor->Engine().TriggerCount() == 1);
+    CHECK(block().empty());
+    // Letting go ends the host's note; the sound is not touched.
+    CHECK(SendNote(*processor, 64, 0) == kResultOk);
+    CHECK(block() == "F64 " && processor->Engine().TriggerCount() == 1);
+    CHECK(SendNote(*processor, 60, 0) == kResultOk); // a release without a strike: nothing
+    CHECK(block().empty());
+    // The same key twice without a release in between: the first note is ended first.
+    CHECK(SendNote(*processor, 62) == kResultOk && SendNote(*processor, 62) == kResultOk);
+    CHECK(block() == "N62 F62 N62 ");
+    // A parameter flush leaves the keys where they are.
+    CHECK(SendNote(*processor, 65) == kResultOk);
+    data.numSamples = 0;
+    CHECK(block().empty());
+    data.numSamples = 64;
+    CHECK(block() == "N65 ");
+    // Keys still held when the plug-in is deactivated, their release lost
+    // with the queue: the host gets the note-offs at the next block.
+    CHECK(SendNote(*processor, 62, 0) == kResultOk);
+    CHECK(processor->setActive(false) == kResultOk);
+    CHECK(processor->setActive(true) == kResultOk);
+    CHECK(block() == "F62 F65 ");
+    CHECK(block().empty());
+    // A host that offers no output list: nothing breaks, the strike sounds.
+    data.outputEvents = nullptr;
+    CHECK(SendNote(*processor, 70) == kResultOk);
+    CHECK(processor->process(data) == kResultOk && processor->Engine().TriggerCount() == 1);
+    processor->setActive(false);
+    processor->terminate();
+    std::printf("screen keyboard MIDI out: note-on per strike, note-off per release, none left "
+                "hanging after deactivation\n");
+}
+
 void TestPauseAndFlush() {
     const std::int64_t total = 48000;
     const HostScore score = Performance(48000.0, total, 9);
@@ -910,7 +1017,8 @@ void TestPauseAndFlush() {
     flushed.Run(4800);
     CHECK(processor.Engine().ControlValue(Control::Tune) == 0.75f);
     CHECK(processor.Engine().ControlValue(Control::Volume) == 0.25f);
-    CHECK(processor.Engine().ControlValue(Control::Damping) == 0.99f);
+    CHECK(processor.Engine().ControlValue(Control::Damping)
+          == static_cast<float>(EngineDamping(0.99)));
     CHECK(processor.Engine().Model() == 19999 % 6);
     CHECK(processor.Adapter().PendingEvents() == 0);
     // Values outside 0..1 and not-a-number are clamped.
@@ -919,7 +1027,7 @@ void TestPauseAndFlush() {
                       Param(flushed.position, kParamStructure, -3.0),
                       Param(flushed.position, 9999, 0.5)});
     flushed.Run(4800);
-    CHECK(processor.Engine().ControlValue(Control::Damping) == 0.0f);
+    CHECK(processor.Engine().ControlValue(Control::Damping) == 1.0f); // 0, mirrored
     CHECK(processor.Engine().ControlValue(Control::Position) == 1.0f);
     CHECK(processor.Engine().ControlValue(Control::Structure) == 0.0f);
     CHECK(flushed.allocations == 0);
@@ -949,7 +1057,7 @@ void TestPauseAndFlush() {
 void TestActivationAndRateChange() {
     // What a fresh instance plays with these settings.
     const HostScore settings = {Param(0, kParamModel, ModelNormalized(4)),
-                                Param(0, kParamDamping, 0.8), Param(0, kParamTune, 0.6)};
+                                Param(0, kParamDamping, 0.2), Param(0, kParamTune, 0.6)};
     const auto notes = [](double rate, std::int64_t at) {
         HostScore score;
         for(int pitch : {50, 57, 62})
@@ -990,6 +1098,15 @@ void TestActivationAndRateChange() {
         fresh.AddScore(notes(rate, fresh.position));
         fresh.Run(static_cast<std::int64_t>(rate / 2), 256);
         CHECK(Energy(fresh.Stereo()) > 0.01);
+        {
+            const auto a = used.Stereo(), b = fresh.Stereo();
+            for(std::size_t i = 0; i < a.size() && i < b.size(); ++i)
+                if(a[i] != b[i]) {
+                    std::printf("  first difference at %zu of %zu: %.9g and %.9g (rate %g)\n", i,
+                                a.size(), a[i], b[i], rate);
+                    break;
+                }
+        }
         CHECK(used.Stereo() == fresh.Stereo());
         CHECK(used.processor->getLatencySamples() == fresh.processor->getLatencySamples());
     }
@@ -1000,12 +1117,15 @@ void TestActivationAndRateChange() {
 void TestState() {
     PluginHost host({48000.0, 2048, false, kRealtime});
     Processor& processor = *host.processor;
-    const std::vector<double> defaults(kDefaults, kDefaults + kSavedParamCount);
+    std::vector<double> defaults;
+    for(const int index : kSavedIndex)
+        defaults.push_back(kDefaults[index]);
     CHECK(SavedState(processor) == MakeState(kStateVersion, defaults));
-    CHECK(SavedState(processor).size() == 4 + 8 * 8);
+    CHECK(SavedState(processor).size() == 4 + 8 * kSavedParamCount && kSavedParamCount == 10);
 
     // A valid state is taken over; the model lands on its step.
-    const std::vector<double> values = {0.1, 0.2, 0.3, 0.4, 0.55, 0.6, 0.5, 0.7};
+    // (Tune .. Volume, then the filter and the free-tuning switch.)
+    const std::vector<double> values = {0.1, 0.2, 0.3, 0.4, 0.55, 0.6, 0.5, 0.7, 0.9, 1.0};
     CHECK(LoadState(processor, MakeState(kStateVersion, values)) == kResultOk);
     std::vector<double> stored = values;
     stored[6] = ModelNormalized(ModelIndex(0.5)); // 0.5 falls on model 3 = 0.6
@@ -1014,13 +1134,44 @@ void TestState() {
     CHECK(processor.Engine().Model() == 3);
     CHECK(processor.Engine().ControlValue(Control::Tune) == 0.1f);
     CHECK(processor.Engine().ControlValue(Control::Volume) == 0.7f);
+    CHECK(processor.Engine().ControlValue(Control::Damping) == static_cast<float>(EngineDamping(0.4)));
+    CHECK(processor.Adapter().Output().FilterValue() == 0.9f);
+
+    // A state of version 1, as 0.1.x saved it, still loads and sounds as it
+    // did: Damping had the opposite sense then and Tune was always free.
+    {
+        PluginHost old({48000.0, 2048, false, kRealtime});
+        const std::vector<double> v1 = {0.1, 0.2, 0.3, 0.4, 0.55, 0.6, 0.5, 0.7};
+        CHECK(LoadState(*old.processor, MakeState(1, v1)) == kResultOk);
+        const std::vector<double> as_v2 = {0.1, 0.2, 0.3, 1.0 - 0.4, 0.55, 0.6,
+                                           ModelNormalized(3), 0.7, kDefaultFilter, 1.0};
+        CHECK(SavedState(*old.processor) == MakeState(kStateVersion, as_v2));
+        old.Run(480);
+        CHECK(old.processor->Engine().ControlValue(Control::Damping)
+              == static_cast<float>(EngineDamping(1.0 - 0.4))); // the engine gets 0.4, as before
+        CHECK(old.processor->Engine().ControlValue(Control::Tune) == 0.1f); // not rounded
+        // A Tune on a whole semitone leaves the switch off.
+        std::vector<double> on_semitone = v1;
+        on_semitone[0] = 0.75; // +12
+        CHECK(LoadState(*old.processor, MakeState(1, on_semitone)) == kResultOk);
+        CHECK(SavedState(*old.processor)[4 + 8 * 9] == 0 && SavedState(*old.processor).size() == 84);
+        double free_value = 1.0;
+        const auto saved = SavedState(*old.processor);
+        std::memcpy(&free_value, saved.data() + 4 + 8 * 9, sizeof(free_value));
+        CHECK(free_value == 0.0);
+        // Cut short or with a bad value, version 1 is refused like any other.
+        CHECK(LoadState(*old.processor, MakeState(1, {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.5})) != kResultOk);
+        CHECK(LoadState(*old.processor, MakeState(1, {0.1, 0.2, 0.3, 1.4, 0.5, 0.6, 0.5, 0.7})) != kResultOk);
+        CHECK(SavedState(*old.processor) == saved);
+    }
 
     // Damaged states change nothing: wrong version, cut short at every
     // length, values that are not finite or outside 0..1.
     const auto good = SavedState(processor);
     const double nan = std::numeric_limits<double>::quiet_NaN();
     const double inf = std::numeric_limits<double>::infinity();
-    std::vector<std::vector<char>> damaged = {MakeState(0, values), MakeState(2, values),
+    std::vector<std::vector<char>> damaged = {MakeState(0, values),
+                                              MakeState(kStateVersion + 1, values),
                                               MakeState(-1, values), {}};
     for(std::size_t length = 1; length < good.size(); ++length)
         damaged.emplace_back(good.begin(), good.begin() + static_cast<std::ptrdiff_t>(length));
@@ -1057,7 +1208,7 @@ void TestState() {
     host.Process(64);
     CHECK(processor.Adapter().PendingEvents() == 1);
     CHECK(SendNote(processor, 79) == kResultOk); // a screen key struck before the load
-    const std::vector<double> next = {0.5, 0.9, 0.1, 0.6, 0.2, 1.0, 1.0, 0.5};
+    const std::vector<double> next = {0.5, 0.9, 0.1, 0.6, 0.2, 1.0, 1.0, 0.5, 1.0, 0.0};
     CHECK(LoadState(processor, MakeState(kStateVersion, next)) == kResultOk);
     CHECK(SavedState(processor) == MakeState(kStateVersion, next)); // at once
     CHECK(SendNote(processor, 72) == kResultOk); // and one struck after it
@@ -1082,11 +1233,13 @@ void TestState() {
         PluginHost inactive({48000.0, 2048, false, kRealtime});
         inactive.AddScore({Param(0, kParamDamping, 0.7), Param(0, kParamPitchBend, 0.9)});
         inactive.Run(4800); // long enough for the 5 ms smoothing to land on the value
-        CHECK(inactive.processor->Engine().ControlValue(Control::Damping) == 0.7f);
+        CHECK(inactive.processor->Engine().ControlValue(Control::Damping)
+              == static_cast<float>(EngineDamping(0.7)));
         CHECK(inactive.processor->setActive(false) == kResultOk);
         CHECK(LoadState(*inactive.processor, MakeState(kStateVersion, next)) == kResultOk);
         CHECK(inactive.processor->setActive(true) == kResultOk);
-        CHECK(inactive.processor->Engine().ControlValue(Control::Damping) == 0.6f);
+        CHECK(inactive.processor->Engine().ControlValue(Control::Damping)
+              == static_cast<float>(EngineDamping(0.6)));
         CHECK(inactive.processor->Engine().PitchOffset() == 0.0f);
         CHECK(SavedState(*inactive.processor) == MakeState(kStateVersion, next));
     }
@@ -1106,27 +1259,38 @@ void TestState() {
                 std::vector<double> state = flip ? high : low;
                 flip = !flip;
                 CHECK(LoadState(*live.processor, MakeState(kStateVersion, state)) == kResultOk);
-                state[kParamModel - kFirstParam] = ModelNormalized(ModelIndex(state[6]));
+                state[6] = ModelNormalized(ModelIndex(state[6])); // the two stepped ones
+                state[9] = IsOn(state[9]) ? 1.0 : 0.0;
                 CHECK(SavedState(*live.processor) == MakeState(kStateVersion, state));
                 loads.fetch_add(1);
             }
         });
         const DryEngine& engine = live.processor->Engine();
-        const auto all = [&](float value, float excitation, float volume) {
-            return engine.ControlValue(Control::Tune) == value
-                   && engine.ControlValue(Control::Structure) == value
-                   && engine.ControlValue(Control::Brightness) == value
-                   && engine.ControlValue(Control::Damping) == value
-                   && engine.ControlValue(Control::Position) == value
-                   && engine.ControlValue(Control::Excitation) == excitation
-                   && engine.ControlValue(Control::Volume) == volume;
+        // Tune, Structure, Brightness, Damping, Position, Excitation, Volume as
+        // the engine holds them for a state with every value alike.
+        using Seven = std::array<float, 7>;
+        const auto holds = [&](const Seven& v) {
+            return engine.ControlValue(Control::Tune) == v[0]
+                   && engine.ControlValue(Control::Structure) == v[1]
+                   && engine.ControlValue(Control::Brightness) == v[2]
+                   && engine.ControlValue(Control::Damping) == v[3]
+                   && engine.ControlValue(Control::Position) == v[4]
+                   && engine.ControlValue(Control::Excitation) == v[5]
+                   && engine.ControlValue(Control::Volume) == v[6];
         };
+        const auto engine_values = [](double value, bool free) {
+            const auto v = static_cast<float>(value);
+            return Seven{static_cast<float>(TuneSounding(v, free)), v, v,
+                         static_cast<float>(EngineDamping(value)), v, v, v};
+        };
+        const Seven low_set = engine_values(0.1, false), high_set = engine_values(0.9, true);
+        const Seven default_set = {0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.8f, 1.0f};
         int low_blocks = 0, high_blocks = 0, switches = 0, last = -1;
         for(int block = 0; block < 2000000 && (switches < 2000 || block < 100000); ++block) {
             live.Process(1);
-            const bool is_low = all(0.1f, 0.1f, 0.1f), is_high = all(0.9f, 0.9f, 0.9f);
+            const bool is_low = holds(low_set), is_high = holds(high_set);
             // Before the first state arrives: the defaults, also complete.
-            CHECK(is_low || is_high || all(0.5f, 0.8f, 1.0f));
+            CHECK(is_low || is_high || holds(default_set));
             CHECK(!is_low || engine.Model() == 0);
             CHECK(!is_high || engine.Model() == 5);
             low_blocks += is_low;
@@ -1174,7 +1338,7 @@ void TestState() {
         stop.store(true);
         loader.join();
         CHECK(loads.load() > 0 && live.allocations == 0);
-        const std::vector<double> final_state = {0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.2, 0.9};
+        const std::vector<double> final_state = {0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.2, 0.9, 1.0, 1.0};
         CHECK(LoadState(*live.processor, MakeState(kStateVersion, final_state)) == kResultOk);
         live.Process(64);
         CHECK(live.processor->Engine().ControlValue(Control::Structure) == 0.4f);
@@ -1182,7 +1346,7 @@ void TestState() {
         std::printf("  %d states loaded from a second thread during %lld samples of audio\n",
                     loads.load(), static_cast<long long>(live.position));
     }
-    std::printf("state: version and eight values; damaged states refused whole; loading "
+    std::printf("state: version and ten values, version 1 converted; damaged states refused whole; loading "
                 "restarts the sound with the new values and a centred pitch wheel\n");
 }
 
@@ -1215,7 +1379,8 @@ void TestController() {
                     {102, "Brightness", 0, 0.5}, {103, "Damping", 0, 0.5},
                     {104, "Position", 0, 0.5},   {105, "Excitation", 0, 0.8},
                     {106, "Model", 5, 0.0},      {107, "Volume", 0, 1.0},
-                    {108, "Pitch Bend", 0, 0.5}};
+                    {108, "Pitch Bend", 0, 0.5}, {109, "Filter", 0, 1.0},
+                    {110, "Tune Free", 1, 0.0}};
     for(int i = 0; i < kParamCount; ++i) {
         ParameterInfo info{};
         CHECK(controller->getParameterInfo(i, info) == kResultOk);
@@ -1223,11 +1388,50 @@ void TestController() {
         CHECK(StringConvert::convert(info.title) == expected[i].title);
         CHECK(info.defaultNormalizedValue == expected[i].default_value);
         CHECK(info.flags & ParameterInfo::kCanAutomate);
-        CHECK(((info.flags & ParameterInfo::kIsList) != 0) == (info.id == kParamModel));
+        CHECK(((info.flags & ParameterInfo::kIsList) != 0)
+              == (info.id == kParamModel || info.id == kParamTuneFree));
         CHECK(controller->getParamNormalized(info.id) == expected[i].default_value);
     }
 
-    // Tune is continuous, in semitones.
+    // Tune in whole semitones, the default: shown, typed and sounding so.
+    CHECK(Text(*controller, kParamTune, 0.5) == "0" && Text(*controller, kParamTune, 0.0) == "-24");
+    CHECK(Text(*controller, kParamTune, 0.5 + 0.37 / 48.0) == "0");
+    CHECK(Text(*controller, kParamTune, 0.5 + 6.6 / 48.0) == "7");
+    {
+        ParamValue snapped = 0.0;
+        CHECK(Typed(*controller, kParamTune, "7.4 st", snapped)
+              && std::fabs(TuneSemitones(snapped) - 7.0) < 1e-9);
+        CHECK(Typed(*controller, kParamTune, "-99", snapped) && snapped == 0.0);
+    }
+    CHECK(TuneSounding(0.5 + 0.37 / 48.0, false) == 0.5 && TuneSounding(0.0, false) == 0.0);
+    CHECK(TuneSounding(0.5 + 0.37 / 48.0, true) == 0.5 + 0.37 / 48.0);
+    for(int semitones = -24; semitones <= 24; ++semitones) // every semitone is a fixed point
+        CHECK(std::fabs(TuneSemitones(TuneSounding(TuneNormalized(semitones), false)) - semitones)
+              < 1e-9);
+    CHECK(Text(*controller, kParamTuneFree, 0.0) == "Off" && Text(*controller, kParamTuneFree, 1.0) == "On");
+    CHECK(Text(*controller, kParamTuneFree, 0.49) == "Off" && Text(*controller, kParamTuneFree, 0.5) == "On");
+    {
+        ParamValue on = 0.5;
+        CHECK(Typed(*controller, kParamTuneFree, " ON ", on) && on == 1.0);
+        CHECK(Typed(*controller, kParamTuneFree, "off", on) && on == 0.0);
+        CHECK(Typed(*controller, kParamTuneFree, "1", on) && on == 1.0);
+    }
+    // Damping: a higher value damps more; the engine gets the mirror image.
+    CHECK(EngineDamping(0.0) == 1.0 && EngineDamping(1.0) == 0.0 && EngineDamping(0.5) == 0.5);
+    CHECK(EngineDamping(std::nan("")) == 1.0);
+    // The filter: its cutoff in Hz, "off" when fully open.
+    CHECK(Text(*controller, kParamFilter, 1.0) == "off" && Text(*controller, kParamFilter, 0.0) == "100");
+    CHECK(Text(*controller, kParamFilter, kFilterTop) == "20000");
+    {
+        ParamValue filter = 0.0;
+        CHECK(Typed(*controller, kParamFilter, "1000 Hz", filter)
+              && std::fabs(FilterHz(filter) - 1000.0) < 1e-6);
+        CHECK(Typed(*controller, kParamFilter, "OFF", filter) && filter == 1.0);
+        CHECK(Typed(*controller, kParamFilter, "5", filter) && filter == 0.0); // clamped
+    }
+
+    // With free tuning on, Tune is continuous.
+    CHECK(controller->setParamNormalized(kParamTuneFree, 1.0) == kResultOk);
     CHECK(Text(*controller, kParamTune, 0.5) == "0.00" && Text(*controller, kParamTune, 0.0) == "-24.00");
     CHECK(Text(*controller, kParamTune, 1.0) == "24.00");
     CHECK(Text(*controller, kParamTune, 0.5 + 0.37 / 48.0) == "0.37");
@@ -1329,7 +1533,8 @@ void TestController() {
     const std::pair<int, ParamID> map[] = {
         {kPitchBend, kParamPitchBend}, {20, kParamTune},     {21, kParamStructure},
         {22, kParamBrightness},        {23, kParamDamping},  {24, kParamPosition},
-        {25, kParamExcitation},        {28, kParamModel},    {33, kParamVolume}};
+        {25, kParamExcitation},        {28, kParamModel},    {33, kParamVolume},
+        {74, kParamFilter}};
     for(int16 channel = 0; channel < 16; ++channel) {
         for(const auto& [number, param] : map) {
             ParamID id = 0;
@@ -1345,7 +1550,7 @@ void TestController() {
                                                            static_cast<CtrlNumber>(number), id)
                       == kResultTrue;
         }
-        CHECK(mapped == 9); // none of the firmware's reverb or polyphony controllers
+        CHECK(mapped == 10); // none of the firmware's reverb or polyphony controllers
         ParamID id = 0;
         for(const int unused : {26, 27, 29, 30, 31, 32, 1, 7, 64})
             CHECK(mapping->getMidiControllerAssignment(0, channel,
@@ -1362,7 +1567,7 @@ void TestController() {
     // returns to its centre on both sides.
     {
         PluginHost host({48000.0, 2048, false, kRealtime});
-        const std::vector<double> values = {0.1, 0.2, 0.3, 0.4, 0.55, 0.6, 0.8, 0.7};
+        const std::vector<double> values = {0.1, 0.2, 0.3, 0.4, 0.55, 0.6, 0.8, 0.7, 0.35, 1.0};
         CHECK(LoadState(*host.processor, MakeState(kStateVersion, values)) == kResultOk);
         CHECK(controller->setParamNormalized(kParamPitchBend, 0.9) == kResultOk);
         const auto load = [&](const std::vector<char>& bytes) {
@@ -1378,8 +1583,9 @@ void TestController() {
         const auto saved = SavedState(*host.processor);
         CHECK(load(saved) == kResultOk);
         for(int i = 0; i < kSavedParamCount; ++i)
-            CHECK(controller->getParamNormalized(kFirstParam + static_cast<ParamID>(i))
-                  == values[i]);
+            CHECK(controller->getParamNormalized(
+                      kFirstParam + static_cast<ParamID>(kSavedIndex[static_cast<std::size_t>(i)]))
+                  == values[static_cast<std::size_t>(i)]);
         CHECK(controller->getParamNormalized(kParamPitchBend) == kDefaultPitchBend);
         // Damaged: nothing changes, the pitch wheel included.
         CHECK(controller->setParamNormalized(kParamPitchBend, 0.9) == kResultOk);
@@ -1390,8 +1596,9 @@ void TestController() {
              std::vector<char>(saved.begin(), saved.end() - 1), std::vector<char>{}}) {
             CHECK(load(bytes) != kResultOk);
             for(int i = 0; i < kSavedParamCount; ++i)
-                CHECK(controller->getParamNormalized(kFirstParam + static_cast<ParamID>(i))
-                      == values[i]);
+                CHECK(controller->getParamNormalized(
+                          kFirstParam + static_cast<ParamID>(kSavedIndex[static_cast<std::size_t>(i)]))
+                      == values[static_cast<std::size_t>(i)]);
             CHECK(controller->getParamNormalized(kParamPitchBend) == 0.9);
         }
         CHECK(controller->setComponentState(nullptr) != kResultOk);
@@ -1443,7 +1650,7 @@ void TestController() {
     CHECK(!controller->PlayNote(60));
     CHECK(!controller->PlayNote(-1) && !controller->PlayNote(128));
     controller->terminate();
-    std::printf("controller: nine parameters, value texts, strict typed values (\"+-5\" "
+    std::printf("controller: eleven parameters, value texts, strict typed values (\"+-5\" "
                 "refused), model step rule shared with the engine, MIDI map, states\n");
 }
 
@@ -1848,6 +2055,7 @@ void TestEditorInWindow() {
         data.numSamples = 64;
         CHECK(processor->process(data) == kResultOk);
         CHECK(processor->Engine().TriggerCount() == 1); // the one struck while active
+        CHECK(controller->ReleaseNote(64)); // letting go travels the same way
         CHECK(processor->setActive(false) == kResultOk);
     }
 
@@ -1946,6 +2154,7 @@ int main() {
     TestInstances();
     TestParameterState();
     TestKeyboardQueue();
+    TestKeyboardMidiOut();
     TestPauseAndFlush();
     TestActivationAndRateChange();
     TestState();

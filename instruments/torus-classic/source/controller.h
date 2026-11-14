@@ -38,8 +38,10 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
 
     // Plays a note through the processor, as the screen keyboard does. False
     // if the host offers no messages or the processor refused the note; then
-    // nothing sounds.
+    // nothing sounds. ReleaseNote tells the processor the key was let go: the
+    // sound does not care, the note the host records does.
     bool PlayNote(int note);
+    bool ReleaseNote(int note);
 
     // IMidiMapping
     Steinberg::tresult PLUGIN_API getMidiControllerAssignment(
@@ -63,7 +65,10 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
         Steinberg::Vst::EditorView* view;
         Editor* editor;
     };
+    bool SendKey(int note, int velocity);
+
     std::vector<OpenEditor> editors_;
+    bool tune_free_ = false; // mirrors kParamTuneFree for Tune's text
     EditorSettings editor_; // window size and keyboard, saved with the project
 };
 

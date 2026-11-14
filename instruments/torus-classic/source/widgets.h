@@ -10,11 +10,16 @@
 namespace torus_classic {
 
 // The on-screen keyboard. A click strikes a key; dragging across the keys
-// strikes each new one, like a glissando. There is no note-off: a struck
-// resonator rings until it has decayed, as with MIDI.
+// strikes each new one, like a glissando. Letting go of a key is reported
+// too: the sound does not stop (a struck resonator rings until it has
+// decayed), but the note the host records needs its end.
 class KeyboardView : public VSTGUI::CView {
   public:
-    KeyboardView(const VSTGUI::CRect& size, std::function<void(int note)> strike);
+    KeyboardView(const VSTGUI::CRect& size, std::function<void(int note)> strike,
+                 std::function<void(int note)> release);
+
+    // Lets go of the key that is held, if any: before the view goes away.
+    void ReleaseHeld();
 
     void draw(VSTGUI::CDrawContext* context) override;
     void onMouseDownEvent(VSTGUI::MouseDownEvent& event) override;
@@ -27,7 +32,7 @@ class KeyboardView : public VSTGUI::CView {
     void Press(int note);
     void Release();
 
-    std::function<void(int)> strike_;
+    std::function<void(int)> strike_, release_;
     VSTGUI::SharedPointer<VSTGUI::CFontDesc> label_font_;
     bool dragging_ = false;
     int pressed_ = -1; // the key under the held mouse button, -1 for none

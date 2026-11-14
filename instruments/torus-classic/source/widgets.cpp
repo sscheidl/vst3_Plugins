@@ -50,8 +50,16 @@ void StrokeRoundRect(CDrawContext* context, CRect rect, CCoord radius, CColor co
 
 } // namespace
 
-KeyboardView::KeyboardView(const CRect& size, std::function<void(int)> strike)
-: CView(size), strike_(std::move(strike)), label_font_(makeOwned<CFontDesc>("Segoe UI", 9)) {}
+KeyboardView::KeyboardView(const CRect& size, std::function<void(int)> strike,
+                           std::function<void(int)> release)
+: CView(size),
+  strike_(std::move(strike)),
+  release_(std::move(release)),
+  label_font_(makeOwned<CFontDesc>("Segoe UI", 9)) {}
+
+void KeyboardView::ReleaseHeld() {
+    Release();
+}
 
 void KeyboardView::draw(CDrawContext* context) {
     const CRect area = getViewSize();
@@ -94,6 +102,8 @@ int KeyboardView::NoteAtPoint(const CPoint& where) const {
 void KeyboardView::Press(int note) {
     if(note == pressed_)
         return;
+    if(pressed_ >= 0 && release_)
+        release_(pressed_); // gliding on: the key before is let go
     pressed_ = note;
     invalid();
     if(note >= 0 && strike_)
@@ -103,6 +113,8 @@ void KeyboardView::Press(int note) {
 void KeyboardView::Release() {
     dragging_ = false;
     if(pressed_ >= 0) {
+        if(release_)
+            release_(pressed_);
         pressed_ = -1;
         invalid();
     }
@@ -111,8 +123,8 @@ void KeyboardView::Release() {
 void KeyboardView::onMouseDownEvent(MouseDownEvent& event) {
     if(!event.buttonState.isLeft())
         return;
+    Release(); // a key still held, should a mouse-up have been lost
     dragging_ = true;
-    pressed_ = -1; // a click on the key just played strikes it again
     Press(NoteAtPoint(event.mousePosition));
     event.consumed = true;
 }

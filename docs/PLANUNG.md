@@ -61,9 +61,12 @@ Bei der Umsetzung selbst festgelegt, weil die Vorgaben es offen ließen:
 ### Torus Classic
 
 Zweiter Port, Auftrag vom 2026-11-14
-([Buildauftrag](CLAUDE_BUILDAUFTRAG_TORUS_CLASSIC_0.1.0.md)). Version 0.1.0 ist
-gebaut und automatisch geprüft; in einer DAW geladen oder angehört wurde sie
-noch nicht. Einzelheiten und Messwerte stehen im
+([Buildauftrag](CLAUDE_BUILDAUFTRAG_TORUS_CLASSIC_0.1.0.md)). Version 0.1.0 lädt
+und spielt in Studio One (erster DAW-Test des Nutzers am 2026-11-14). Codex
+fand in 0.1.0 vier Fehler; sie sind seit 0.1.1 behoben. 0.2.0 bringt die
+Ergänzungen aus dem DAW-Test und ist gebaut und automatisch geprüft, in
+einer DAW aber noch nicht ausprobiert. Was sich wann geändert hat, steht im
+[Änderungsprotokoll](../instruments/torus-classic/CHANGELOG.md). Einzelheiten und Messwerte stehen im
 [Build-Bericht](../instruments/torus-classic/docs/BUILD_REPORT_0.1.0.md), die
 offene Abnahme in der
 [DAW-Prüfliste](../instruments/torus-classic/docs/DAW_TEST_0.1.0.md).
@@ -86,6 +89,18 @@ Auftrag es offen ließ:
 | Zustandsprüfung | Werte außerhalb 0 bis 1 werden abgelehnt, nicht geklemmt | Ein solcher Zustand ist beschädigt; ein Teilzustand soll nie entstehen |
 | Überlast der Ereignis-Warteschlangen (seit 0.1.1, Codex-Befund TC-R03) | 1024 Noten und je Parameter 256 Automationspunkte warten höchstens. Weitere Noten werden verworfen. Ist die Warteschlange eines Parameters voll, weicht der jüngste wartende Punkt dem neuen | Nichts darf vor seinem Zeitpunkt wirken. So geht höchstens eine Zwischenstufe verloren; der letzte Wert kommt an, zu seiner Zeit |
 | Gemeinsamer Code | Nichts nach `common/` verschoben; Fenster- und Textcode sind Kopien aus Toy Piano Classic 0.3.2 | Toy Piano wurde parallel geändert. Kandidaten für später: Fenstergröße und -skalierung, strenge Texteingabe, Host-Doppel der Tests |
+
+Vom Nutzer nach dem ersten DAW-Test verlangt und in 0.2.0 umgesetzt; die
+Einzelheiten darin selbst festgelegt:
+
+| Thema | Festlegung | Begründung |
+| --- | --- | --- |
+| Damping | Höherer Wert dämpft stärker; die Engine bekommt das Spiegelbild. Zustände aus 0.1.x werden beim Laden umgerechnet, Automationsdaten in Projekten nicht | Vorgabe des Nutzers. Der Parameter behält seine ID; ein neuer Parameter hätte alte Projekte ohne Wert gelassen |
+| Tune | Klingt in Halbtonschritten; Schalter FREE (Parameter 110) gibt stufenloses Stimmen frei. Der Parameter 100 bleibt für den Host stufenlos, gerundet wird an der Engine | Vorgabe des Nutzers. So bleibt vorhandene Automation gültig, und die Stufenzahl eines Parameters muss sich nicht zur Laufzeit ändern |
+| Filter | Parameter 109, CC 74: Tiefpass 12 dB/Oktave ohne Resonanz, 100 Hz bis 20 kHz; ganz offen wirkungslos (exakt) | „Einfaches LP-Filtermodell" laut Vorgabe. Offen muss das Signal unverändert bleiben, sonst gälte der Referenzvergleich nie |
+| Limiter | Am Ende der Kette, nach Filter und Sampleratenwandlung; Decke −6 dBFS, beide Kanäle gemeinsam, sofortiger Zugriff, Erholung 0,15 s, kein Look-ahead | Vorgabe: einfacher Limiter gegen Übersteuerung. Die Decke ist eine Konstante im Quelltext (`OutputStage::kCeiling`) und bei Bedarf in einer Zeile zu ändern. Ohne Look-ahead keine Latenz; dafür kann ein sehr lauter Anschlag eine hörbare Kante bekommen |
+| MIDI aus der Bildschirm-Klaviatur | Event-Ausgang „MIDI Out"; Note-on beim Anschlag, Note-off beim Loslassen | Vorgabe des Nutzers. Ohne Note-off blieben aufgenommene Noten hängen; die Engine selbst kennt weiterhin kein Note-off |
+| Tests | Nur automatische Prüfungen des Verhaltens; keine Fenster- oder DAW-Tests der Ergänzungen | Der Nutzer prüft Optik, GUI und DAW selbst |
 
 ## Stand des Fahrplans
 

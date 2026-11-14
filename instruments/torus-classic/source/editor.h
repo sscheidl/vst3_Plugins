@@ -111,12 +111,14 @@ struct EditorCallbacks {
     // The user has finished changing the settings: time to tell the host the
     // project needs saving. Called once per change, not per step of a drag.
     std::function<void()> settled;
-    // A key on the screen keyboard was struck.
+    // A key on the screen keyboard was struck, or let go.
     std::function<void(int note)> strike;
+    std::function<void(int note)> release;
 };
 
-// The plug-in window: a model selector, seven knobs and an on-screen keyboard
-// that a button shows and hides. The layout is fixed and drawn as vectors, so
+// The plug-in window: a model selector, eight knobs, a small switch for free
+// tuning beside the Tune knob, and an on-screen keyboard that a button shows
+// and hides. The layout is fixed and drawn as vectors, so
 // the window scales as a whole: by the zoom the user picks when resizing it,
 // times the host's display scale factor. The aspect ratio stays the same.
 //
@@ -126,7 +128,7 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
                public VSTGUI::IControlListener,
                public Steinberg::IPlugViewContentScaleSupport {
   public:
-    static constexpr std::size_t kKnobCount = 7;
+    static constexpr std::size_t kKnobCount = 8;
 
     Editor(Steinberg::Vst::EditController* controller, const EditorSettings& settings,
            EditorCallbacks callbacks);
@@ -139,6 +141,8 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     const EditorSettings& Settings() const { return settings_; }
     // Selects a model, as a click on the selector does: an edit the host records.
     void ChooseModel(int model);
+    // Switches free tuning, as a click on FREE does: an edit the host records.
+    void SetTuneFree(bool free);
     // What the window currently shows; -1 while it is closed. For tests.
     int ShownModel() const;
     float ShownKnobValue(Steinberg::Vst::ParamID id) const;
@@ -193,6 +197,7 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     std::array<Knob, kKnobCount> knobs_{};
     KeyboardView* keyboard_view_ = nullptr; // owned by the frame, like the next two
     ToggleButton* keyboard_button_ = nullptr;
+    ToggleButton* tune_free_button_ = nullptr;
     ModelSelector* model_selector_ = nullptr;
     double scale_ = 1.0; // the host's display scale factor
     EditorSettings settings_;

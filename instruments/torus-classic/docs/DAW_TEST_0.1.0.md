@@ -28,6 +28,18 @@ Hosts: **Studio One 7**, **Tracktion Waveform 14**, **Ableton Live 12 Lite**.
 Note per item and host: ok, or what happened. A crash or a hang ends the test
 for that host; note the last step.
 
+## New in 0.2.0, to try
+
+| # | Step | Expected | S1 | Waveform | Live |
+| --- | --- | --- | --- | --- | --- |
+| 8.1 | Turn Damping up | The sound gets shorter; fully down it sustains | | | |
+| 8.2 | Turn Tune with FREE off, then with FREE on | Whole semitones with a whole-number display; continuous with decimals | | | |
+| 8.3 | Close the FILTER knob while notes ring, then open it fully | The sound gets darker; fully open reads "off" and sounds as without filter | | | |
+| 8.4 | Play the loudest settings you found (hard chords, FM, high Brightness) | The host's meter never passes −6 dBFS; no clipping. Note whether the limiter is audible | | | |
+| 8.5 | Route the plug-in's "MIDI Out" to another track or record it; click screen keys | Notes arrive with the length the key was held | | | |
+| 8.6 | Open a project saved with 0.1.0 | Sounds as before (apart from the limiter); Damping knob shows the mirrored value | | | |
+| 8.7 | Record automation by moving a knob (2.4 again) | One clean automation pass; 0.1.0 reported every knob edit twice | | | |
+
 ## Before starting
 
 1. The folder `Torus Classic.vst3` from `out/torus-classic-0.1.0/` belongs in

@@ -61,8 +61,11 @@ const auto kNothing = [](std::int64_t, int) {};
 
 // --- Stand-in engines --------------------------------------------------------
 
-// Left channel: the index of each internal sample; right: its negative.
-// Remembers in which quantum every event arrived.
+// Left channel: the index of each internal sample, scaled by 2^-25 so that it
+// stays an exact float far below the output limiter's ceiling; right: its
+// negative. Remembers in which quantum every event arrived.
+constexpr float kCounterScale = 1.0f / 33554432.0f; // 2^-25
+
 class CounterEngine final : public QuantumEngine {
   public:
     struct Logged {
@@ -76,8 +79,8 @@ class CounterEngine final : public QuantumEngine {
     }
     void Render(float* left, float* right) override {
         for(int i = 0; i < kQ; ++i, ++index) {
-            left[i] = static_cast<float>(index);
-            right[i] = -static_cast<float>(index);
+            left[i] = static_cast<float>(index) * kCounterScale;
+            right[i] = -static_cast<float>(index) * kCounterScale;
         }
     }
     std::int64_t index = 0;
@@ -86,10 +89,16 @@ class CounterEngine final : public QuantumEngine {
 };
 
 // A sine on the left, a cosine on the right, at a fixed frequency of the
-// internal clock. A note event adds one unit impulse to the next sample.
+// internal clock, at kToneLevel: below the output limiter's ceiling, so the
+// measurements see the rate conversion alone. A note event adds one impulse
+// of kImpulse to the next sample.
+constexpr double kToneLevel = 0.4;
+constexpr float kImpulse = 0.25f;
+
 class ToneEngine final : public QuantumEngine {
   public:
-    explicit ToneEngine(double hz, double amplitude = 1.0) : hz_(hz), amplitude_(amplitude) {}
+    explicit ToneEngine(double hz, double amplitude = kToneLevel)
+    : hz_(hz), amplitude_(amplitude) {}
     void HandleEvent(const EngineEvent& event) override {
         if(event.type == EngineEvent::kNoteOn)
             impulse_ = true;
@@ -102,7 +111,7 @@ class ToneEngine final : public QuantumEngine {
             left[i] = static_cast<float>(amplitude_ * std::sin(phase));
             right[i] = static_cast<float>(amplitude_ * std::cos(phase));
             if(impulse_) {
-                left[i] += 1.0f;
+                left[i] += kImpulse;
                 impulse_ = false;
             }
         }
@@ -131,7 +140,8 @@ void TestPassThrough() {
             Run(adapter, total, VaryingBlocks{}, kNothing, &left, &right);
         // Every sample once, in order.
         for(std::int64_t i = 0; i < total; ++i)
-            CHECK(left[i] == static_cast<float>(i) && right[i] == -static_cast<float>(i));
+            CHECK(left[i] == static_cast<float>(i) * kCounterScale
+                  && right[i] == -static_cast<float>(i) * kCounterScale);
         CHECK(adapter.HostPosition() == static_cast<std::uint64_t>(total));
         // The engine never runs more than one quantum ahead.
         CHECK(adapter.RenderedSamples() == (total + kQ - 1) / kQ * kQ);
@@ -315,15 +325,16 @@ void TestResamplerResponse() {
             if(hz >= stopband) {
                 // Above the stopband edge nothing may come through, neither
                 // the tone (if the host rate could carry it) nor its alias.
-                const double leak = Rms(left, skip, skip + length) * std::sqrt(2.0);
+                const double leak = Rms(left, skip, skip + length) * std::sqrt(2.0) / kToneLevel;
                 worst_leak_db = std::max(worst_leak_db, Decibel(leak));
                 continue;
             }
             const ToneFit fit = FitTone(left, hz, rate, skip, skip + length);
             worst_spurious_db =
-                std::max(worst_spurious_db, Decibel(fit.residual_rms * std::sqrt(2.0)));
+                std::max(worst_spurious_db,
+                         Decibel(fit.residual_rms * std::sqrt(2.0) / kToneLevel));
             if(hz <= passband) {
-                const double gain_db = Decibel(fit.amplitude);
+                const double gain_db = Decibel(fit.amplitude / kToneLevel);
                 if(std::fabs(gain_db) > std::fabs(worst_passband_db))
                     worst_passband_db = gain_db;
                 // The tone is where the reported latency says it is: the
@@ -378,7 +389,7 @@ void TestLatency() {
         for(std::size_t i = 0; i + static_cast<std::size_t>(reach) < peak_at; ++i)
             CHECK(left[i] == 0.0f);
         if(!adapter.Resampling())
-            CHECK(latency == 0 && left[peak_at] == 1.0f);
+            CHECK(latency == 0 && left[peak_at] == kImpulse);
         std::printf(" %g Hz: %lld (%.3f ms)", rate, static_cast<long long>(latency),
                     1000.0 * static_cast<double>(latency) / rate);
     }
@@ -426,7 +437,7 @@ void TestLongRun() {
         for(std::size_t i = 0; i < tail; ++i) {
             const double n = static_cast<double>(first + static_cast<std::int64_t>(i)
                                                  - adapter.LatencySamples());
-            const double ideal = std::sin(2.0 * kPi * hz * n / rate);
+            const double ideal = kToneLevel * std::sin(2.0 * kPi * hz * n / rate);
             worst = std::max(worst, std::fabs(all[i] - ideal));
         }
         const double one_sample = 2.0 * kPi * hz / rate;
@@ -643,6 +654,143 @@ void TestNoAllocation() {
     std::printf("allocation: none in AddEvent, Process and Reset (operator new counted)\n");
 }
 
+// --- The output stage: low-pass and limiter ----------------------------------
+
+std::vector<float> ThroughStage(OutputStage& stage, const std::vector<float>& in) {
+    std::vector<float> out = in; // interleaved stereo
+    for(std::size_t i = 0; i + 1 < out.size(); i += 2)
+        stage.Process(out[i], out[i + 1]);
+    return out;
+}
+
+void TestOutputStage() {
+    Lcg random(99);
+    // Filter open, level below the ceiling: every sample passes as it came.
+    {
+        OutputStage stage;
+        stage.Prepare(48000.0);
+        std::vector<float> quiet(96000);
+        for(float& v : quiet)
+            v = (random.Unit() * 2.0f - 1.0f) * OutputStage::kCeiling;
+        CHECK(ThroughStage(stage, quiet) == quiet && stage.Gain() == 1.0f);
+    }
+    // Limiter: whatever comes in, no sample leaves above the ceiling; once the
+    // loud part is over the gain returns to exactly 1 and samples pass as
+    // they came again.
+    for(const double rate : kRates) {
+        OutputStage stage;
+        stage.Prepare(rate);
+        std::vector<float> loud;
+        for(int i = 0; i < 20000; ++i) { // bursts up to 8 times the ceiling, and a square
+            const float burst = (i / 500) % 2 ? 4.0f : 0.3f;
+            loud.push_back((random.Unit() * 2.0f - 1.0f) * burst);
+            loud.push_back(i % 64 < 32 ? 2.0f : -2.0f);
+        }
+        const auto limited = ThroughStage(stage, loud);
+        float peak = 0.0f, peak_in = 0.0f;
+        for(std::size_t i = 0; i < limited.size(); ++i) {
+            CHECK(std::isfinite(limited[i]));
+            peak = std::max(peak, std::fabs(limited[i]));
+            peak_in = std::max(peak_in, std::fabs(loud[i]));
+        }
+        CHECK(peak_in > 3.0f && peak <= OutputStage::kCeiling && peak > 0.4f);
+        CHECK(stage.Gain() < 1.0f);
+        // Four seconds of stereo: from an eighth of full gain the release
+        // (0.15 s time constant) needs about 1.4 s to be back at 1.
+        std::vector<float> quiet(static_cast<std::size_t>(8.0 * rate), 0.0f);
+        for(float& v : quiet)
+            v = (random.Unit() * 2.0f - 1.0f) * 0.2f;
+        const auto after = ThroughStage(stage, quiet);
+        CHECK(stage.Gain() == 1.0f);
+        const std::size_t tail = quiet.size() / 2; // the last two seconds
+        CHECK(std::equal(after.begin() + static_cast<std::ptrdiff_t>(tail), after.end(),
+                         quiet.begin() + static_cast<std::ptrdiff_t>(tail)));
+        // While it recovers the level only rises towards the input's.
+        for(std::size_t i = 0; i < tail; ++i)
+            CHECK(std::fabs(after[i]) <= std::fabs(quiet[i]));
+    }
+    // Low-pass: flat below the cutoff, 3 dB down at it, 12 dB per octave above.
+    std::printf("  low-pass at 1 kHz:");
+    for(const double rate : {44100.0, 48000.0, 96000.0}) {
+        const float control = static_cast<float>(
+            OutputStage::kTop * std::log(1000.0 / OutputStage::kLowHz)
+            / std::log(OutputStage::kHighHz / OutputStage::kLowHz));
+        const auto gain_db = [&](double hz) {
+            OutputStage stage;
+            stage.Prepare(rate);
+            stage.JumpFilter(control);
+            std::vector<float> tone;
+            const int frames = static_cast<int>(rate);
+            for(int n = 0; n < frames; ++n) {
+                const auto v = static_cast<float>(0.25 * std::sin(2.0 * kPi * hz * n / rate));
+                tone.push_back(v);
+                tone.push_back(v);
+            }
+            const auto out = ThroughStage(stage, tone);
+            std::vector<float> left;
+            for(std::size_t i = 0; i < out.size(); i += 2) {
+                CHECK(out[i] == out[i + 1]); // both channels alike
+                left.push_back(out[i]);
+            }
+            return Decibel(ToneAmplitude(left, hz, rate, left.size() / 2, left.size()) / 0.25);
+        };
+        const double low = gain_db(100.0), at = gain_db(1000.0), two = gain_db(2000.0),
+                     four = gain_db(4000.0);
+        std::printf(" %g Hz: %.2f dB at 100 Hz, %.2f at 1 kHz, %.2f at 2 kHz, %.2f at 4 kHz;", rate,
+                    low, at, two, four);
+        CHECK(std::fabs(low) < 0.1 && std::fabs(at + 3.01) < 0.2);
+        CHECK(std::fabs(two + 12.3) < 0.8 && std::fabs(four + 24.1) < 1.2);
+    }
+    std::printf("\n");
+    // The filter control: set, it glides and lands exactly; back at 1 the
+    // samples pass as they came again.
+    {
+        OutputStage stage;
+        stage.Prepare(48000.0);
+        stage.SetFilter(0.2f);
+        float l = 0.1f, r = 0.1f;
+        stage.Process(l, r);
+        CHECK(stage.FilterValue() < 1.0f && stage.FilterValue() > 0.2f);
+        for(int i = 0; i < 48000; ++i)
+            stage.Process(l, r);
+        CHECK(stage.FilterValue() == 0.2f && stage.FilterTarget() == 0.2f);
+        stage.SetFilter(std::nanf("")); // not a number: 0
+        CHECK(stage.FilterTarget() == 0.0f);
+        stage.SetFilter(7.0f);
+        CHECK(stage.FilterTarget() == 1.0f);
+        std::vector<float> quiet(96000);
+        for(float& v : quiet)
+            v = (random.Unit() * 2.0f - 1.0f) * 0.3f;
+        const auto out = ThroughStage(stage, quiet);
+        CHECK(stage.FilterValue() == 1.0f);
+        CHECK(std::equal(out.begin() + 48000, out.end(), quiet.begin() + 48000));
+    }
+    // Through the adapter the filter control is an event like the others: it
+    // changes when its quantum is rendered, not before the sample it was sent
+    // for, and not later than grid and latency allow.
+    for(const double rate : kRates) {
+        ToneEngine engine(440.0);
+        StreamAdapter adapter(engine);
+        CHECK(adapter.Prepare(rate));
+        const int at = 1000;
+        CHECK(adapter.AddEvent(at, FilterEvent(0.3f)));
+        std::vector<float> left(4096), right(4096);
+        adapter.Process(left.data(), right.data(), at);
+        CHECK(adapter.Output().FilterTarget() == 1.0f); // not before its sample
+        const int allowance =
+            adapter.LatencySamples() + static_cast<int>(std::ceil(kQ * rate / 48000.0)) + 1;
+        adapter.Process(left.data(), right.data(), allowance);
+        CHECK(adapter.Output().FilterTarget() == 0.3f);
+        adapter.Reset();
+        adapter.JumpOutputFilter(0.5f);
+        CHECK(adapter.Output().FilterValue() == 0.5f);
+    }
+    std::printf("output stage: untouched below the ceiling with the filter open; no sample "
+                "above %.2f whatever comes in, exact again after the release; low-pass 12 dB "
+                "per octave\n",
+                OutputStage::kCeiling);
+}
+
 // --- The real engine through the adapter ------------------------------------
 
 struct HostEvent {
@@ -728,10 +876,8 @@ void TestBlockSizesWithEngine() {
         CHECK(Energy(reference) > 1.0);
         for(const float v : reference)
             CHECK(std::isfinite(v));
-        // The engine stays below 0.8. Between its samples the interpolated
-        // curve can run higher, so at other rates the peak is only reported.
-        if(rate == 48000.0)
-            CHECK(Peak(reference) < 0.8f);
+        // The limiter at the end of the chain holds every sample, at every rate.
+        CHECK(Peak(reference) <= OutputStage::kCeiling);
         for(const int size : kBlockSizes)
             CHECK(RenderEngine(rate, score, total, FixedBlocks{size}, model) == reference);
         CHECK(RenderEngine(rate, score, total, VaryingBlocks{}, model) == reference);
@@ -741,8 +887,9 @@ void TestBlockSizesWithEngine() {
                     Peak(reference));
     }
 
-    // At 48 kHz the adapter adds nothing: the output is the engine's own,
-    // with every event applied on the quantum the rule names.
+    // At 48 kHz the adapter converts nothing: the output is the engine's own
+    // through the output stage (filter open; the limiter acts on the loud
+    // parts), with every event applied on the quantum the rule names.
     const std::int64_t total = 48000;
     const auto score = HostScore(total);
     const auto through_adapter = RenderEngine(48000.0, score, total, VaryingBlocks{}, 0);
@@ -750,6 +897,8 @@ void TestBlockSizesWithEngine() {
     engine.Reset(0x12345678);
     engine.JumpModel(0);
     EngineBridge bridge(engine);
+    OutputStage stage;
+    stage.Prepare(48000.0);
     std::vector<float> left, right;
     float l[kQ], r[kQ];
     std::size_t next = 0;
@@ -757,6 +906,8 @@ void TestBlockSizesWithEngine() {
         for(; next < score.size() && (score[next].sample + kQ - 1) / kQ <= quantum; ++next)
             bridge.HandleEvent(score[next].event);
         engine.Render(l, r);
+        for(int i = 0; i < kQ; ++i)
+            stage.Process(l[i], r[i]);
         left.insert(left.end(), l, l + kQ);
         right.insert(right.end(), r, r + kQ);
     }
@@ -780,6 +931,7 @@ int main() {
     TestQueueLimits();
     TestResetAndRates();
     TestNoAllocation();
+    TestOutputStage();
     TestBlockSizesWithEngine();
     std::printf("PASS\n");
     return 0;

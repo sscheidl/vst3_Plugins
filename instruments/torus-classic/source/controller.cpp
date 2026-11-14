@@ -84,6 +84,103 @@ class LinearParameter : public Parameter {
     const char* format_;
 };
 
+// Tune, in semitones. With free tuning off it is shown, and typed, in whole
+// semitones: that is how it sounds then. `free` is the controller's flag.
+class TuneParameter : public Parameter {
+  public:
+    TuneParameter(const TChar* title, ParamID tag, const bool* free)
+    : Parameter(title, tag, STR16("st"), kDefaultTune, 0, ParameterInfo::kCanAutomate),
+      free_(free) {}
+
+    void toString(ParamValue normalized, String128 string) const SMTG_OVERRIDE {
+        Print(string, *free_ ? "%.2f" : "%.0f", TuneSemitones(TuneSounding(normalized, *free_)));
+    }
+
+    bool fromString(const TChar* string, ParamValue& normalized) const SMTG_OVERRIDE {
+        double semitones = 0.0;
+        if(!ReadTyped(string, "st", semitones))
+            return false;
+        normalized = TuneSounding(TuneNormalized(semitones), *free_); // clamped, then rounded
+        return true;
+    }
+
+    ParamValue toPlain(ParamValue normalized) const SMTG_OVERRIDE {
+        return TuneSemitones(normalized);
+    }
+    ParamValue toNormalized(ParamValue semitones) const SMTG_OVERRIDE {
+        return TuneNormalized(semitones);
+    }
+
+    OBJ_METHODS(TuneParameter, Parameter)
+
+  private:
+    const bool* free_;
+};
+
+// The low-pass over the output, shown as its cutoff; fully open reads "off".
+class FilterParameter : public Parameter {
+  public:
+    FilterParameter(const TChar* title, ParamID tag)
+    : Parameter(title, tag, STR16("Hz"), kDefaultFilter, 0, ParameterInfo::kCanAutomate) {}
+
+    void toString(ParamValue normalized, String128 string) const SMTG_OVERRIDE {
+        if(normalized >= 1.0)
+            UString(string, 128).fromAscii("off");
+        else
+            Print(string, "%.0f", FilterHz(normalized));
+    }
+
+    bool fromString(const TChar* string, ParamValue& normalized) const SMTG_OVERRIDE {
+        if(string && EqualsIgnoringCase(StripUnit(StringConvert::convert(string), "Hz"), "off")) {
+            normalized = 1.0;
+            return true;
+        }
+        double hz = 0.0;
+        if(!ReadTyped(string, "Hz", hz))
+            return false;
+        normalized = FilterNormalized(hz);
+        return true;
+    }
+
+    ParamValue toPlain(ParamValue normalized) const SMTG_OVERRIDE { return FilterHz(normalized); }
+    ParamValue toNormalized(ParamValue hz) const SMTG_OVERRIDE { return FilterNormalized(hz); }
+
+    OBJ_METHODS(FilterParameter, Parameter)
+};
+
+// A switch: "Off" and "On".
+class SwitchParameter : public Parameter {
+  public:
+    SwitchParameter(const TChar* title, ParamID tag, ParamValue default_normalized)
+    : Parameter(title, tag, nullptr, default_normalized, 1,
+                ParameterInfo::kCanAutomate | ParameterInfo::kIsList) {}
+
+    void toString(ParamValue normalized, String128 string) const SMTG_OVERRIDE {
+        UString(string, 128).fromAscii(IsOn(normalized) ? "On" : "Off");
+    }
+
+    bool fromString(const TChar* string, ParamValue& normalized) const SMTG_OVERRIDE {
+        if(!string)
+            return false;
+        const std::string text = StringConvert::convert(string);
+        const std::string_view word = StripUnit(text, "");
+        if(EqualsIgnoringCase(word, "on") || word == "1")
+            normalized = 1.0;
+        else if(EqualsIgnoringCase(word, "off") || word == "0")
+            normalized = 0.0;
+        else
+            return false;
+        return true;
+    }
+
+    ParamValue toPlain(ParamValue normalized) const SMTG_OVERRIDE {
+        return IsOn(normalized) ? 1.0 : 0.0;
+    }
+    ParamValue toNormalized(ParamValue plain) const SMTG_OVERRIDE { return plain >= 0.5 ? 1.0 : 0.0; }
+
+    OBJ_METHODS(SwitchParameter, Parameter)
+};
+
 // The synthesis model: six named steps. Display, typed text, normalized
 // values and the engine all go through ModelIndex().
 class ModelParameter : public Parameter {
@@ -161,9 +258,8 @@ tresult PLUGIN_API Controller::initialize(FUnknown* context) {
     if(result != kResultOk)
         return result;
 
-    // Tune is continuous: no semitone steps, as on the Daisy kit's knob.
-    parameters.addParameter(new LinearParameter(STR16("Tune"), kParamTune, "st", STR16("st"), 0.5,
-                                                2.0 * kTuneRange, "%.2f", kDefaultTune));
+    // Tune sounds in whole semitones unless Tune Free is on.
+    parameters.addParameter(new TuneParameter(STR16("Tune"), kParamTune, &tune_free_));
     const struct {
         const TChar* title;
         ParamID id;
@@ -182,6 +278,10 @@ tresult PLUGIN_API Controller::initialize(FUnknown* context) {
     // The pitch wheel arrives as a parameter, the way VST3 delivers MIDI
     // controllers. It can be automated, has no knob and is not saved.
     parameters.addParameter(new PitchBendParameter(STR16("Pitch Bend"), kParamPitchBend));
+    // Since 0.2.0, after the others so that their order stays as it was.
+    parameters.addParameter(new FilterParameter(STR16("Filter"), kParamFilter));
+    parameters.addParameter(
+        new SwitchParameter(STR16("Tune Free"), kParamTuneFree, kDefaultTuneFree));
     return kResultOk;
 }
 
@@ -191,17 +291,23 @@ tresult PLUGIN_API Controller::setComponentState(IBStream* state) {
     SavedValues values;
     if(!ReadSavedValues(state, values))
         return kResultFalse;
+    // The switch first: Tune's text depends on it.
+    setParamNormalized(kParamTuneFree, values[9]);
     for(int i = 0; i < kSavedParamCount; ++i)
-        setParamNormalized(kFirstParam + static_cast<ParamID>(i), values[i]);
+        setParamNormalized(kFirstParam + static_cast<ParamID>(kSavedIndex[static_cast<std::size_t>(i)]),
+                           values[static_cast<std::size_t>(i)]);
     setParamNormalized(kParamPitchBend, kDefaultPitchBend);
     return kResultOk;
 }
 
 tresult PLUGIN_API Controller::setParamNormalized(ParamID tag, ParamValue value) {
     const tresult result = EditController::setParamNormalized(tag, value);
-    if(result == kResultOk)
-        for(const OpenEditor& open : editors_)
-            open.editor->ParameterChanged(tag, getParamNormalized(tag));
+    if(result != kResultOk)
+        return result;
+    if(tag == kParamTuneFree)
+        tune_free_ = IsOn(getParamNormalized(tag));
+    for(const OpenEditor& open : editors_)
+        open.editor->ParameterChanged(tag, getParamNormalized(tag));
     return result;
 }
 
@@ -236,6 +342,14 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
 }
 
 bool Controller::PlayNote(int note) {
+    return SendKey(note, kKeyboardVelocity);
+}
+
+bool Controller::ReleaseNote(int note) {
+    return SendKey(note, 0);
+}
+
+bool Controller::SendKey(int note, int velocity) {
     if(note < 0 || note > 127)
         return false;
     IPtr<IMessage> message = owned(allocateMessage());
@@ -243,7 +357,7 @@ bool Controller::PlayNote(int note) {
         return false; // the host offers no messages: nothing to play through
     message->setMessageID(kNoteMessageId);
     message->getAttributes()->setInt(kNoteMessageNote, note);
-    message->getAttributes()->setInt(kNoteMessageVelocity, kKeyboardVelocity);
+    message->getAttributes()->setInt(kNoteMessageVelocity, velocity);
     return sendMessage(message) == kResultOk;
 }
 
@@ -257,6 +371,7 @@ IPlugView* PLUGIN_API Controller::createView(FIDString name) {
     // save. They are not parameters; no performEdit goes out for them.
     callbacks.settled = [this] { setDirty(true); };
     callbacks.strike = [this](int note) { PlayNote(note); };
+    callbacks.release = [this](int note) { ReleaseNote(note); };
     return new Editor(this, editor_, std::move(callbacks));
 }
 
@@ -296,6 +411,7 @@ tresult PLUGIN_API Controller::getMidiControllerAssignment(int32 busIndex, int16
         case kMidiCcExcitation: id = kParamExcitation; return kResultTrue;
         case kMidiCcModel: id = kParamModel; return kResultTrue;
         case kMidiCcVolume: id = kParamVolume; return kResultTrue;
+        case kMidiCcFilter: id = kParamFilter; return kResultTrue;
         default: return kResultFalse;
     }
 }

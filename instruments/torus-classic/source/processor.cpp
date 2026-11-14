@@ -22,13 +22,19 @@ uint64 ChannelMask(int32 numChannels) {
     return numChannels >= 64 ? ~uint64{0} : (uint64{1} << numChannels) - 1;
 }
 
-// The engine control behind a parameter, or false for Model and Pitch Bend.
-bool ControlOf(int index, Control& control) {
+// The engine control a parameter drives directly, with the value the engine
+// gets for it. False for Tune (which goes through the bridge, with its
+// switch), Model, Pitch Bend, Filter and the switch itself.
+bool DirectControl(int index, double value, Control& control, float& engine_value) {
+    engine_value = static_cast<float>(value);
     switch(kFirstParam + static_cast<std::uint32_t>(index)) {
-        case kParamTune: control = Control::Tune; return true;
         case kParamStructure: control = Control::Structure; return true;
         case kParamBrightness: control = Control::Brightness; return true;
-        case kParamDamping: control = Control::Damping; return true;
+        case kParamDamping:
+            // A higher Damping damps more; the engine has it the other way round.
+            control = Control::Damping;
+            engine_value = static_cast<float>(EngineDamping(value));
+            return true;
         case kParamPosition: control = Control::Position; return true;
         case kParamExcitation: control = Control::Excitation; return true;
         case kParamVolume: control = Control::Volume; return true;
@@ -48,6 +54,8 @@ tresult PLUGIN_API Processor::initialize(FUnknown* context) {
         return result;
     addAudioOutput(STR16("Stereo Out"), SpeakerArr::kStereo);
     addEventInput(STR16("MIDI In"), 16);
+    // The screen keyboard's notes, for the host to record or pass on.
+    addEventOutput(STR16("MIDI Out"), 1);
     // Usable before the host has named a sample rate.
     adapter_.Prepare(StreamAdapter::kInternalRate);
     Restart(state_.Current());
@@ -94,12 +102,15 @@ void Processor::Restart(const ParameterState::Values& values) {
     engine_.Reset(DryEngine::kDefaultSeed);
     for(int i = 0; i < kParamCount; ++i) {
         Control control;
-        if(ControlOf(i, control))
-            engine_.JumpControl(control, static_cast<float>(values[i]));
+        float engine_value;
+        if(DirectControl(i, values[i], control, engine_value))
+            engine_.JumpControl(control, engine_value);
     }
-    engine_.JumpModel(static_cast<unsigned>(ModelIndex(values[kParamModel - kFirstParam])));
-    engine_.JumpPitchBend(
-        static_cast<unsigned>(PitchBendRaw(values[kParamPitchBend - kFirstParam])));
+    bridge_.JumpTune(static_cast<float>(values[Index(kParamTune)]),
+                     IsOn(values[Index(kParamTuneFree)]));
+    engine_.JumpModel(static_cast<unsigned>(ModelIndex(values[Index(kParamModel)])));
+    engine_.JumpPitchBend(static_cast<unsigned>(PitchBendRaw(values[Index(kParamPitchBend)])));
+    adapter_.JumpOutputFilter(static_cast<float>(values[Index(kParamFilter)]));
 }
 
 tresult PLUGIN_API Processor::setActive(TBool state) {
@@ -120,6 +131,9 @@ tresult PLUGIN_API Processor::setActive(TBool state) {
             keyboard_valid_after_ = pending.loaded_at;
         }
         Restart(state_.Current());
+        // The queue just emptied may have held the release of a screen key
+        // whose strike the host already has: release it at the next block.
+        release_held_keys_ = true;
     }
     return AudioEffect::setActive(state);
 }
@@ -140,12 +154,28 @@ void Processor::QueueParameter(int32 offset, ParamID id, double value) {
     value = Clamp01(value);
     state_.Write(index, value);
     Control control;
-    if(ControlOf(index, control))
-        adapter_.AddEvent(offset, ControlEvent(control, static_cast<float>(value)));
-    else if(id == kParamModel)
-        adapter_.AddEvent(offset, ModelEvent(static_cast<unsigned>(ModelIndex(value))));
-    else
-        adapter_.AddEvent(offset, BendEvent(static_cast<unsigned>(PitchBendRaw(value))));
+    float engine_value;
+    if(DirectControl(index, value, control, engine_value)) {
+        adapter_.AddEvent(offset, ControlEvent(control, engine_value));
+        return;
+    }
+    switch(id) {
+        case kParamTune:
+            // As set; the bridge rounds it to semitones unless tuning is free.
+            adapter_.AddEvent(offset, ControlEvent(Control::Tune, static_cast<float>(value)));
+            break;
+        case kParamTuneFree: adapter_.AddEvent(offset, TuneFreeEvent(IsOn(value))); break;
+        case kParamModel:
+            adapter_.AddEvent(offset, ModelEvent(static_cast<unsigned>(ModelIndex(value))));
+            break;
+        case kParamPitchBend:
+            adapter_.AddEvent(offset, BendEvent(static_cast<unsigned>(PitchBendRaw(value))));
+            break;
+        case kParamFilter:
+            adapter_.AddEvent(offset, FilterEvent(static_cast<float>(value)));
+            break;
+        default: break;
+    }
 }
 
 void Processor::ReadParameterChanges(IParameterChanges& changes, int32 num_samples) {
@@ -169,14 +199,52 @@ void Processor::ReadParameterChanges(IParameterChanges& changes, int32 num_sampl
     }
 }
 
-void Processor::ReadKeyboard() {
+void Processor::SendKey(IEventList* output, int note, int velocity) {
+    if(velocity > 0)
+        held_keys_.set(static_cast<std::size_t>(note));
+    else
+        held_keys_.reset(static_cast<std::size_t>(note));
+    if(!output)
+        return;
+    Event event{};
+    event.busIndex = 0;
+    event.sampleOffset = 0;
+    event.flags = Event::kIsLive;
+    if(velocity > 0) {
+        event.type = Event::kNoteOnEvent;
+        event.noteOn.pitch = static_cast<int16>(note);
+        event.noteOn.velocity = static_cast<float>(velocity) / 127.0f;
+        event.noteOn.noteId = -1;
+    } else {
+        event.type = Event::kNoteOffEvent;
+        event.noteOff.pitch = static_cast<int16>(note);
+        event.noteOff.noteId = -1;
+    }
+    output->addEvent(event);
+}
+
+void Processor::ReadKeyboard(IEventList* output) {
+    // After an activation: keys the host still believes held are released.
+    if(release_held_keys_) {
+        release_held_keys_ = false;
+        for(int note = 0; note < 128 && held_keys_.any(); ++note)
+            if(held_keys_.test(static_cast<std::size_t>(note)))
+                SendKey(output, note, 0);
+    }
     // Screen keyboard notes start with the block: they come from the UI and
     // have no sample position. At most one queue's worth per call, so the work
-    // stays bounded even if the UI keeps adding notes meanwhile.
+    // stays bounded even if the UI keeps adding notes meanwhile. Each strike
+    // goes to the engine and, as a note-on, to the host's MIDI output; each
+    // release of a key only to the host, because the engine knows no note-off.
     KeyboardNote key;
     Clock::time_point now{};
     bool have_time = false;
     for(std::size_t i = 0; i < kKeyboardQueueSize && keyboard_notes_.Pop(key); ++i) {
+        if(key.velocity == 0) {
+            if(held_keys_.test(key.note)) // only for a strike that went out
+                SendKey(output, key.note, 0);
+            continue;
+        }
         if(!have_time) {
             now = Clock::now();
             have_time = true;
@@ -185,7 +253,10 @@ void Processor::ReadKeyboard() {
             continue; // struck while nobody was rendering
         if(key.struck <= keyboard_valid_after_)
             continue; // struck before the state that was loaded since
+        if(held_keys_.test(key.note)) // struck again without a release in between
+            SendKey(output, key.note, 0);
         adapter_.AddEvent(0, NoteEvent(key.note, key.velocity));
+        SendKey(output, key.note, key.velocity);
     }
 }
 
@@ -261,7 +332,7 @@ tresult PLUGIN_API Processor::process(ProcessData& data) {
     // Keyboard notes wait for a block with audio: taken in a parameter flush
     // they would sit in the adapter, past their lifetime, until audio resumes.
     if(num_samples > 0)
-        ReadKeyboard();
+        ReadKeyboard(data.outputEvents);
     if(data.inputEvents)
         ReadEvents(*data.inputEvents, num_samples);
 
@@ -278,8 +349,8 @@ tresult PLUGIN_API Processor::getState(IBStream* state) {
     // One complete state: the last loaded one with the automation since.
     const ParameterState::Values current = state_.Current();
     SavedValues values;
-    for(int i = 0; i < kSavedParamCount; ++i)
-        values[i] = current[i];
+    for(std::size_t i = 0; i < values.size(); ++i)
+        values[i] = current[static_cast<std::size_t>(kSavedIndex[i])];
     return WriteSavedValues(state, values) ? kResultOk : kResultFalse;
 }
 
@@ -307,8 +378,8 @@ tresult PLUGIN_API Processor::notify(IMessage* message) {
     if(!attributes || attributes->getInt(kNoteMessageNote, note) != kResultOk
        || attributes->getInt(kNoteMessageVelocity, velocity) != kResultOk)
         return kInvalidArgument;
-    if(note < 0 || note > 127 || velocity < 1 || velocity > 127)
-        return kInvalidArgument;
+    if(note < 0 || note > 127 || velocity < 0 || velocity > 127)
+        return kInvalidArgument; // velocity 0 is the release of the key
     // A full queue drops the note and says so.
     if(!keyboard_notes_.Push({static_cast<std::uint8_t>(note),
                               static_cast<std::uint8_t>(velocity), Clock::now()}))

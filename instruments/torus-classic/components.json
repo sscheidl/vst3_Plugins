@@ -3,7 +3,7 @@
   "product": {
     "id": "torus-classic",
     "name": "Torus Classic",
-    "version": "0.1.1",
+    "version": "0.2.0",
     "vendor": "TAUREON",
     "format": "VST3",
     "platform": "Windows x64",
@@ -34,7 +34,7 @@
       "id": "torus-classic.adapter",
       "path": "adapter/",
       "layer": 3,
-      "version": "0.1.1",
+      "version": "0.2.0",
       "description": "Streaming adapter: host sample rate, 12-sample quanta, event time, latency",
       "interface": "adapter/stream_adapter.h",
       "depends_on": [],
@@ -44,7 +44,7 @@
       "id": "torus-classic.shell",
       "path": "source/",
       "layer": 4,
-      "version": "0.1.1",
+      "version": "0.2.0",
       "description": "VST3 processor, controller, state and editor",
       "depends_on": [
         "torus-classic.engine",

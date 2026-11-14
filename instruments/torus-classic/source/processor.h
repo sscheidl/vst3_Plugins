@@ -11,12 +11,13 @@
 
 #include <array>
 #include <atomic>
+#include <bitset>
 #include <chrono>
 
 namespace torus_classic {
 
 // Audio side of the plug-in (layer 4): MIDI notes and parameter changes in,
-// dry stereo audio out. Owns one engine and one streaming adapter.
+// dry stereo audio out; the screen keyboard's notes also out as MIDI. Owns one engine and one streaming adapter.
 //
 // Threads. The engine and the adapter are touched by process() and, while the
 // host is not processing, by setupProcessing() and setActive(). Everything
@@ -83,7 +84,9 @@ class Processor : public Steinberg::Vst::AudioEffect {
     void QueueParameter(Steinberg::int32 offset, Steinberg::Vst::ParamID id, double value);
     void ReadParameterChanges(Steinberg::Vst::IParameterChanges& changes,
                               Steinberg::int32 num_samples);
-    void ReadKeyboard();
+    void ReadKeyboard(Steinberg::Vst::IEventList* output);
+    // A screen key to the host's MIDI output; velocity 0 is its release.
+    void SendKey(Steinberg::Vst::IEventList* output, int note, int velocity);
     void ReadEvents(Steinberg::Vst::IEventList& events, Steinberg::int32 num_samples);
     void Render(Steinberg::Vst::ProcessData& data);
 
@@ -100,6 +103,10 @@ class Processor : public Steinberg::Vst::AudioEffect {
     // Keyboard notes struck up to this moment belong to the time before the
     // last loaded state and are not played. Owned by the audio thread.
     Clock::time_point keyboard_valid_after_{};
+    // Screen keys the host has a note-on for and no note-off yet. Owned by
+    // the audio thread.
+    std::bitset<128> held_keys_;
+    bool release_held_keys_ = false;
 
     // process() renders through these in pieces, then converts to the host's
     // sample format.

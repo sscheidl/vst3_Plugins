@@ -51,6 +51,7 @@ bool StreamAdapter::Prepare(double host_rate) {
     const std::size_t capacity = 2 * (window + kQuantum + static_cast<std::size_t>(step)) + 64;
     buffer_left_.assign(capacity, 0.0f);
     buffer_right_.assign(capacity, 0.0f);
+    output_.Prepare(host_rate_);
     notes_.Allocate(kNoteCapacity);
     for(Queue& queue : controls_)
         queue.Allocate(kControlCapacity);
@@ -75,6 +76,7 @@ void StreamAdapter::Reset() {
         base_ = 0;
     std::fill(buffer_left_.begin(), buffer_left_.end(), 0.0f);
     std::fill(buffer_right_.begin(), buffer_right_.end(), 0.0f);
+    output_.Reset();
     notes_.Clear();
     for(Queue& queue : controls_)
         queue.Clear();
@@ -110,6 +112,7 @@ bool StreamAdapter::AddEvent(std::int32_t offset, const EngineEvent& event) {
             break;
         case EngineEvent::kModel: queue = &controls_[kModelQueue]; break;
         case EngineEvent::kPitchBend: queue = &controls_[kBendQueue]; break;
+        case EngineEvent::kOutputFilter: queue = &controls_[kFilterQueue]; break;
     }
     if(offset < 0)
         offset = 0;
@@ -165,7 +168,11 @@ void StreamAdapter::RenderQuantum() {
     // it renders.) Each loop ends with its queue, which is bounded.
     for(Queue& queue : controls_)
         while(queue.count > 0 && queue.First().quantum <= quantum) {
-            engine_.HandleEvent(queue.First().event);
+            const EngineEvent& event = queue.First().event;
+            if(event.type == EngineEvent::kOutputFilter)
+                output_.SetFilter(event.value);
+            else
+                engine_.HandleEvent(event);
             queue.Pop();
         }
     while(notes_.count > 0 && notes_.First().quantum <= quantum) {
@@ -196,6 +203,8 @@ void StreamAdapter::Process(float* left, float* right, int frames) {
             kernel_.Interpolate(buffer_left_.data() + first, buffer_right_.data() + first,
                                 pos_rem_, left[frame], right[frame]);
         }
+        // The end of the chain, at the host's rate: low-pass, then limiter.
+        output_.Process(left[frame], right[frame]);
         // One host sample on, in both clocks.
         pos_rem_ += ratio_.num;
         pos_int_ += static_cast<std::int64_t>(pos_rem_ / ratio_.den);

@@ -64,6 +64,7 @@ constexpr KnobSpec kKnobs[Editor::kKnobCount] = {
     {kParamDamping, "DAMPING", kDefaultDamping, false},
     {kParamPosition, "POSITION", kDefaultPosition, false},
     {kParamExcitation, "EXCITATION", kDefaultExcitation, false},
+    {kParamFilter, "FILTER", kDefaultFilter, false},
     {kParamVolume, "VOLUME", kDefaultVolume, false},
 };
 
@@ -106,6 +107,7 @@ void Editor::ForgetViews() {
     knobs_ = {};
     keyboard_view_ = nullptr;
     keyboard_button_ = nullptr;
+    tune_free_button_ = nullptr;
     model_selector_ = nullptr;
 }
 
@@ -141,6 +143,10 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
                                       [this](int note) {
                                           if(callbacks_.strike)
                                               callbacks_.strike(note);
+                                      },
+                                      [this](int note) {
+                                          if(callbacks_.release)
+                                              callbacks_.release(note);
                                       });
     keyboard_view_->setVisible(settings_.keyboard);
     frame->addView(keyboard_view_);
@@ -170,6 +176,15 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         // One semitone per wheel step for Tune, one hundredth for the others.
         knob->setWheelInc(spec.id == kParamTune ? static_cast<float>(0.5 / kTuneRange) : 0.01f);
         frame->addView(knob);
+        if(spec.id == kParamTune) {
+            // A small switch at the knob's lower right: free tuning on or off.
+            const bool free = controller && IsOn(controller->getParamNormalized(kParamTuneFree));
+            tune_free_button_ = new ToggleButton(
+                CRect(left + kColumnWidth - 32, kKnobTop + kKnobSize - 8, left + kColumnWidth + 2,
+                      kKnobTop + kKnobSize + 6),
+                "FREE", free, [this](bool on) { SetTuneFree(on); });
+            frame->addView(tune_free_button_);
+        }
 
         auto* value = MakeLabel(CRect(left, kValueTop, left + kColumnWidth, kValueTop + 20), "",
                                 value_font, kText, kCenterText);
@@ -340,11 +355,14 @@ void PLUGIN_API Editor::close() {
     // A knob still held by the mouse, or within the pause that follows a turn
     // of the wheel, has told the host that an edit began. Its view is about
     // to go without a mouse-up; finish the edit here, once, while the frame
-    // can still pass it on.
+    // can still pass it on. The same for a screen key still held: the host
+    // gets its note-off.
     if(frame)
         for(const Knob& knob : knobs_)
             while(knob.knob && knob.knob->isEditing())
                 knob.knob->endEdit();
+    if(keyboard_view_)
+        keyboard_view_->ReleaseHeld();
     ForgetViews();
     if(frame) {
         frame->removeAll(true);
@@ -360,8 +378,12 @@ void Editor::valueChanged(CControl* control) {
     if(!controller || !control)
         return;
     const auto id = static_cast<ParamID>(control->getTag());
-    const ParamValue normalized = control->getValueNormalized();
-    // The controller reports back through ParameterChanged().
+    ParamValue normalized = control->getValueNormalized();
+    // Tune moves in whole semitones unless free tuning is on.
+    if(id == kParamTune)
+        normalized = TuneSounding(normalized, IsOn(controller->getParamNormalized(kParamTuneFree)));
+    // The controller reports back through ParameterChanged(), which also puts
+    // the knob on the semitone it landed on.
     controller->setParamNormalized(id, normalized);
     controller->performEdit(id, normalized);
 }
@@ -374,6 +396,16 @@ void Editor::ChooseModel(int model) {
     controller->setParamNormalized(kParamModel, normalized);
     controller->performEdit(kParamModel, normalized);
     controller->endEdit(kParamModel);
+}
+
+void Editor::SetTuneFree(bool free) {
+    if(!controller)
+        return;
+    const ParamValue normalized = free ? 1.0 : 0.0;
+    controller->beginEdit(kParamTuneFree);
+    controller->setParamNormalized(kParamTuneFree, normalized);
+    controller->performEdit(kParamTuneFree, normalized);
+    controller->endEdit(kParamTuneFree);
 }
 
 int Editor::ShownModel() const {
@@ -398,6 +430,15 @@ void Editor::ParameterChanged(ParamID id, ParamValue normalized) {
     if(id == kParamModel) {
         if(model_selector_)
             model_selector_->SetModel(ModelIndex(normalized));
+        return;
+    }
+    if(id == kParamTuneFree) {
+        if(tune_free_button_)
+            tune_free_button_->SetOn(IsOn(normalized));
+        // Tune reads in whole semitones or with decimals accordingly.
+        for(Knob& knob : knobs_)
+            if(knob.id == kParamTune && knob.knob && controller)
+                ShowValue(knob, controller->getParamNormalized(kParamTune));
         return;
     }
     for(Knob& knob : knobs_) {

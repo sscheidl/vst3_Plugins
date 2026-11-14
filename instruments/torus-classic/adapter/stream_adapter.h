@@ -5,6 +5,11 @@
 //
 // Component id "torus-classic.adapter", version kAdapterVersion.
 //
+// At the end of the chain, at the host's rate, sits the output stage: a
+// low-pass and a limiter (output_stage.h). Its filter control is an event
+// like the others and changes when its quantum is rendered: at or after the
+// host sample it was sent for, by at most the grid and the latency.
+//
 // Time. Host sample n (counted from the last Reset) stands for the internal
 // time n * 48000 / host_rate. The output is delayed against that by
 // LatencySamples() host samples, the group delay of the interpolation filter;
@@ -22,6 +27,7 @@
 // at its own time. Nothing ever acts before its time, full queues or not.
 #pragma once
 
+#include "output_stage.h"
 #include "sinc_kernel.h"
 
 #include <array>
@@ -31,10 +37,12 @@
 
 namespace torus_classic {
 
-constexpr const char* kAdapterVersion = "0.1.1";
+constexpr const char* kAdapterVersion = "0.2.0";
 
 struct EngineEvent {
-    enum Type : std::uint8_t { kNoteOn, kControl, kModel, kPitchBend };
+    // kOutputFilter is the adapter's own: it sets the low-pass of the output
+    // stage and does not reach the engine.
+    enum Type : std::uint8_t { kNoteOn, kControl, kModel, kPitchBend, kOutputFilter };
     Type type = kNoteOn;
     std::uint8_t index = 0;   // note, control or model
     std::uint16_t data = 0;   // velocity or 14-bit bend
@@ -67,8 +75,14 @@ class StreamAdapter {
     bool Prepare(double host_rate);
 
     // Time back to zero: no waiting events, empty buffers, filter history
-    // cleared. Does not touch the engine. Does not allocate or lock.
+    // cleared, output stage at rest. Does not touch the engine. Does not
+    // allocate or lock.
     void Reset();
+
+    // The output filter's control at once, without waiting for a quantum and
+    // without a glide: for a start from a known state.
+    void JumpOutputFilter(float value) { output_.JumpFilter(value); }
+    const OutputStage& Output() const { return output_; }
 
     double HostRate() const { return host_rate_; }
     bool Resampling() const { return !ratio_.Unity(); }
@@ -134,7 +148,8 @@ class StreamAdapter {
     };
     static constexpr int kModelQueue = kControlKinds;
     static constexpr int kBendQueue = kControlKinds + 1;
-    static constexpr int kControlQueues = kControlKinds + 2;
+    static constexpr int kFilterQueue = kControlKinds + 2;
+    static constexpr int kControlQueues = kControlKinds + 3;
 
     void RenderQuantum();
     void Compact(std::int64_t first_needed);
@@ -143,6 +158,7 @@ class StreamAdapter {
     double host_rate_ = kInternalRate;
     RateRatio ratio_;
     SincKernel kernel_;
+    OutputStage output_;
     int latency_ = 0;
     int left_ = 0, right_ = 0; // input samples used around an output position
 
