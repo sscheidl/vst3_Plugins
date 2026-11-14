@@ -55,7 +55,8 @@ class Processor : public Steinberg::Vst::AudioEffect {
         std::uint8_t note = 0;
         std::uint8_t velocity = 0;
     };
-    toy_piano::SpscQueue<KeyboardNote, 64> keyboard_notes_;
+    static constexpr std::size_t kKeyboardQueueSize = 64;
+    toy_piano::SpscQueue<KeyboardNote, kKeyboardQueueSize> keyboard_notes_;
 };
 
 } // namespace taureon::toy_piano_classic

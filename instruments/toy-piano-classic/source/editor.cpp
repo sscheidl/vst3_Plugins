@@ -85,6 +85,13 @@ Editor::Editor(EditController* controller, const EditorSettings& settings,
     setRect(ScaledSize());
 }
 
+Editor::~Editor() {
+    // A host should call removed() first, which closes the window. If it does
+    // not, close it here, while this object still exists.
+    if(frame)
+        close();
+}
+
 tresult PLUGIN_API Editor::queryInterface(const TUID _iid, void** obj) {
     QUERY_INTERFACE(_iid, obj, IPlugViewContentScaleSupport::iid, IPlugViewContentScaleSupport)
     return VSTGUIEditor::queryInterface(_iid, obj);
@@ -94,6 +101,7 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
     frame = new CFrame(CRect(0, 0, kWidth, EditorBaseHeight(settings_.keyboard)), this);
     frame->setBackgroundColor(kBackground);
     applied_zoom_ = 1.0;
+    drag_ = DragConstraint{};
 
     const auto title_font = makeOwned<CFontDesc>("Segoe UI", 20, kBoldFace);
     const auto name_font = makeOwned<CFontDesc>("Segoe UI", 11, kBoldFace);
@@ -107,7 +115,7 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
                              kRightText));
     keyboard_button_ = new ToggleButton(CRect(button_left, 18, kWidth - kMargin, 40), "KEYS",
                                         settings_.keyboard,
-                                        [this](bool on) { ShowKeyboard(on); });
+                                        [this](bool on) { SetKeyboardVisible(on); });
     frame->addView(keyboard_button_);
     keyboard_view_ = new KeyboardView(CRect(kMargin, kKeyboardTop, kWidth - kMargin,
                                             kKeyboardBottom),
@@ -161,10 +169,10 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         keyboard_button_ = nullptr;
         return false;
     }
-    const ViewRect wanted = ScaledSize();
-    LayOut(wanted.getWidth(), wanted.getHeight());
-    // `rect` holds the size the host knows. A host that asked for the size
-    // before it told us the scale factor made its window too small.
+    // `rect` is the size the host gave the window. Fill it, then ask for the
+    // size the settings want: a host that asked for the size before it told us
+    // the scale factor made the window too small.
+    LayOut(rect.getWidth(), rect.getHeight());
     Resize();
     return true;
 }
@@ -174,47 +182,60 @@ ViewRect Editor::ScaledSize() const {
     return ViewRect(0, 0, size.width, size.height);
 }
 
+double Editor::DisplayZoom(int32 width, int32 height) const {
+    const ViewRect wanted = ScaledSize();
+    if(width == wanted.getWidth() && height == wanted.getHeight())
+        return scale_ * settings_.zoom;
+    // A window the settings did not ask for: as large as fits into it, also
+    // below the 50 % a user can choose, so nothing is cut off. Above 200 %
+    // the content stops growing and background fills the rest.
+    const double fitting =
+        std::min(width / kEditorWidth, height / EditorBaseHeight(settings_.keyboard));
+    return std::min(fitting, scale_ * kMaxEditorZoom);
+}
+
 void Editor::LayOut(int32 width, int32 height) {
     if(!frame)
         return;
+    if(keyboard_view_)
+        keyboard_view_->setVisible(settings_.keyboard);
+    if(keyboard_button_)
+        keyboard_button_->SetOn(settings_.keyboard);
     // Zooming invalidates and repaints the whole window, so only when needed.
-    const double total = scale_ * settings_.zoom;
+    const double total = DisplayZoom(width, height);
     if(total != applied_zoom_) {
         frame->setZoom(total);
         applied_zoom_ = total;
     }
-    // A host may hand out a window of another shape; the frame then fills it
-    // and shows background beside or below the content.
     frame->setSize(width, height);
 }
 
-void Editor::Resize() {
+bool Editor::Resize() {
     if(!frame)
-        return;
+        return false;
     ViewRect wanted = ScaledSize();
-    if(rect.getWidth() == wanted.getWidth() && rect.getHeight() == wanted.getHeight())
-        return;
-    // Ask with `rect` still at the old size: hosts compare the two and answer
-    // with onSize(), which lays out again and updates `rect`.
-    if(plugFrame && plugFrame->resizeView(this, &wanted) == kResultTrue)
-        return;
-    // Refused: keep the window and zoom the content to fit into it.
-    settings_.zoom = EditorZoomForSize(rect.getWidth(), rect.getHeight(), scale_,
-                                       settings_.keyboard);
-    LayOut(rect.getWidth(), rect.getHeight());
+    if(rect.getWidth() == wanted.getWidth() && rect.getHeight() == wanted.getHeight()) {
+        LayOut(rect.getWidth(), rect.getHeight());
+        return true;
+    }
+    // Only ask. The window itself changes in onSize(), once the host agrees,
+    // as the VST3 interface requires. `rect` still holds the old size here:
+    // hosts compare the two.
+    return plugFrame && plugFrame->resizeView(this, &wanted) == kResultTrue;
 }
 
-void Editor::ShowKeyboard(bool show) {
+void Editor::SetKeyboardVisible(bool show) {
     if(show == settings_.keyboard)
         return;
+    const EditorSettings before = settings_;
     settings_.keyboard = show;
-    if(keyboard_view_)
-        keyboard_view_->setVisible(show);
-    if(keyboard_button_)
-        keyboard_button_->SetOn(show);
-    const ViewRect wanted = ScaledSize();
-    LayOut(wanted.getWidth(), wanted.getHeight());
-    Resize();
+    if(frame && !Resize()) {
+        // The host keeps the window as it is, so the keyboard stays as it was.
+        settings_ = before;
+        if(keyboard_button_)
+            keyboard_button_->SetOn(before.keyboard);
+        return;
+    }
     UserChanged();
 }
 
@@ -260,7 +281,8 @@ tresult PLUGIN_API Editor::onSize(ViewRect* newSize) {
         return kResultFalse;
     const ViewRect current = ScaledSize();
     if(width != current.getWidth() || height != current.getHeight()) {
-        // The user resized the window.
+        // The user resized the window, or the host chose a size. The zoom to
+        // remember stays within the limits; the display may go below them.
         const double zoom = EditorZoomForSize(width, height, scale_, settings_.keyboard);
         if(zoom != settings_.zoom) {
             settings_.zoom = zoom;
@@ -278,15 +300,10 @@ void Editor::ApplySettings(const EditorSettings& settings) {
         return;
     settings_.zoom = zoom;
     settings_.keyboard = settings.keyboard;
-    if(keyboard_view_)
-        keyboard_view_->setVisible(settings_.keyboard);
-    if(keyboard_button_)
-        keyboard_button_->SetOn(settings_.keyboard);
-    if(frame) {
-        const ViewRect wanted = ScaledSize();
-        LayOut(wanted.getWidth(), wanted.getHeight());
-        Resize();
-    }
+    // A loaded project decides. If the host keeps the window size, the
+    // content fits into it as it is.
+    if(frame && !Resize())
+        LayOut(rect.getWidth(), rect.getHeight());
 }
 
 tresult PLUGIN_API Editor::getSize(ViewRect* size) {
@@ -364,11 +381,8 @@ tresult PLUGIN_API Editor::setContentScaleFactor(ScaleFactor factor) {
     if(!(factor > 0.0f))
         return kInvalidArgument;
     scale_ = factor;
-    if(frame) {
-        const ViewRect wanted = ScaledSize();
-        LayOut(wanted.getWidth(), wanted.getHeight());
-        Resize();
-    }
+    if(frame && !Resize())
+        LayOut(rect.getWidth(), rect.getHeight());
     return kResultOk;
 }
 

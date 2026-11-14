@@ -1,6 +1,6 @@
 # Toy Piano Classic
 
-VST3 instrument, version 0.3.0. First test object of this repository: the
+VST3 instrument, version 0.3.1. First test object of this repository: the
 sound engine of the Daisy Seed3 firmware *Toy Piano*, running unchanged inside
 a native Windows plug-in.
 
@@ -8,8 +8,10 @@ a native Windows plug-in.
 
 **Status:** builds, passes Steinberg's validator and its own tests. Version
 0.1.0 loaded in Studio One and its knobs responded there; 0.2.0 added the
-resizable window, 0.3.0 the screen keyboard and smoother resizing. Neither has
-been in a DAW, and nobody has listened to any version yet, see
+resizable window, 0.3.0 the screen keyboard and smoother resizing, 0.3.1 the
+fixes from an independent code review ([review](docs/CODEX_REVIEW_0.3.0.md),
+[what was done](docs/CODEX_REVIEW_0.3.0_UMSETZUNG.md)). None of these has been
+in a DAW, and nobody has listened to any version yet, see
 [Still to be checked](#still-to-be-checked).
 
 ## Sound and controls
@@ -42,6 +44,11 @@ and scales as a whole. Dragging an edge keeps that edge under the mouse;
 dragging a corner takes the allowed size nearest to the mouse. Everything is
 drawn as vectors, so it stays sharp at any size. Size and keyboard are saved
 with the project. On top of that the window follows the Windows display scale.
+If a host refuses the larger window that KEYS needs, the keyboard stays hidden;
+if a host forces a window smaller than 50 %, the content shrinks to fit it.
+
+Typed values accept one number and optionally the unit: `500`, `500 ms`,
+`-6 dB`, `2,5`. Volume also takes `-inf`. Anything else is refused.
 
 ### Level
 
@@ -159,13 +166,14 @@ recorded with GCC and glibc.
 | Steinberg validator (SDK 3.8.0), Release and Debug | 47 tests passed, 0 failed |
 | Build, validator and tests with Visual Studio 2022 as well | passed |
 | Firmware engine test compiled with MSVC ([tests/test_toy_piano_core.cpp](tests/test_toy_piano_core.cpp)) | passed |
-| Bit-exact against the engine, 7 block sizes, 32/64 bit | passed |
+| Bit-exact against the engine, 7 block sizes, each in 32 and 64 bit | passed |
 | A4 = 440 Hz at 44.1, 88.2, 96 and 192 kHz | within 0.05 Hz |
 | Master Pitch −24 to +24, pitch wheel ±2 | frequencies within 0.01 % |
-| Pitch and volume changes while a note sounds | no jump in the waveform |
+| Volume change, and a Master Pitch glide by an octave on A3, while the note sounds | no jump in the waveform (but see R07 under limits) |
+| Volume and pitch glides at 8 to 192 kHz, both directions, up to +24 dB | land exactly on the target; afterwards bit-exact again |
 | Notes above Nyquist at 8, 22.05, 44.1, 48 kHz | muted, bounded, no table overrun |
 | State save and load; damaged state | identical round trip; rejected |
-| Parameter texts, MIDI controller map | as in the tables above |
+| Parameter texts, MIDI controller map; typed values for all five parameters, junk refused | as in the tables above |
 | Window in the SDK's `editorhost` at 120 % display scale | drawn as in the picture |
 | Same window resized by script to 300 × 124, 920 × 380 and 700 × 420 pixels | scales sharply; a window of another shape shows background below the content |
 | Resize rule: aspect ratio, 50 to 200 %, edge drags follow the mouse, corner drags grow steadily | passed |
@@ -173,10 +181,15 @@ recorded with GCC and glibc.
 | Resize cost in `editorhost`, 240 steps between 400 and 900 px wide, each step repainted | median 3.4 to 3.9 ms, 95th percentile up to 5.6 ms (0.2.0: 3.2 to 4.0 ms and 6.0 ms) |
 | Keyboard geometry: every key where it is drawn, black keys on top | passed |
 | Screen keyboard note reaches the engine; equal to a MIDI note at the block start | bit-exact |
+| Keyboard queue: 64 notes, a full queue reports it, at most 64 notes per block | passed |
+| Window in a hidden parent window with a stand-in host: asks before it changes, a refusal changes nothing, a too-small window gets the whole content, a window dropped without `removed()` is forgotten | passed |
 | Keyboard in `editorhost`: drawn, white and black key lit while held, KEYS hides and shows it, window shrinks and grows | as captured by script |
 | Studio One, version 0.1.0: plug-in loads, knobs respond | reported by the operator |
 
-Everything but the last row is automated or was captured by script. All of it
+Everything but the last row is automated or was captured by script. The
+`editorhost` captures and the resize timings were taken with 0.3.0; for
+0.3.1 the window was captured again (default size, KEYS off and on, 920 × 544,
+and a forced 300 × 100), not timed again. All of it
 ran on one machine: Windows 11 x64, MSVC 19.51 (Visual Studio
 Build Tools 2026) and MSVC 19.44 (Build Tools 2022).
 
@@ -204,6 +217,11 @@ Build Tools 2026) and MSVC 19.44 (Build Tools 2022).
   size and then smoothed over about 5 ms.
 * Attack and decay are read at the strike. Automating them does not bend notes
   that already sound, as in the firmware.
+* Moving the pitch across a quarter of the sample rate (about 12 kHz at
+  48 kHz, so only very high notes with Master Pitch or the pitch wheel)
+  switches the 12 % second harmonic on or off at once: a small step in the
+  waveform. This is the firmware engine's behaviour (`core/`, review finding
+  R07); its fix belongs in Daisy-Seed.
 * No presets.
 * Screen keyboard: one fixed velocity; notes start at the next audio block, so
   they are up to one block late (at 512 samples and 48 kHz, 11 ms); MIDI notes
@@ -218,10 +236,11 @@ Build Tools 2026) and MSVC 19.44 (Build Tools 2022).
 | --- | --- |
 | `core/` | The firmware engine and its MIDI queue, unchanged |
 | `source/engine.*` | Pitch offset, volume, Nyquist guard |
-| `source/parameters.h` | Parameters, ranges, MIDI controller numbers |
+| `source/parameters.h`, `value_text.h` | Parameters, ranges, MIDI controller numbers; reading typed values |
 | `source/processor.*` | Audio side: MIDI and screen keyboard notes in, stereo out, state |
 | `source/controller.*` | Parameters as the host sees them, MIDI controller map, window settings |
 | `source/editor.*` | The window and its resizing |
 | `source/keyboard_layout.h`, `keyboard_view.*` | The screen keyboard and the KEYS button |
 | `source/factory.cpp`, `plugin_ids.h`, `version.h` | Registration, IDs, version |
 | `tests/` | Engine test from the firmware, plug-in test |
+| `docs/` | Picture of the window, code review and what was done about it |

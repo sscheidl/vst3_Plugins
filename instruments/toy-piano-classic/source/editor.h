@@ -128,6 +128,13 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
   public:
     Editor(Steinberg::Vst::EditController* controller, const EditorSettings& settings,
            EditorCallbacks callbacks);
+    ~Editor() override;
+
+    // Shows or hides the keyboard, as the KEYS button does. If the host
+    // refuses the new window size, nothing changes.
+    void SetKeyboardVisible(bool show);
+    bool KeyboardVisible() const { return settings_.keyboard; }
+    const EditorSettings& Settings() const { return settings_; }
 
     // Called by the controller whenever a parameter changes, whatever the
     // source: this window, host automation or a MIDI controller.
@@ -158,12 +165,13 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     void ShowValue(Knob& knob, Steinberg::Vst::ParamValue normalized);
     // Window size in pixels for the current zoom, display scale and keyboard.
     Steinberg::ViewRect ScaledSize() const;
-    // Draws the content at the current zoom into a frame of the given size.
+    // The zoom the content is drawn at in a window of this size.
+    double DisplayZoom(Steinberg::int32 width, Steinberg::int32 height) const;
+    // Fills a frame of the given size with the content.
     void LayOut(Steinberg::int32 width, Steinberg::int32 height);
-    // Gives the window the size ScaledSize() says. If the host refuses, the
-    // content is zoomed to fit the window it has.
-    void Resize();
-    void ShowKeyboard(bool show);
+    // Asks the host for the size ScaledSize() says. True if the window has it
+    // or the host agreed; then onSize() does the rest.
+    bool Resize();
     // Records a change by the user; `settled` follows once it has stopped.
     void UserChanged();
 

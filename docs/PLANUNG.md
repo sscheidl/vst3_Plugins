@@ -1,6 +1,6 @@
 # Planung
 
-Stand: 2026-11-13. Das erste Testobjekt, Toy Piano Classic 0.3.0, ist gebaut
+Stand: 2026-11-14. Das erste Testobjekt, Toy Piano Classic 0.3.1, ist gebaut
 und automatisch geprüft. In Studio One lädt es, die Regler reagieren. Angehört
 wurde es noch nicht; Waveform und Live stehen aus.
 
@@ -138,6 +138,13 @@ und die Tests ausführt. Zwei Dinge sind vorher zu klären:
   Ecke springen. Die Lösung merkt sich je Ziehvorgang, ob eine Kante oder eine
   Ecke gezogen wird. Außerdem darf „Projekt geändert" nicht bei jedem
   Zwischenschritt an den Host gehen.
+* **Eine unabhängige Prüfung findet, was die eigenen Tests nicht sehen.**
+  Codex fand in 0.3.0 acht Befunde, die alle Tests und der validator
+  übersehen hatten: Lebensdauer des Fensters bei einem nachlässigen Host,
+  eine Glättung, die ihr Ziel nie erreicht, zu nachgiebige Texteingabe,
+  Größenänderung gegen den VST3-Vertrag. Gemeinsam war allen, dass kein Test
+  einen echten Host nachbildete. Seit 0.3.1 gibt es dafür ein Host-Doppel im
+  Test. Ein Befund (R07) liegt in der Firmware selbst.
 * **Die beiden VST3-Hälften reden über Nachrichten.** Was im Fenster passiert,
   erreicht den Audioteil nur als Parameter oder als Nachricht. Für Noten von
   der Bildschirm-Klaviatur passt die Nachricht; die Firmware-Queue bringt sie

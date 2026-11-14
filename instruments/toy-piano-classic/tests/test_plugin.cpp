@@ -8,6 +8,7 @@
 #include "parameters.h"
 #include "processor.h"
 #include "toy_piano.h"
+#include "value_text.h"
 
 #include "public.sdk/source/common/memorystream.h"
 #include "public.sdk/source/vst/hosting/eventlist.h"
@@ -15,6 +16,10 @@
 #include "public.sdk/source/vst/hosting/parameterchanges.h"
 #include "public.sdk/source/vst/hosting/processdata.h"
 #include "public.sdk/source/vst/utility/stringconvert.h"
+#include "pluginterfaces/gui/iplugview.h"
+#include "vstgui/lib/cframe.h"
+
+#include <windows.h>
 
 #include <algorithm>
 #include <cmath>
@@ -31,9 +36,12 @@ using namespace Steinberg;
 using namespace Steinberg::Vst;
 using namespace taureon::toy_piano_classic;
 
-// In a plug-in the SDK's DLL entry point defines this handle. The test links
-// the plug-in's classes into an executable, so it has to provide it.
+// In a plug-in the SDK's DLL entry point defines this handle and calls
+// InitModule(). The test links the plug-in's classes into an executable, so it
+// has to provide both itself (see TestEditorInWindow).
 void* moduleHandle = nullptr;
+bool InitModule();
+bool DeinitModule();
 
 #define CHECK(condition) \
     do { \
@@ -205,14 +213,14 @@ void TestBitExactAtPitchZero() {
     const auto reference =
         RenderCore(48000.0f, score, total, AttackSeconds(run.attack), DecaySeconds(run.decay));
     CHECK(Peak(reference) > 0.1f); // many voices at once, not a lone note
-    for(const int block : {1, 16, 48, 64, 333, 1024, 2048}) {
-        run.block_size = block;
-        CHECK(Identical(RenderPlugin(run, score, total), reference));
-    }
-    run.block_size = 256;
-    run.double_precision = true; // 64-bit processing carries the same float samples
-    CHECK(Identical(RenderPlugin(run, score, total), reference));
-    std::printf("bit-exact against the firmware engine: 7 block sizes, 32 and 64 bit\n");
+    // 64-bit processing carries the same float samples.
+    for(const bool double_precision : {false, true})
+        for(const int block : {1, 16, 48, 64, 333, 1024, 2048}) {
+            run.block_size = block;
+            run.double_precision = double_precision;
+            CHECK(Identical(RenderPlugin(run, score, total), reference));
+        }
+    std::printf("bit-exact against the firmware engine: 7 block sizes, each 32 and 64 bit\n");
 }
 
 // Other sample rates: same engine, initialised with the host's rate.
@@ -796,9 +804,263 @@ void TestScreenKeyboardNotes() {
     std::printf("screen keyboard: note message reaches the engine, bit-exact\n");
 }
 
+// Typed values: one number, optionally the unit, nothing else (review R03).
+void TestTypedValues() {
+    double value = 7.0;
+    for(const auto& [text, unit, expected] :
+        {std::tuple{"500", "ms", 500.0}, std::tuple{" 500 ms ", "ms", 500.0},
+         std::tuple{"500MS", "ms", 500.0}, std::tuple{"+2.5", "", 2.5},
+         std::tuple{"2,5", "", 2.5}, std::tuple{"-6dB", "dB", -6.0},
+         std::tuple{"1e2", "", 100.0}}) {
+        CHECK(ParseTypedNumber(text, unit, value) && value == expected);
+    }
+    for(const char* text : {"", "   ", "foo", "12junk", "nan", "inf", "-inf", "1,2,3", "ms",
+                            "5 s", "--5", "+"}) {
+        value = 7.0;
+        CHECK(!ParseTypedNumber(text, "ms", value));
+        CHECK(value == 7.0); // untouched on failure
+    }
+
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(nullptr) == kResultOk);
+    const auto typed = [&](ParamID id, const char* text, ParamValue& normalized) {
+        String128 string{};
+        StringConvert::convert(std::string(text), string);
+        return controller->getParamValueByString(id, string, normalized) == kResultOk;
+    };
+    const auto refused = [&](ParamID id, const char* text) {
+        ParamValue normalized = 0.123;
+        return !typed(id, text, normalized) && normalized == 0.123;
+    };
+    for(const ParamID id :
+        {kParamMasterPitch, kParamAttack, kParamDecay, kParamVolume, kParamPitchBend})
+        for(const char* text : {"", "foo", "12junk", "nan", "+inf"})
+            CHECK(refused(id, text));
+    ParamValue normalized = 0.0;
+    CHECK(typed(kParamDecay, "500", normalized) && std::fabs(DecaySeconds(normalized) - 0.5f) < 1e-4f);
+    CHECK(typed(kParamAttack, "10 ms", normalized)
+          && std::fabs(AttackSeconds(normalized) - 0.01f) < 1e-5f);
+    CHECK(typed(kParamVolume, "-inf", normalized) && normalized == 0.0);
+    CHECK(typed(kParamVolume, "-INF dB", normalized) && normalized == 0.0);
+    CHECK(typed(kParamVolume, "-6 dB", normalized) && std::fabs(VolumeDb(normalized) + 6.0) < 1e-9);
+    CHECK(typed(kParamMasterPitch, "-7 st", normalized) && MasterPitchSemitones(normalized) == -7);
+    CHECK(typed(kParamMasterPitch, "7.4", normalized) && MasterPitchSemitones(normalized) == 7);
+    CHECK(typed(kParamMasterPitch, "+30", normalized) && MasterPitchSemitones(normalized) == 24);
+    CHECK(typed(kParamPitchBend, "1", normalized) && std::fabs(normalized - 0.75) < 1e-12);
+    controller->terminate();
+    std::printf("typed values: strict, unit optional, -inf for silence, junk refused\n");
+}
+
+// Volume and pitch glides land exactly on their target, at every sample rate
+// and from both sides (review R02). Back at 0 dB the output is the engine's
+// own again, bit for bit.
+void TestGlidesReachTarget() {
+    for(const float rate : {8000.0f, 44100.0f, 48000.0f, 96000.0f, 192000.0f}) {
+        Engine engine;
+        engine.Init(rate);
+        const int second = static_cast<int>(rate);
+        const auto run = [&](int samples) {
+            for(int i = 0; i < samples; ++i)
+                engine.Process();
+        };
+        for(const float target : {0.25f, 1.0f, VolumeGain(1.0), 1.0f, 0.0f, 1.0f}) {
+            engine.SetVolume(target);
+            run(second);
+            CHECK(engine.Volume() == target);
+        }
+        for(const float semitones : {7.0f, 0.0f, -26.0f, 0.0f, 0.37f, 0.0f}) {
+            engine.SetPitch(semitones);
+            run(second);
+            CHECK(engine.PitchRatio() == std::pow(2.0f, semitones / 12.0f));
+        }
+        CHECK(engine.PitchRatio() == 1.0f);
+    }
+    // A note played through a volume round trip sounds like one that never had it.
+    Engine moved, still;
+    moved.Init(48000.0f);
+    still.Init(48000.0f);
+    moved.NoteOn(60, 127, toy_piano::kAttackMin, toy_piano::kDecayMax);
+    still.NoteOn(60, 127, toy_piano::kAttackMin, toy_piano::kDecayMax);
+    moved.SetVolume(0.25f);
+    for(int i = 0; i < 24000; ++i) {
+        moved.Process();
+        still.Process();
+    }
+    moved.SetVolume(1.0f);
+    for(int i = 0; i < 48000; ++i) {
+        moved.Process();
+        still.Process();
+    }
+    for(int i = 0; i < 4800; ++i)
+        CHECK(moved.Process() == still.Process());
+    std::printf("glides: volume and pitch land exactly on target at 8..192 kHz\n");
+}
+
+// A full keyboard queue refuses further notes and says so; one block empties it.
+void TestKeyboardQueueLimit() {
+    IPtr<HostApplication> host = owned(new HostApplication());
+    IPtr<Processor> processor = owned(new Processor());
+    CHECK(processor->initialize(host) == kResultOk);
+    ProcessSetup setup{kRealtime, kSample32, 64, 48000.0};
+    CHECK(processor->setupProcessing(setup) == kResultOk);
+    CHECK(processor->setActive(true) == kResultOk);
+    const auto note = [&](int64 pitch) {
+        auto message = owned(new HostMessage());
+        message->setMessageID(kNoteMessageId);
+        message->getAttributes()->setInt(kNoteMessageNote, pitch);
+        message->getAttributes()->setInt(kNoteMessageVelocity, 100);
+        return processor->notify(message);
+    };
+    for(int i = 0; i < 64; ++i)
+        CHECK(note(40 + i) == kResultOk);
+    CHECK(note(110) != kResultOk); // the 65th
+    HostProcessData data;
+    CHECK(data.prepare(*processor.get(), 64, kSample32));
+    data.numSamples = 64;
+    CHECK(processor->process(data) == kResultOk);
+    CHECK(note(110) == kResultOk); // room again
+    processor->setActive(false);
+    processor->terminate();
+    std::printf("keyboard queue: 64 notes, a full queue reports it, one block empties it\n");
+}
+
+// A host stand-in: answers the window's size requests. Accepting, it does what
+// a host does: resizes its window, then calls the view's onSize().
+class FakeHost : public IPlugFrame {
+  public:
+    tresult PLUGIN_API resizeView(IPlugView* view, ViewRect* size) override {
+        ++requests;
+        view->getSize(&size_at_request);
+        const VSTGUI::CRect frame = editor->getFrame()->getViewSize();
+        frame_at_request = {static_cast<int>(frame.getWidth()), static_cast<int>(frame.getHeight())};
+        if(!accept)
+            return kResultFalse;
+        view->onSize(size);
+        return kResultTrue;
+    }
+    tresult PLUGIN_API queryInterface(const TUID, void** obj) override {
+        *obj = nullptr;
+        return kNoInterface;
+    }
+    uint32 PLUGIN_API addRef() override { return 1; }
+    uint32 PLUGIN_API release() override { return 1; }
+
+    Editor* editor = nullptr;
+    bool accept = true;
+    int requests = 0;
+    ViewRect size_at_request{};
+    EditorSize frame_at_request{};
+};
+
+// The real window in a hidden parent window, with a host that accepts or
+// refuses sizes (review R01, R04, R05).
+void TestEditorInWindow() {
+    using VSTGUI::CRect;
+    moduleHandle = GetModuleHandleW(nullptr);
+    CHECK(InitModule()); // what a plug-in's DLL entry does: sets up VSTGUI
+    HWND parent = CreateWindowExW(0, L"STATIC", L"", WS_POPUP, 0, 0, 1600, 1000, nullptr, nullptr,
+                                  GetModuleHandleW(nullptr), nullptr);
+    CHECK(parent != nullptr);
+
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(nullptr) == kResultOk);
+    FakeHost host;
+    const auto open_view = [&]() {
+        IPtr<IPlugView> view = owned(controller->createView(ViewType::kEditor));
+        CHECK(view != nullptr);
+        host.editor = dynamic_cast<Editor*>(view.get());
+        CHECK(host.editor != nullptr);
+        CHECK(view->setFrame(&host) == kResultOk);
+        CHECK(view->attached(parent, kPlatformTypeHWND) == kResultOk);
+        return view;
+    };
+    const auto same = [](EditorSize a, EditorSize b) {
+        return a.width == b.width && a.height == b.height;
+    };
+    const auto view_size = [](IPlugView* view) {
+        ViewRect size{};
+        CHECK(view->getSize(&size) == kResultOk);
+        return EditorSize{size.getWidth(), size.getHeight()};
+    };
+    const auto frame_size = [](Editor* editor) {
+        const CRect size = editor->getFrame()->getViewSize();
+        return EditorSize{static_cast<int>(size.getWidth()), static_cast<int>(size.getHeight())};
+    };
+
+    IPtr<IPlugView> view = open_view();
+    Editor* editor = host.editor;
+    CHECK(controller->OpenEditorCount() == 1);
+    CHECK(editor->KeyboardVisible());
+    CHECK(same(view_size(view), {460, 272}) && same(frame_size(editor), {460, 272}));
+
+    // KEYS off, host agrees: the window changes only once the host has agreed.
+    // (The SDK's attached() has already sent one request of its own.)
+    int requests = host.requests;
+    editor->SetKeyboardVisible(false);
+    CHECK(host.requests == requests + 1);
+    CHECK(host.size_at_request.getHeight() == 272 && host.frame_at_request.height == 272);
+    CHECK(!editor->KeyboardVisible());
+    CHECK(same(view_size(view), {460, 190}) && same(frame_size(editor), {460, 190}));
+
+    // KEYS on, host refuses: nothing changes, nothing is cut off.
+    host.accept = false;
+    requests = host.requests;
+    editor->SetKeyboardVisible(true);
+    CHECK(host.requests == requests + 1 && host.frame_at_request.height == 190);
+    CHECK(!editor->KeyboardVisible());
+    CHECK(same(view_size(view), {460, 190}) && same(frame_size(editor), {460, 190}));
+
+    // The same at the smallest zoom (the case in R04).
+    host.accept = true;
+    editor->ApplySettings({kMinEditorZoom, false});
+    CHECK(same(view_size(view), {230, 95}) && same(frame_size(editor), {230, 95}));
+    host.accept = false;
+    editor->SetKeyboardVisible(true);
+    CHECK(!editor->KeyboardVisible() && same(frame_size(editor), {230, 95}));
+
+    // A loaded project brings the keyboard, the host keeps the window: the
+    // content shrinks below 50 % to fit; the saved zoom stays as it was.
+    editor->ApplySettings({kMinEditorZoom, true});
+    CHECK(editor->KeyboardVisible() && same(frame_size(editor), {230, 95}));
+    const double display = editor->getFrame()->getTransform().m11;
+    CHECK(EditorBaseHeight(true) * display <= 95.0 + 1e-9 && kEditorWidth * display <= 230.0 + 1e-9);
+    CHECK(editor->Settings().zoom == kMinEditorZoom);
+
+    // Display scale and a user drag, host agreeing.
+    host.accept = true;
+    editor->ApplySettings({1.0, true});
+    CHECK(same(view_size(view), {460, 272}));
+    CHECK(editor->setContentScaleFactor(1.5f) == kResultOk);
+    CHECK(same(view_size(view), {690, 408}) && same(frame_size(editor), {690, 408}));
+    ViewRect dragged(0, 0, 920, 544);
+    CHECK(view->onSize(&dragged) == kResultOk);
+    CHECK(std::fabs(editor->Settings().zoom - 920.0 / 690.0) < 1e-9);
+
+    // Closed properly, then opened again with the settings it had.
+    CHECK(view->removed() == kResultOk);
+    CHECK(controller->OpenEditorCount() == 0);
+    view = nullptr;
+    view = open_view();
+    CHECK(controller->OpenEditorCount() == 1);
+    CHECK(same(view_size(view), EditorSizeFor(920.0 / 690.0, true)));
+
+    // A host that drops the window without removed() (R01): the controller
+    // forgets it, and the next parameter change does not reach it.
+    view = nullptr;
+    CHECK(controller->OpenEditorCount() == 0);
+    CHECK(controller->setParamNormalized(kParamVolume, 0.3) == kResultOk);
+
+    controller->terminate();
+    DestroyWindow(parent);
+    DeinitModule();
+    std::printf("editor in a window: asks before resizing, refusals change nothing, "
+                "dropped windows forgotten\n");
+}
+
 } // namespace
 
 int main() {
+    std::setvbuf(stdout, nullptr, _IONBF, 0); // progress survives a crash
     TestBitExactAtPitchZero();
     TestSampleRates();
     TestMasterPitch();
@@ -812,6 +1074,10 @@ int main() {
     TestEditorResize();
     TestKeyboardLayout();
     TestScreenKeyboardNotes();
+    TestTypedValues();
+    TestGlidesReachTarget();
+    TestKeyboardQueueLimit();
+    TestEditorInWindow();
     std::printf("PASS\n");
     return 0;
 }

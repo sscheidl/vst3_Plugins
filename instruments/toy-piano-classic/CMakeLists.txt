@@ -2,7 +2,7 @@
 
 # Its own version; moduleinfo.json takes it from here. Keep it equal to
 # FULL_VERSION_STR in source/version.h.
-project(ToyPianoClassic VERSION 0.3.0 LANGUAGES CXX)
+project(ToyPianoClassic VERSION 0.3.1 LANGUAGES CXX)
 
 # The firmware engine exactly as copied from Daisy-Seed. Its own warnings stay
 # as they are; the files are not to be edited here.
@@ -30,6 +30,7 @@ add_library(toy_piano_classic_shell STATIC
     source/plugin_ids.h
     source/processor.cpp
     source/processor.h
+    source/value_text.h
     source/version.h)
 target_include_directories(toy_piano_classic_shell PUBLIC source)
 target_compile_options(toy_piano_classic_shell PRIVATE /W4 /permissive-)

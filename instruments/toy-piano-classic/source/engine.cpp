@@ -25,6 +25,15 @@ constexpr float kHeldIncrement = 0.49f;
 // Samples over which a voice fades when it is muted or comes back.
 constexpr std::size_t kLevelRamp = 64;
 
+// One step of an exponential approach. Lands exactly on the target once it is
+// within `snap`, or once the step has become too small to change a float:
+// close to the target the step can round away to nothing, and the value would
+// stop just short of it for good.
+float Approach(float current, float target, float coefficient, float snap) {
+    const float next = current + coefficient * (target - current);
+    return next == current || std::fabs(target - next) < snap ? target : next;
+}
+
 } // namespace
 
 void Engine::Init(float sample_rate) {
@@ -57,22 +66,14 @@ float Engine::Process() {
         tick_ = 0;
         StepGlide();
     }
-    if(volume_current_ != volume_target_) {
-        const float distance = volume_target_ - volume_current_;
-        volume_current_ = std::fabs(distance) < kVolumeSnap
-                              ? volume_target_
-                              : volume_current_ + volume_coefficient_ * distance;
-    }
+    if(volume_current_ != volume_target_)
+        volume_current_ = Approach(volume_current_, volume_target_, volume_coefficient_, kVolumeSnap);
     // At volume 1 the product is the raw sum itself, bit for bit.
     return toy_piano::ToyPiano::SoftLimit(piano_.ProcessRaw() * volume_current_);
 }
 
 void Engine::StepGlide() {
-    const float distance = pitch_target_ - pitch_current_;
-    if(std::fabs(distance) < kGlideSnap)
-        pitch_current_ = pitch_target_;
-    else
-        pitch_current_ += glide_coefficient_ * distance;
+    pitch_current_ = Approach(pitch_current_, pitch_target_, glide_coefficient_, kGlideSnap);
     ratio_ = std::pow(2.0f, pitch_current_ / 12.0f); // exactly 1 at 0 semitones
     ApplyPitch();
 }

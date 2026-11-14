@@ -4,12 +4,15 @@
 #include "keyboard_layout.h"
 #include "parameters.h"
 #include "plugin_ids.h"
+#include "value_text.h"
 
 #include "base/source/fstreamer.h"
 #include "pluginterfaces/base/ustring.h"
+#include "public.sdk/source/vst/utility/stringconvert.h"
 #include "public.sdk/source/vst/vstparameters.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <utility>
@@ -20,6 +23,34 @@ using namespace Steinberg;
 using namespace Steinberg::Vst;
 
 namespace {
+
+// Typed text, read strictly (see value_text.h). The SDK's own readers accept
+// "foo" and "12junk"; for a stepped RangeParameter "foo" even yields an
+// uninitialised number.
+bool ReadTyped(const TChar* string, const char* unit, double& value) {
+    if(!string)
+        return false;
+    return ParseTypedNumber(StringConvert::convert(string), unit, value);
+}
+
+// A range in plain units, typed strictly. With steps, a typed value is
+// rounded to the nearest step; out-of-range values are clamped.
+class TypedRangeParameter : public RangeParameter {
+  public:
+    using RangeParameter::RangeParameter;
+
+    bool fromString(const TChar* string, ParamValue& normalized) const SMTG_OVERRIDE {
+        double plain = 0.0;
+        if(!ReadTyped(string, "st", plain))
+            return false;
+        if(info.stepCount > 0)
+            plain = std::round(plain);
+        normalized = toNormalized(std::clamp(plain, getMin(), getMax()));
+        return true;
+    }
+
+    OBJ_METHODS(TypedRangeParameter, RangeParameter)
+};
 
 // A time on the firmware's logarithmic pot curve, shown and typed in milliseconds.
 class LogTimeParameter : public Parameter {
@@ -39,7 +70,7 @@ class LogTimeParameter : public Parameter {
 
     bool fromString(const TChar* string, ParamValue& normalized) const SMTG_OVERRIDE {
         double milliseconds = 0.0;
-        if(!UString(const_cast<TChar*>(string), -1).scanFloat(milliseconds))
+        if(!ReadTyped(string, "ms", milliseconds))
             return false;
         normalized = toNormalized(milliseconds);
         return true;
@@ -77,8 +108,12 @@ class VolumeParameter : public Parameter {
     }
 
     bool fromString(const TChar* string, ParamValue& normalized) const SMTG_OVERRIDE {
+        if(string && EqualsIgnoringCase(StripUnit(StringConvert::convert(string), "dB"), "-inf")) {
+            normalized = 0.0; // silence, as displayed
+            return true;
+        }
         double db = 0.0;
-        if(!UString(const_cast<TChar*>(string), -1).scanFloat(db))
+        if(!ReadTyped(string, "dB", db))
             return false;
         normalized = VolumeNormalized(db);
         return true;
@@ -97,7 +132,7 @@ tresult PLUGIN_API Controller::initialize(FUnknown* context) {
     if(result != kResultOk)
         return result;
 
-    parameters.addParameter(new RangeParameter(STR16("Master Pitch"), kParamMasterPitch,
+    parameters.addParameter(new TypedRangeParameter(STR16("Master Pitch"), kParamMasterPitch,
                                                STR16("st"), -kMasterPitchRange, kMasterPitchRange,
                                                0, kMasterPitchSteps,
                                                ParameterInfo::kCanAutomate));
@@ -110,7 +145,7 @@ tresult PLUGIN_API Controller::initialize(FUnknown* context) {
     parameters.addParameter(new VolumeParameter(STR16("Volume"), kParamVolume));
     // The pitch wheel arrives as a parameter, the way VST3 delivers MIDI
     // controllers. It has no knob and is not saved.
-    parameters.addParameter(new RangeParameter(STR16("Pitch Bend"), kParamPitchBend, STR16("st"),
+    parameters.addParameter(new TypedRangeParameter(STR16("Pitch Bend"), kParamPitchBend, STR16("st"),
                                                -kPitchBendRange, kPitchBendRange, 0, 0,
                                                ParameterInfo::kCanAutomate));
     return kResultOk;
@@ -135,8 +170,8 @@ tresult PLUGIN_API Controller::setComponentState(IBStream* state) {
 tresult PLUGIN_API Controller::setParamNormalized(ParamID tag, ParamValue value) {
     const tresult result = EditController::setParamNormalized(tag, value);
     if(result == kResultOk)
-        for(Editor* editor : editors_)
-            editor->ParameterChanged(tag, getParamNormalized(tag));
+        for(const OpenEditor& open : editors_)
+            open.editor->ParameterChanged(tag, getParamNormalized(tag));
     return result;
 }
 
@@ -164,8 +199,8 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
         return kResultFalse;
     editor_.zoom = ClampEditorZoom(zoom);
     editor_.keyboard = keyboard != 0;
-    for(Editor* editor : editors_)
-        editor->ApplySettings(editor_);
+    for(const OpenEditor& open : editors_)
+        open.editor->ApplySettings(editor_);
     return kResultOk;
 }
 
@@ -194,16 +229,23 @@ IPlugView* PLUGIN_API Controller::createView(FIDString name) {
 }
 
 void Controller::editorAttached(EditorView* editor) {
-    if(auto* own = dynamic_cast<Editor*>(editor))
-        editors_.push_back(own);
+    auto* own = dynamic_cast<Editor*>(editor);
+    if(!own)
+        return;
+    for(const OpenEditor& open : editors_)
+        if(open.view == editor)
+            return; // attached twice: keep one entry
+    editors_.push_back({editor, own});
 }
 
 void Controller::editorRemoved(EditorView* editor) {
     editors_.erase(std::remove_if(editors_.begin(), editors_.end(),
-                                  [editor](Editor* own) {
-                                      return static_cast<EditorView*>(own) == editor;
-                                  }),
+                                  [editor](const OpenEditor& open) { return open.view == editor; }),
                    editors_.end());
+}
+
+void Controller::editorDestroyed(EditorView* editor) {
+    editorRemoved(editor);
 }
 
 tresult PLUGIN_API Controller::getMidiControllerAssignment(int32 busIndex, int16 /*channel*/,

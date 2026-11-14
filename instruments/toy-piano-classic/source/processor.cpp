@@ -109,9 +109,10 @@ void Processor::Render(ProcessData& data, SampleType** channels, int32 numChanne
     };
 
     // Screen keyboard notes start with the block: they come from the UI and
-    // have no sample position.
+    // have no sample position. At most one queue's worth per block, so the work
+    // here stays bounded even if the UI keeps adding notes meanwhile.
     KeyboardNote key;
-    while(keyboard_notes_.Pop(key))
+    for(std::size_t i = 0; i < kKeyboardQueueSize && keyboard_notes_.Pop(key); ++i)
         engine_.NoteOn(key.note, key.velocity, attack, decay);
 
     IEventList* events = data.inputEvents;
@@ -197,8 +198,10 @@ tresult PLUGIN_API Processor::notify(IMessage* message) {
         return kInvalidArgument;
     if(note < 0 || note > 127 || velocity < 1 || velocity > 127)
         return kInvalidArgument;
-    // A full queue drops the note, as the firmware does.
-    keyboard_notes_.Push({static_cast<std::uint8_t>(note), static_cast<std::uint8_t>(velocity)});
+    // A full queue drops the note, as the firmware does, and says so.
+    if(!keyboard_notes_.Push(
+           {static_cast<std::uint8_t>(note), static_cast<std::uint8_t>(velocity)}))
+        return kResultFalse;
     return kResultOk;
 }
 

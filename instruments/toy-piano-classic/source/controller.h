@@ -27,6 +27,11 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
     Steinberg::IPlugView* PLUGIN_API createView(Steinberg::FIDString name) SMTG_OVERRIDE;
     void editorAttached(Steinberg::Vst::EditorView* editor) SMTG_OVERRIDE;
     void editorRemoved(Steinberg::Vst::EditorView* editor) SMTG_OVERRIDE;
+    // Also called when a window is destroyed without having been removed
+    // first, which some hosts may do. Forgets it either way.
+    void editorDestroyed(Steinberg::Vst::EditorView* editor) SMTG_OVERRIDE;
+    // Number of windows the controller keeps up to date; for the tests.
+    std::size_t OpenEditorCount() const { return editors_.size(); }
 
     // Plays a note through the processor, as the screen keyboard does.
     void PlayNote(int note);
@@ -47,7 +52,13 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
     REFCOUNT_METHODS(EditController)
 
   private:
-    std::vector<Editor*> editors_; // the open windows; they are not owned here
+    // The open windows, not owned here. The view pointer identifies an entry
+    // even while its Editor part is already being destroyed.
+    struct OpenEditor {
+        Steinberg::Vst::EditorView* view;
+        Editor* editor;
+    };
+    std::vector<OpenEditor> editors_;
     EditorSettings editor_;        // window size and keyboard, saved with the project
 };
 
