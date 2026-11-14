@@ -1,4 +1,4 @@
-# Puts a built Elements bundle, the license texts that must accompany it and
+# Puts a built Mendelejew bundle, the license texts that must accompany it and
 # the documents for the DAW test into out/elements-<version>/, and writes
 # SHA256SUMS.txt over everything there. Installs nothing. After the script of
 # the same name in Torus Classic.
@@ -15,14 +15,17 @@ $plugin = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repo = (Resolve-Path (Join-Path $plugin '..\..')).Path
 $version = ([regex]'FULL_VERSION_STR "([^"]+)"').Match(
     [IO.File]::ReadAllText((Join-Path $plugin 'source\version.h'))).Groups[1].Value
-$bundle = Join-Path $repo "build\$Preset\VST3\Release\Elements.vst3"
-if (-not (Test-Path (Join-Path $bundle 'Contents\x86_64-win\Elements.vst3'))) {
+$bundle = Join-Path $repo "build\$Preset\VST3\Release\Mendelejew.vst3"
+if (-not (Test-Path (Join-Path $bundle 'Contents\x86_64-win\Mendelejew.vst3'))) {
     throw "No Release bundle at $bundle. Build the preset first."
 }
 $target = Join-Path $repo "out\elements-$version"
 New-Item -ItemType Directory -Force $target, (Join-Path $target 'licenses') | Out-Null
 
-# The bundle, with its hidden desktop.ini and icon.
+# The bundle, with its hidden desktop.ini and icon. A bundle staged under the
+# former working title would otherwise stay beside it.
+$former = Join-Path $target 'Elements.vst3'
+if (Test-Path $former) { Remove-Item $former -Recurse -Force }
 Copy-Item $bundle $target -Recurse -Force
 
 $licenses = @(
@@ -52,4 +55,4 @@ $lines = Get-ChildItem $target -Recurse -File -Force |
         '{0} *{1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $relative
     }
 [IO.File]::WriteAllText($sums, ($lines -join "`n") + "`n")
-"Staged Elements $version from $Preset in $target ($($lines.Count) files)."
+"Staged Mendelejew $version from $Preset in $target ($($lines.Count) files)."

@@ -1,4 +1,4 @@
-// Parameters of the Elements plug-in and their mapping to engine values.
+// Parameters of the Mendelejew plug-in and their mapping to engine values.
 // Shared by the processor, the controller, the editor and the tests; free of
 // VST3 types.
 #pragma once

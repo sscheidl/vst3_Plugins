@@ -1,6 +1,7 @@
-# Elements (working title): VST3 instrument around the modal synthesis DSP of
-# the Mutable Instruments Elements module, running at a true 48 kHz. Four
-# layers, each a target:
+# Mendelejew (internal project name: Elements): VST3 instrument around the
+# modal synthesis DSP of the Mutable Instruments Elements module, running at a
+# true 48 kHz. Only the plug-in target carries the product name. Four layers,
+# each a target:
 #
 #   elements_core     the DSP, adapted to a run-time sample rate (vendored)
 #   elements_engine   instrument: notes, controls, smoothing, output
@@ -128,11 +129,12 @@ target_link_libraries(elements_shell PUBLIC
     elements_adapter elements_engine sdk vstgui_support)
 set_target_properties(elements_shell PROPERTIES FOLDER "Elements")
 
-smtg_add_vst3plugin(Elements
-    PACKAGE_NAME "Elements"
+# The target name is the name of the bundle and of the binary in it.
+smtg_add_vst3plugin(Mendelejew
+    PACKAGE_NAME "Mendelejew"
     SOURCES_LIST source/factory.cpp)
-target_link_libraries(Elements PRIVATE elements_shell sdk)
-set_target_properties(Elements PROPERTIES FOLDER "Elements")
+target_link_libraries(Mendelejew PRIVATE elements_shell sdk)
+set_target_properties(Mendelejew PROPERTIES FOLDER "Elements")
 
 if(BUILD_TESTING)
     # The original DSP at its 32 kHz, for the comparison with the port.

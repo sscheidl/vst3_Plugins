@@ -2,7 +2,9 @@
 
 ## 0.1.0 (2026-11-14)
 
-First version: phase 1 of the Elements project.
+First version: phase 1 of the Elements project. The plug-in is called
+Mendelejew; "Elements", the working title of the first build, remains the
+internal project name. The class IDs are those of the first build.
 
 * The DSP of the Mutable Instruments Elements module (bow, blow and strike
   exciters, modal resonator, reverb) from pichenettes/eurorack, adapted to a

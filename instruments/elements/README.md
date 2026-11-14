@@ -1,4 +1,4 @@
-# Elements
+# Mendelejew
 
 A VST3 instrument around the modal synthesis DSP of the Mutable Instruments
 Elements module: bow, blow and strike exciters, a modal resonator, a stereo
@@ -12,20 +12,20 @@ form that later serves firmware (Daisy Seed3, ESP32-S3) as well as a plug-in.
 not listened to, not reviewed.** Details and every measured number are in the
 [build report](docs/BUILD_REPORT_0.1.0.md).
 
-> **About the name.** "Elements" is the internal name of this project, taken
-> from the work order. It is the name of Mutable Instruments' module, and
+> **About the name.** The plug-in is called Mendelejew, after Dmitri
+> Mendeleev (in the German spelling), who arranged the elements into the
+> periodic table. "Elements" is the name of Mutable Instruments' module, and
 > Mutable Instruments asks that derivative works do not keep a module's name
 > and never carry the company's ("Mutable Instruments" is a registered
-> trademark). Before this plug-in is published as a product it needs a name
-> of its own; that is one line in `source/version.h` and one in
-> `CMakeLists.txt`. The class IDs stay, so projects keep working. This
+> trademark). In this repository "elements" is the internal name of the
+> project only: its directory, branch, build targets and namespaces. This
 > software is not made, endorsed or supported by Mutable Instruments.
 
 ## What you get
 
 | | |
 | --- | --- |
-| Plug-in | `Elements.vst3`, vendor TAUREON, category Instrument, Synth |
+| Plug-in | `Mendelejew.vst3`, vendor TAUREON, category Instrument, Synth |
 | Audio | No input, one stereo output. The hardware's two outputs: left carries the sound with the stereo side, at low SPACE the exciter signal; right the main output |
 | MIDI | Notes with velocity, note-off, pitch wheel (±2 semitones), six controllers. One voice, last-note priority |
 | Sample rate | The engine always runs at 48 kHz. A 48 kHz host gets its output as it is; at any other host rate a sinc converter follows (about 1 ms latency, reported to the host) |
@@ -150,14 +150,14 @@ ctest --preset windows-vs2026-x64-release -R elements
 ```
 
 The build ends with Steinberg's validator run on the plug-in, which lands in
-`build/windows-vs2026-x64/VST3/Release/Elements.vst3`. To try it without a
+`build/windows-vs2026-x64/VST3/Release/Mendelejew.vst3`. To try it without a
 DAW:
 
 ```powershell
-& "build\windows-vs2026-x64\bin\Release\editorhost.exe" "build\windows-vs2026-x64\VST3\Release\Elements.vst3"
+& "build\windows-vs2026-x64\bin\Release\editorhost.exe" "build\windows-vs2026-x64\VST3\Release\Mendelejew.vst3"
 ```
 
-To install, copy the `Elements.vst3` folder into a VST3 folder the DAW scans,
+To install, copy the `Mendelejew.vst3` folder into a VST3 folder the DAW scans,
 for one user `%LOCALAPPDATA%\Programs\Common\VST3\`. Nothing is installed
 automatically.
 

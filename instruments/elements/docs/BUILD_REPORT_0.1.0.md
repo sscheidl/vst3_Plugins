@@ -1,9 +1,17 @@
-# Build report: Elements 0.1.0 (phase 1)
+# Build report: Mendelejew 0.1.0 (project Elements, phase 1)
 
 Date: 2026-11-14. Work order: "Phase 1 – Mutable Instruments Elements als
 natives VST3" (handed over in the session; its requirements are summarised
 in the pull request).
 Built and tested by Claude (Fable 5.2) on the user's machine.
+
+**The name.** The plug-in is called Mendelejew, the user's decision of
+2026-11-14 after the first build under the working title "Elements". Only
+the product name changed: the name the host shows, the bundle, the window
+title. "Elements" remains the internal project name (directory, branch,
+build targets, namespaces, test names), and where this report says
+"Elements" for the plug-in's parts it means the project. The builds and
+tests of section 6 were repeated after the change.
 
 **Status: built, validated, tested automatically. Not a release approval.**
 The plug-in has not been loaded in a DAW, nobody has listened to it, and the
@@ -22,7 +30,7 @@ the DSP measurements are also kept in
 
 ## 1. What was built
 
-A VST3 instrument in `instruments/elements/`, bundle `Elements.vst3`, vendor
+A VST3 instrument in `instruments/elements/`, bundle `Mendelejew.vst3`, vendor
 TAUREON, version 0.1.0, category Instrument/Synth, with its own class IDs
 (`419AD745 43C74420 A606A40F 1DE4FA7B` processor,
 `43CEC3AF 41924864 B3076AE1 6AF0085D` controller; generated for this
@@ -34,15 +42,16 @@ plug-in).
 | `elements_engine` | `engine/` | Instrument: voice, controls, smoothing, velocity, pitch wheel, output. Its headers show no DSP and no framework type |
 | `elements_adapter` | `adapter/` | Host block sizes, sample rate conversion, event timing |
 | `elements_shell` | `source/` | VST3 processor, controller, state, window |
-| `Elements` | `source/factory.cpp` | The plug-in |
+| `Mendelejew` | `source/factory.cpp` | The plug-in; the one target that carries the product name |
 | `elements_reference` | `tests/reference/` | The unchanged original DSP, for tests only |
 
 Local paths after the build:
 
-* `build/windows-vs2026-x64/VST3/Release/Elements.vst3` (and `.../Debug/`)
-* the binary inside: `Contents/x86_64-win/Elements.vst3`
+* `build/windows-vs2026-x64/VST3/Release/Mendelejew.vst3` (and `.../Debug/`)
+* the binary inside: `Contents/x86_64-win/Mendelejew.vst3`
 
-Nothing was installed.
+The build installs nothing. At the user's request the Release bundle was
+copied to `%LOCALAPPDATA%\Programs\Common\VST3\` for the DAW test.
 
 ## 2. Starting point
 
@@ -51,11 +60,11 @@ Nothing was installed.
   `torus-classic-0.1.0` at `78e5b9a`. Torus Classic exists on that branch
   only, not on `main`. The feature branch `elements-0.1.0` therefore starts
   there, and the pull request is made against that branch so that it shows
-  Elements alone.
+  this plug-in alone.
 * **There is no JUCE in this repository**, although the work order mentions
   it. Both existing plug-ins sit directly on the Steinberg VST3 SDK 3.8.0
-  with VSTGUI (decision of 2026-11-12, `docs/PLANUNG.md`). Elements does the
-  same; no second framework was introduced.
+  with VSTGUI (decision of 2026-11-12, `docs/PLANUNG.md`). Mendelejew does
+  the same; no second framework was introduced.
 * Baseline before any change: configure, Release build and tests of the
   branch as found. 6 of 6 tests passed, validator 47 passed, 0 failed for
   both plug-ins (`baseline-*.log`).
@@ -154,8 +163,8 @@ Final runs: Visual Studio 2026 Build Tools, preset `windows-vs2026-x64`.
 | --- | --- | --- |
 | Toy Piano | **PASS** (builds; its 2 tests pass; validator 47/0) | `ctest-vs2026-*.log`, `build-vs2026-*.log` |
 | Torus | **PASS** (builds; its 4 tests pass; validator 47/0) | the same |
-| Elements Debug | **PASS** | `build-vs2026-debug.log` |
-| Elements Release | **PASS**, no compiler warning in `instruments/elements` | `build-vs2026-release.log` |
+| Elements Debug (`Mendelejew.vst3`) | **PASS** | `build-vs2026-debug.log` |
+| Elements Release (`Mendelejew.vst3`) | **PASS**, no compiler warning in `instruments/elements` | `build-vs2026-release.log` |
 | VST3 validation | **PASS**: 47 tests passed, 0 failed, in both configurations | the same |
 | MIDI | **PASS**: note-on, note-off, velocity (15 dB range at full Velocity), pitch wheel (±2 semitones within 2 cents) | `TestNotes`, `TestVoice`, `TestPitch` |
 | Exciters | **PASS**: each alone makes its sound and ends with the key; levels against the original in section 5 | `TestExciters`, `MeasureSpectra` |
@@ -234,9 +243,11 @@ listed in the README ("Known differences", "96 kHz"). In addition:
 
 ## 9. Decisions that are the user's
 
-1. **The name.** "Elements" is a working title; see the README.
+1. **The name.** Decided on 2026-11-14: Mendelejew. Whether the name is free
+   as a product name was looked at with one web search only, which showed no
+   audio plug-in of that name; that is not a trademark search.
 2. **Damping.** Higher rings longer, as on the hardware. Torus Classic was
-   reversed at the user's request in 0.2.0; whether Elements should follow
+   reversed at the user's request in 0.2.0; whether Mendelejew should follow
    is open. One line in the engine, plus the state.
 3. **Velocity.** The mapping of key velocity to the hardware's STRENGTH is a
    choice (README, parameter 117); the default of 50 % is a guess at what

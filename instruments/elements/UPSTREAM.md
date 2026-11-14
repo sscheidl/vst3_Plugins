@@ -1,6 +1,6 @@
 # Where the code comes from
 
-Elements contains the DSP of the Mutable Instruments Elements module, written
+Mendelejew contains the DSP of the Mutable Instruments Elements module, written
 by Emilie Gillet and published under the MIT license. This file says what was
 taken, from which state, and what was changed.
 [`SHA256SUMS.upstream`](SHA256SUMS.upstream) has one line per file; the test
@@ -26,9 +26,10 @@ the sampled strikes and noise, carries the same notice. Texts:
 trademark. The name 'Mutable Instruments' should not be used on any of the
 derivative works you create from these files. We do not recommend you to keep
 the original name of the Mutable Instruments module for your derivative
-works." The plug-in does not carry the company's name. "Elements" is the
-internal name of this project for now; a published plug-in should get a name
-of its own (see [README.md](README.md)).
+works." The plug-in carries neither: it is called Mendelejew. "Elements"
+remains only the internal name of this project, for its directory, branch,
+build targets and namespaces, and the name of the upstream code it says where
+it comes from (see [README.md](README.md)).
 
 ## What was taken
 

@@ -1,4 +1,4 @@
-# DSP measurements: Elements 0.1.0
+# DSP measurements: Mendelejew 0.1.0 (project Elements)
 
 The output of `test_elements_dsp` (Release, Visual Studio 2026) in the final
 run of 2026-11-14, as written to `dsp-measurements-Release.md` in the build

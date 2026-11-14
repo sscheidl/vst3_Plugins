@@ -3,7 +3,7 @@
 Stand: 2026-11-14. Das erste Testobjekt, Toy Piano Classic 0.3.2, ist gebaut
 und automatisch geprüft. In Studio One lädt es, die Regler reagieren. Angehört
 wurde es noch nicht; Waveform und Live stehen aus. Dazugekommen sind Torus
-Classic und, als dritter Port, Elements (Arbeitstitel); ihr Stand steht in den
+Classic und, als dritter Port, Mendelejew (Projekt Elements); ihr Stand steht in den
 Abschnitten unten.
 
 ## Entscheidungen
@@ -104,7 +104,7 @@ Einzelheiten darin selbst festgelegt:
 | MIDI aus der Bildschirm-Klaviatur | Event-Ausgang „MIDI Out"; Note-on beim Anschlag, Note-off beim Loslassen | Vorgabe des Nutzers. Ohne Note-off blieben aufgenommene Noten hängen; die Engine selbst kennt weiterhin kein Note-off |
 | Tests | Nur automatische Prüfungen des Verhaltens; keine Fenster- oder DAW-Tests der Ergänzungen | Der Nutzer prüft Optik, GUI und DAW selbst |
 
-### Elements (Arbeitstitel)
+### Mendelejew (Projektname Elements)
 
 Dritter Port, Auftrag vom 2026-11-14 („Phase 1 – Mutable Instruments Elements
 als natives VST3"). Version 0.1.0 ist gebaut, vom validator geprüft und
@@ -124,7 +124,7 @@ weil der Auftrag es offen ließ:
 
 | Thema | Festlegung | Begründung |
 | --- | --- | --- |
-| Name | Verzeichnis, Bundle und Anzeigename „Elements" als Arbeitstitel | So nennt der Auftrag das Projekt. Mutable Instruments empfiehlt, Modulnamen für abgeleitete Werke nicht beizubehalten; vor einer Veröffentlichung braucht das Plugin einen eigenen Namen (zwei Zeilen, die Klassen-IDs bleiben). **Vom Nutzer zu entscheiden** |
+| Name | Das Plugin heißt „Mendelejew" (Anzeigename, Bundle, Fenstertitel). „Elements" bleibt interner Projektname: Verzeichnis, Branch, Build-Targets, Namensräume, Testnamen | **Entscheidung des Nutzers vom 2026-11-14,** nach dem ersten Build unter dem Arbeitstitel „Elements": benannt nach Dmitri Mendelejew, in deutscher Schreibweise, nur der Produktname. Mutable Instruments empfiehlt, Modulnamen für abgeleitete Werke nicht beizubehalten. Die Klassen-IDs sind die des ersten Builds |
 | Abtastrate des Kerns | Zur Laufzeit 32, 48 oder 96 kHz; Blockgröße 16, 24 oder 48 Samples, immer 0,5 ms | Bei 32 kHz muss der Port das Original sein: Nur so lässt sich bitgenau prüfen, dass kein Patch den Klang ändert. Mit der mitwachsenden Blockgröße bleiben Hüllkurventabelle und alles, was Blöcke zählt, unverändert |
 | Was „gleiches Instrument bei 48 kHz" heißt | Jedes Teil verhält sich in Zeit und Frequenz wie bei 32 kHz: Moden behalten Frequenz, Ausklang und Pegel, Verzögerungen ihre Dauer, der Tiefpass der Erreger seinen Verlauf bis 16 kHz | Die naheliegende Umrechnung (gleiche Grenzfrequenzen, Güte mal Ratenverhältnis) ergab messbar ein anderes Instrument: obere Teiltöne bis 170 Cent anders gestimmt, kürzer ausklingend und bei hellen Klängen bis 12 dB lauter. Die genaue Umrechnung ist ableitbar und einzeln gemessen; sie ist keine Klangkorrektur nach Gehör |
 | Mehr Bandbreite | Keine zusätzlichen Moden oberhalb der 15,7 kHz des Originals | Sonst hätten hohe Töne Teiltöne, die das Original nie hatte |
@@ -134,7 +134,7 @@ weil der Auftrag es offen ließ:
 | Nicht übernommen | Saitenmodelle und „Ominous Voice" der späteren Firmware, Audio-Eingänge, die „Signatur" aus der Seriennummer | Nicht Teil von Phase 1; die Saitenmodelle bräuchten eine eigene Ratenanpassung. Im Testbezug sind sie unverändert vorhanden |
 | Regler | Die Potis der Hardware als Parameter 0 bis 1; Abschwächer und CV-Eingänge entfallen | Es gibt nichts zu patchen; zusätzliche Modulation ist nicht Teil von Phase 1 |
 | Glättung | Wie der Regler-Leser der Hardware: 1 % des Wegs je halbe Millisekunde, Position und Space zusätzlich | Ohne sie knackt Automation; mit den Werten des Originals verhält sich das Plugin wie das Gerät |
-| Damping | Höherer Wert klingt länger, wie an der Hardware | Vorgabe „Originalparameter". **Bei Torus Classic ist es seit 0.2.0 auf Wunsch des Nutzers umgekehrt;** ob Elements folgen soll, ist offen |
+| Damping | Höherer Wert klingt länger, wie an der Hardware | Vorgabe „Originalparameter". **Bei Torus Classic ist es seit 0.2.0 auf Wunsch des Nutzers umgekehrt;** ob Mendelejew folgen soll, ist offen |
 | Coarse, Fine | ±30 Halbtöne in ganzen Schritten, ±2 Halbtöne stufenlos | Umfang der Hardware-Potis (5 Oktaven, ±2 Halbtöne), um die gespielte Note zentriert |
 | Freeze | Eigener Schalter | An der Hardware nur mit Steuerspannung auf SPACE erreichbar |
 | Velocity | Regler 0 bis 100 %, Vorgabe 50 %: Anschlag bewegt STRENGTH um die Ruhelage der Hardware, bei 100 % ±15 dB | Bei 0 % ist jede Note so laut wie an der unbeschalteten Hardware; damit bleibt der Vergleich mit dem Original einfach |

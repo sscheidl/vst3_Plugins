@@ -1,18 +1,20 @@
-# DAW-Prüfliste: Elements 0.1.0
+# DAW-Prüfliste: Mendelejew 0.1.0 (Projekt Elements)
 
 Was automatisch nicht prüfbar ist und in der DAW (Studio One) noch aussteht.
 Ergebnisse bitte hier eintragen: PASS, FAIL mit kurzer Beschreibung, oder
 offen.
 
-Installation: den Ordner `Elements.vst3` aus
+Installation: den Ordner `Mendelejew.vst3` aus
 `build\windows-vs2026-x64\VST3\Release\` (oder aus `out\elements-0.1.0\`) nach
-`%LOCALAPPDATA%\Programs\Common\VST3\` kopieren, DAW neu scannen lassen.
+`%LOCALAPPDATA%\Programs\Common\VST3\` kopieren, DAW neu scannen lassen. Eine
+dort liegende Kopie unter dem Arbeitstitel (`Elements.vst3`) vorher entfernen:
+Beide haben dieselben Klassen-IDs.
 
 ## Laden und Spielen
 
 | Nr. | Prüfung | Ergebnis |
 | --- | --- | --- |
-| 1 | Plugin erscheint als Instrument „Elements" (Hersteller TAUREON) | offen |
+| 1 | Plugin erscheint als Instrument „Mendelejew" (Hersteller TAUREON) | offen |
 | 2 | Lädt auf einer Instrumentenspur ohne Fehlermeldung | offen |
 | 3 | Fenster öffnet, Regler und Beschriftung vollständig sichtbar, nichts überlappt | offen |
 | 4 | Fenster lässt sich an der Ecke ziehen (50 bis 200 %) | offen |

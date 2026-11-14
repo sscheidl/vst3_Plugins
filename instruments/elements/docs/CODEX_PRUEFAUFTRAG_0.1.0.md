@@ -1,18 +1,23 @@
-# Prüfauftrag an Codex: Elements 0.1.0 (Phase 1, nur Code)
+# Prüfauftrag an Codex: Mendelejew 0.1.0 (Projekt Elements, Phase 1, nur Code)
 
 * **Stand:** 2026-11-14
+* **Name:** Das Plugin heißt „Mendelejew" (Bundle `Mendelejew.vst3`).
+  „Elements" ist nur noch der interne Projektname: Verzeichnis, Branch,
+  Build-Targets, Namensräume und Testnamen.
 * **Gegenstand:** `instruments/elements/` im Repo
   [sscheidl/vst3_Plugins](https://github.com/sscheidl/vst3_Plugins), Branch
   `elements-0.1.0`, dazu die wenigen Zeilen außerhalb davon (`CMakeLists.txt`,
   READMEs, `THIRD_PARTY_NOTICES.md`, `docs/PLANUNG.md`). Der Branch setzt auf
   `torus-classic-0.1.0` auf; `git diff torus-classic-0.1.0...elements-0.1.0`
-  zeigt genau diese Arbeit.
+  zeigt genau diese Arbeit. Zu prüfen ist der letzte Commit des Branches, der
+  mit der Umbenennung; Pull Request
+  [#2](https://github.com/sscheidl/vst3_Plugins/pull/2).
 * **Verfasser des Codes:** Claude (Fable 5.2)
 * **Grundlage:** der Arbeitsauftrag „Phase 1 – Mutable Instruments Elements
   als natives VST3" (seine Anforderungen stehen zusammengefasst im Pull
   Request und in Abschnitt 6 des Build-Berichts), das
   [README](../README.md), [UPSTREAM.md](../UPSTREAM.md), der
-  [Build-Bericht](BUILD_REPORT_0.1.0.md) und der Abschnitt „Elements" in
+  [Build-Bericht](BUILD_REPORT_0.1.0.md) und der Abschnitt „Mendelejew" in
   [docs/PLANUNG.md](../../../docs/PLANUNG.md)
 * **Ergebnis nach:** `instruments/elements/docs/CODEX_REVIEW_0.1.0.md`
 
@@ -124,6 +129,13 @@ Kopien aus Torus Classic 0.2.0 und dort schon geprüft. Neu und zu prüfen:
 
 * `adapter/stream_adapter.*`: Note-Off und „alle Noten aus" in der
   Warteschlange; die Regel bei Überlauf (ein Note-Off geht nie verloren).
+* **Offener Befund der automatischen Prüfung am Pull Request** (P2,
+  `processor.cpp` um Zeile 366, Commit `7901899`): Kommen von der
+  Bildschirm-Klaviatur zwischen zwei Audio-Blöcken mehr als 64 Ereignisse,
+  gehen auch Loslass-Ereignisse verloren, und die letzte Taste bleibt hängen.
+  Noch nicht nachgeprüft und nicht behoben. Bitte bestätigen oder widerlegen
+  und als EL-R-Befund führen; dabei auch die anderen Warteschlangen zwischen
+  Fenster, Controller und Prozessor auf dieselbe Lücke ansehen.
 * `processor.cpp`: Note-Off-Ereignisse, Note-On mit Velocity 0, die
   Bildschirm-Klaviatur mit Loslassen, die Statusnachricht an den Controller
   aus `setActive` (Thread, Host ohne Nachrichten, Controller ohne Fenster).
@@ -140,8 +152,10 @@ Kopien aus Torus Classic 0.2.0 und dort schon geprüft. Neu und zu prüfen:
   erhaltenem Lizenzhinweis?
 * Ist irgendwo Code aus `VCVRack/AudibleInstruments` oder
   `Conceptual-Machines/magda-core` (beide GPL) übernommen?
-* Der Name: Das Plugin heißt als Arbeitstitel „Elements". Der Hinweis dazu
-  steht im README; reicht er, solange das Repository öffentlich ist?
+* Der Name: Das Plugin heißt „Mendelejew"; „Elements" ist nur noch der
+  interne Projektname. Trägt noch etwas, das ein Nutzer des Plugins sieht
+  (Anzeigename, Bundle, Fenster, `moduleinfo.json`), den Modulnamen oder den
+  Namen Mutable Instruments? Reicht der Hinweis im README?
 
 ## Bekannt und nicht zu melden
 
