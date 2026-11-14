@@ -11,8 +11,12 @@ Their license texts must accompany any binary that is passed on.
 | Daisy-Seed, Toy Piano | The sound engine in `instruments/toy-piano-classic/core/` | MIT, © 2026 TAUREON | Copied into this repository, unchanged |
 | Torus, the Daisy port of Mutable Instruments Rings | The synthesis DSP in `instruments/torus-classic/core/torus/`; with its reverb also in the test reference `instruments/torus-classic/tests/reference/`, which no plug-in contains | MIT, © Emilie Gillet and the upstream contributors | Copied through Daisy-Seed and patched, see `instruments/torus-classic/UPSTREAM.md`; text in `instruments/torus-classic/licenses/Torus-Rings-MIT.txt` |
 | stmlib | DSP helpers in `instruments/torus-classic/core/stmlib/` | MIT, © Emilie Gillet | Copied through Daisy-Seed, unchanged; text in `instruments/torus-classic/core/stmlib/LICENSE` |
-| Daisy-Seed, Physical Modeling | The instrument engine in `instruments/torus-classic/engine/` and one queue header in `source/` | MIT, © 2026 TAUREON | Copied into this repository and adapted, see `instruments/torus-classic/UPSTREAM.md` |
+| Daisy-Seed, Physical Modeling | The instrument engine in `instruments/torus-classic/engine/` and one queue header in `source/`; that header also in `instruments/elements/source/` | MIT, © 2026 TAUREON | Copied into this repository and adapted, see `instruments/torus-classic/UPSTREAM.md` |
+| Mutable Instruments Elements, from pichenettes/eurorack | The synthesis DSP, its tables and its sampled strikes in `instruments/elements/core/elements/`; unchanged also in the test reference `instruments/elements/tests/reference/`, which no plug-in contains | MIT, © 2014 Emilie Gillet | Copied into this repository and patched for a run-time sample rate, see `instruments/elements/UPSTREAM.md`; text in `instruments/elements/licenses/Elements-MIT.txt` |
+| stmlib, from pichenettes/stmlib | DSP helpers in `instruments/elements/core/stmlib/` | MIT, © Emilie Gillet | Copied into this repository, unchanged; text in `instruments/elements/core/stmlib/LICENSE` |
 
 Neither submodule content nor build output is stored in this repository.
 
 VST is a registered trademark of Steinberg Media Technologies GmbH.
+Mutable Instruments is a registered trademark; nothing in this repository is
+made, endorsed or supported by Mutable Instruments.

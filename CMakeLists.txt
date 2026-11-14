@@ -79,3 +79,4 @@ add_subdirectory("${SDK_ROOT}/public.sdk/samples/vst-hosting/editorhost"
 # ---------------------------------------------------------------------------
 add_subdirectory(instruments/toy-piano-classic)
 add_subdirectory(instruments/torus-classic)
+add_subdirectory(instruments/elements)
