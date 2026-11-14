@@ -37,7 +37,8 @@ foreach ($entry in $licenses) {
 }
 foreach ($document in 'README.md', 'CHANGELOG.md', 'UPSTREAM.md', 'components.json', 'docs\DAW_TEST_0.1.0.md',
     'docs\BUILD_REPORT_0.1.0.md', 'docs\CODEX_REVIEW_0.1.0.md',
-    'docs\CODEX_REVIEW_0.1.0_UMSETZUNG.md', 'docs\editor.png') {
+    'docs\CODEX_REVIEW_0.1.0_UMSETZUNG.md', 'docs\CODEX_REVIEW_0.2.0.md',
+    'docs\CODEX_REVIEW_0.2.0_UMSETZUNG.md', 'docs\editor.png') {
     $source = Join-Path $plugin $document
     if (Test-Path $source) { Copy-Item $source (Join-Path $target (Split-Path $document -Leaf)) -Force }
 }

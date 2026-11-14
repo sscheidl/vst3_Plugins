@@ -48,7 +48,7 @@ class Processor : public Steinberg::Vst::AudioEffect {
     // sample rate alone, which the host only changes while the plug-in is
     // inactive, and is valid from setupProcessing() on.
     Steinberg::uint32 PLUGIN_API getLatencySamples() SMTG_OVERRIDE;
-    // Resonators ring on after the last note, at full Damping without end.
+    // Resonators ring on after the last note, at Damping 0 without end.
     Steinberg::uint32 PLUGIN_API getTailSamples() SMTG_OVERRIDE {
         return Steinberg::Vst::kInfiniteTail;
     }
@@ -72,9 +72,11 @@ class Processor : public Steinberg::Vst::AudioEffect {
 
   private:
     using Clock = std::chrono::steady_clock;
+    // A strike of a screen key. Releases do not travel in the queue.
     struct KeyboardNote {
         std::uint8_t note = 0;
         std::uint8_t velocity = 0;
+        std::uint32_t number = 0; // counts the strikes of this key, from 1
         Clock::time_point struck{};
     };
 
@@ -86,7 +88,10 @@ class Processor : public Steinberg::Vst::AudioEffect {
                               Steinberg::int32 num_samples);
     void ReadKeyboard(Steinberg::Vst::IEventList* output);
     // A screen key to the host's MIDI output; velocity 0 is its release.
-    void SendKey(Steinberg::Vst::IEventList* output, int note, int velocity);
+    // False if the host did not take it.
+    bool SendKey(Steinberg::Vst::IEventList* output, int note, int velocity);
+    // Whether the given strike of a key, and every one before, has been let go.
+    bool Released(std::size_t key, std::uint32_t strike) const;
     void ReadEvents(Steinberg::Vst::IEventList& events, Steinberg::int32 num_samples);
     void Render(Steinberg::Vst::ProcessData& data);
 
@@ -103,9 +108,17 @@ class Processor : public Steinberg::Vst::AudioEffect {
     // Keyboard notes struck up to this moment belong to the time before the
     // last loaded state and are not played. Owned by the audio thread.
     Clock::time_point keyboard_valid_after_{};
-    // Screen keys the host has a note-on for and no note-off yet. Owned by
-    // the audio thread.
+    // Per key: strikes accepted so far (the UI thread's alone), and that
+    // count as it was at the key's last release (written by the UI thread,
+    // read by the audio thread).
+    std::array<std::uint32_t, 128> key_struck_{};
+    std::array<std::atomic<std::uint32_t>, 128> key_released_{};
+    // Owned by the audio thread: screen keys the host has a note-on for and
+    // no note-off yet, the strike that note-on belongs to, and keys whose
+    // note-off the host has to get although they have not been let go.
     std::bitset<128> held_keys_;
+    std::array<std::uint32_t, 128> sent_strike_{};
+    std::bitset<128> release_due_;
     bool release_held_keys_ = false;
 
     // process() renders through these in pieces, then converts to the host's

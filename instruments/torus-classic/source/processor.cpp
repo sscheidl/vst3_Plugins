@@ -106,8 +106,7 @@ void Processor::Restart(const ParameterState::Values& values) {
         if(DirectControl(i, values[i], control, engine_value))
             engine_.JumpControl(control, engine_value);
     }
-    bridge_.JumpTune(static_cast<float>(values[Index(kParamTune)]),
-                     IsOn(values[Index(kParamTuneFree)]));
+    bridge_.JumpTune(values[Index(kParamTune)], IsOn(values[Index(kParamTuneFree)]));
     engine_.JumpModel(static_cast<unsigned>(ModelIndex(values[Index(kParamModel)])));
     engine_.JumpPitchBend(static_cast<unsigned>(PitchBendRaw(values[Index(kParamPitchBend)])));
     adapter_.JumpOutputFilter(static_cast<float>(values[Index(kParamFilter)]));
@@ -161,8 +160,8 @@ void Processor::QueueParameter(int32 offset, ParamID id, double value) {
     }
     switch(id) {
         case kParamTune:
-            // As set; the bridge rounds it to semitones unless tuning is free.
-            adapter_.AddEvent(offset, ControlEvent(Control::Tune, static_cast<float>(value)));
+            // As set, with its semitone; the bridge picks one by the switch.
+            adapter_.AddEvent(offset, TuneEvent(value));
             break;
         case kParamTuneFree: adapter_.AddEvent(offset, TuneFreeEvent(IsOn(value))); break;
         case kParamModel:
@@ -199,13 +198,8 @@ void Processor::ReadParameterChanges(IParameterChanges& changes, int32 num_sampl
     }
 }
 
-void Processor::SendKey(IEventList* output, int note, int velocity) {
-    if(velocity > 0)
-        held_keys_.set(static_cast<std::size_t>(note));
-    else
-        held_keys_.reset(static_cast<std::size_t>(note));
-    if(!output)
-        return;
+bool Processor::SendKey(IEventList* output, int note, int velocity) {
+    const auto key = static_cast<std::size_t>(note);
     Event event{};
     event.busIndex = 0;
     event.sampleOffset = 0;
@@ -220,43 +214,64 @@ void Processor::SendKey(IEventList* output, int note, int velocity) {
         event.noteOff.pitch = static_cast<int16>(note);
         event.noteOff.noteId = -1;
     }
-    output->addEvent(event);
+    // What the host holds changes only with an event it has taken. A
+    // note-off that finds no room, or no list, is due again next block.
+    if(output && output->addEvent(event) == kResultOk) {
+        held_keys_.set(key, velocity > 0);
+        release_due_.reset(key);
+        return true;
+    }
+    if(velocity == 0)
+        release_due_.set(key);
+    return false;
+}
+
+bool Processor::Released(std::size_t key, std::uint32_t strike) const {
+    // Counts that wrap around still compare right.
+    const std::uint32_t released = key_released_[key].load(std::memory_order_acquire);
+    return static_cast<std::int32_t>(released - strike) >= 0;
 }
 
 void Processor::ReadKeyboard(IEventList* output) {
     // After an activation: keys the host still believes held are released.
     if(release_held_keys_) {
         release_held_keys_ = false;
-        for(int note = 0; note < 128 && held_keys_.any(); ++note)
-            if(held_keys_.test(static_cast<std::size_t>(note)))
-                SendKey(output, note, 0);
+        release_due_ |= held_keys_;
     }
-    // Screen keyboard notes start with the block: they come from the UI and
+    // First the note-offs: keys the host holds whose screen key has been let
+    // go, and those due from earlier blocks. They need no room in the queue,
+    // so none is lost; one the host's list has no room for comes next block.
+    if(held_keys_.any())
+        for(std::size_t key = 0; key < held_keys_.size(); ++key)
+            if(held_keys_.test(key) && (release_due_.test(key) || Released(key, sent_strike_[key])))
+                SendKey(output, static_cast<int>(key), 0);
+    // Then the strikes, which start with the block: they come from the UI and
     // have no sample position. At most one queue's worth per call, so the work
-    // stays bounded even if the UI keeps adding notes meanwhile. Each strike
-    // goes to the engine and, as a note-on, to the host's MIDI output; each
-    // release of a key only to the host, because the engine knows no note-off.
-    KeyboardNote key;
+    // stays bounded even if the UI keeps adding notes meanwhile. Each goes to
+    // the engine and, as a note-on, to the host's MIDI output.
+    KeyboardNote strike;
     Clock::time_point now{};
     bool have_time = false;
-    for(std::size_t i = 0; i < kKeyboardQueueSize && keyboard_notes_.Pop(key); ++i) {
-        if(key.velocity == 0) {
-            if(held_keys_.test(key.note)) // only for a strike that went out
-                SendKey(output, key.note, 0);
-            continue;
-        }
+    for(std::size_t i = 0; i < kKeyboardQueueSize && keyboard_notes_.Pop(strike); ++i) {
         if(!have_time) {
             now = Clock::now();
             have_time = true;
         }
-        if(now - key.struck > kKeyboardNoteLifetime)
+        if(now - strike.struck > kKeyboardNoteLifetime)
             continue; // struck while nobody was rendering
-        if(key.struck <= keyboard_valid_after_)
+        if(strike.struck <= keyboard_valid_after_)
             continue; // struck before the state that was loaded since
-        if(held_keys_.test(key.note)) // struck again without a release in between
-            SendKey(output, key.note, 0);
-        adapter_.AddEvent(0, NoteEvent(key.note, key.velocity));
-        SendKey(output, key.note, key.velocity);
+        adapter_.AddEvent(0, NoteEvent(strike.note, strike.velocity));
+        // Struck again without a release in between: the host's note ends
+        // first. If that note-off finds no room, the host keeps the old note
+        // until it does, and gets no second note-on for the same key.
+        if(held_keys_.test(strike.note) && !SendKey(output, strike.note, 0))
+            continue;
+        if(!SendKey(output, strike.note, strike.velocity))
+            continue; // the host has no note to end
+        sent_strike_[strike.note] = strike.number;
+        if(Released(strike.note, strike.number)) // let go already: a short tap
+            SendKey(output, strike.note, 0);
     }
 }
 
@@ -380,10 +395,19 @@ tresult PLUGIN_API Processor::notify(IMessage* message) {
         return kInvalidArgument;
     if(note < 0 || note > 127 || velocity < 0 || velocity > 127)
         return kInvalidArgument; // velocity 0 is the release of the key
-    // A full queue drops the note and says so.
-    if(!keyboard_notes_.Push({static_cast<std::uint8_t>(note),
-                              static_cast<std::uint8_t>(velocity), Clock::now()}))
+    const auto key = static_cast<std::size_t>(note);
+    if(velocity == 0) {
+        // The release of a key is never refused: it only records that every
+        // strike of this key so far has been let go.
+        key_released_[key].store(key_struck_[key], std::memory_order_release);
+        return kResultOk;
+    }
+    // A full queue drops the strike and says so.
+    const std::uint32_t number = key_struck_[key] + 1;
+    if(!keyboard_notes_.Push({static_cast<std::uint8_t>(note), static_cast<std::uint8_t>(velocity),
+                              number, Clock::now()}))
         return kResultFalse;
+    key_struck_[key] = number;
     return kResultOk;
 }
 

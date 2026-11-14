@@ -37,7 +37,7 @@
 
 namespace torus_classic {
 
-constexpr const char* kAdapterVersion = "0.2.0";
+constexpr const char* kAdapterVersion = "0.2.1";
 
 struct EngineEvent {
     // kOutputFilter is the adapter's own: it sets the low-pass of the output

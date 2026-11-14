@@ -11,7 +11,7 @@ constexpr double kPi = 3.14159265358979323846;
 
 void OutputStage::Prepare(double sample_rate) {
     sample_rate_ = sample_rate > 0.0 ? sample_rate : 48000.0;
-    smoothing_ = static_cast<float>(1.0 - std::exp(-1.0 / (kSmoothingSeconds * sample_rate_)));
+    smoothing_ = 1.0 - std::exp(-1.0 / (kSmoothingSeconds * sample_rate_));
     release_ = static_cast<float>(1.0 - std::exp(-1.0 / (kReleaseSeconds * sample_rate_)));
     Reset();
 }

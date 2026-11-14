@@ -11,9 +11,18 @@
 // gain down at once, so no output sample exceeds kCeiling; the gain then
 // recovers over kReleaseSeconds. Below the ceiling the gain is exactly 1 and
 // the samples pass exactly as they came. No look-ahead, no delay.
+//
+// The filter's integrators run all the time, also while the filter is faded
+// out: closing it again starts from what the signal is now, never from what
+// it was when the filter was last open.
+//
+// Any input gives finite output. A sample that is not a number or infinite is
+// a fault, not a level, and enters as 0; a finite one beyond kInputLimit
+// enters as kInputLimit. Neither can reach the integrators.
 #pragma once
 
 #include <cstdint>
+#include <limits>
 
 namespace torus_classic {
 
@@ -25,6 +34,9 @@ class OutputStage {
     static constexpr double kHighHz = 20000.0;
     static constexpr double kTop = 0.98;
     static constexpr double kSmoothingSeconds = 0.005;
+    static constexpr float kInputLimit = 1.0e6f; // +120 dBFS
+    // The glide lands exactly on its target once it is this close.
+    static constexpr double kSnap = 1e-6;
 
     // Sets the sample rate and resets. Does not allocate.
     void Prepare(double sample_rate);
@@ -42,14 +54,28 @@ class OutputStage {
 
     // For tests.
     float Gain() const { return gain_; }
-    float FilterValue() const { return value_; }
+    float FilterValue() const { return static_cast<float>(value_); }
+    float FilterMix() const { return mix_; }
 
   private:
     void UpdateCoefficients();
+    static float Bounded(float sample) {
+        if(sample >= -kInputLimit && sample <= kInputLimit)
+            return sample;
+        constexpr float kMax = std::numeric_limits<float>::max();
+        if(sample > kInputLimit && sample <= kMax)
+            return kInputLimit;
+        if(sample < -kInputLimit && sample >= -kMax)
+            return -kInputLimit;
+        return 0.0f; // not a number, or infinite
+    }
 
     double sample_rate_ = 48000.0;
-    // Low-pass.
-    float target_ = 1.0f, value_ = 1.0f, smoothing_ = 1.0f;
+    // Low-pass. The control glides in double: in float, steps near the
+    // target become too small to add at high sample rates and the glide
+    // stops short of it.
+    float target_ = 1.0f;
+    double value_ = 1.0, smoothing_ = 1.0;
     float mix_ = 0.0f;                  // 0: unfiltered, 1: filtered
     float g_ = 0.0f, k_ = 0.0f;         // filter coefficients
     float a1_ = 0.0f, a2_ = 0.0f, a3_ = 0.0f;
@@ -60,22 +86,23 @@ class OutputStage {
 
 inline void OutputStage::Process(float& left, float& right) {
     if(value_ != target_) {
-        value_ += (target_ - value_) * smoothing_;
-        if(value_ - target_ < 1e-5f && target_ - value_ < 1e-5f)
-            value_ = target_;
+        // Lands on the target when close, or when a step no longer changes
+        // the value.
+        const double next = value_ + (target_ - value_) * smoothing_;
+        const double rest = target_ - next;
+        value_ = next == value_ || (rest < kSnap && rest > -kSnap) ? target_ : next;
         UpdateCoefficients();
     }
-    if(mix_ > 0.0f) {
-        float* channels[2] = {&left, &right};
-        for(int c = 0; c < 2; ++c) {
-            const float in = *channels[c];
-            const float v3 = in - state_[c][1];
-            const float v1 = a1_ * state_[c][0] + a2_ * v3;
-            const float v2 = state_[c][1] + a2_ * state_[c][0] + a3_ * v3;
-            state_[c][0] = 2.0f * v1 - state_[c][0];
-            state_[c][1] = 2.0f * v2 - state_[c][1];
-            *channels[c] = in + (v2 - in) * mix_;
-        }
+    float* channels[2] = {&left, &right};
+    for(int c = 0; c < 2; ++c) {
+        const float in = Bounded(*channels[c]);
+        const float v3 = in - state_[c][1];
+        const float v1 = a1_ * state_[c][0] + a2_ * v3;
+        const float v2 = state_[c][1] + a2_ * state_[c][0] + a3_ * v3;
+        state_[c][0] = 2.0f * v1 - state_[c][0];
+        state_[c][1] = 2.0f * v2 - state_[c][1];
+        // Fully open the sample passes exactly as it came.
+        *channels[c] = mix_ > 0.0f ? in + (v2 - in) * mix_ : in;
     }
     const float l = left < 0.0f ? -left : left, r = right < 0.0f ? -right : right;
     const float peak = l > r ? l : r;

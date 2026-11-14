@@ -8,7 +8,7 @@
 #
 # Its own version; moduleinfo.json takes it from here. Keep it equal to
 # FULL_VERSION_STR in source/version.h and to components.json.
-project(TorusClassic VERSION 0.2.0 LANGUAGES CXX)
+project(TorusClassic VERSION 0.2.1 LANGUAGES CXX)
 
 # The SDK compiles everything with /fp:fast. The DSP, the adapter and their
 # tests use /fp:precise instead: the engine's guard against non-finite samples

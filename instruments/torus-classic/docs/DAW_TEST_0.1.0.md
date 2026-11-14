@@ -39,6 +39,7 @@ for that host; note the last step.
 | 8.5 | Route the plug-in's "MIDI Out" to another track or record it; click screen keys | Notes arrive with the length the key was held | | | |
 | 8.6 | Open a project saved with 0.1.0 | Sounds as before (apart from the limiter); Damping knob shows the mirrored value | | | |
 | 8.7 | Record automation by moving a knob (2.4 again) | One clean automation pass; 0.1.0 reported every knob edit twice | | | |
+| 8.8 | 0.2.1: play with FILTER half closed, open it fully, wait in silence, close it again | No short burst of old sound when closing it again | | | |
 
 ## Before starting
 
