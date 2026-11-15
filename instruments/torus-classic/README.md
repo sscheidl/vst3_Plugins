@@ -1,11 +1,20 @@
-# Torus Classic
+# Kekulé
 
-VST3 instrument, version 0.2.0, Windows x64. The Rings/Torus keyboard engine
+VST3 instrument, version 0.2.2, Windows x64. The Rings/Torus keyboard engine
 of the Daisy Seed3 firmware *Physical Modeling*, without its reverb, inside a
 native plug-in: six synthesis models, four voices, dry stereo output, with a
 low-pass and a limiter at the end.
 
 ![The plug-in window](docs/editor.png)
+
+**Name:** Kekulé, after August Kekulé, who found the benzene ring: Rings,
+ring, Kekulé. Hosts show it with the accent; the bundle is `Kekule.vst3`,
+without it, because some hosts and tools mishandle accents in file names.
+Up to 0.2.1 the plug-in was called Torus Classic, and that stays the internal
+name of the project: this directory, the branch, the build targets, the
+namespaces and the test names. The class IDs, the parameters and the saved
+state are those of Torus Classic, so projects and presets saved with it load
+in Kekulé.
 
 **Status:** built and tested automatically on one machine; passes Steinberg's
 validator.
@@ -22,6 +31,14 @@ validator.
   Tune in semitones with a switch for free tuning, a low-pass, a limiter, and
   MIDI notes from the screen keys. None of that has been in a DAW yet. See
   the [change log](CHANGELOG.md).
+* Codex re-reviewed 0.2.0: the four defects of 0.1.0 are fixed; it found five
+  new ones ([review](docs/CODEX_REVIEW_0.2.0.md)). 0.2.1 fixes them
+  ([what was done](docs/CODEX_REVIEW_0.2.0_UMSETZUNG.md)).
+* Codex re-reviewed 0.2.1 and released it for the DAW test
+  ([review](docs/CODEX_REVIEW_0.2.1.md)): the five defects are fixed, nothing
+  new of priority P0 to P2. One minor point (TC-R10, P3) concerns a test and
+  an internal helper, not the plug-in's own path; it is still open.
+* 0.2.2 only renames the plug-in to Kekulé.
 * The [build report](docs/BUILD_REPORT_0.1.0.md) describes 0.1.0: what was
   verified then and what was not.
 
@@ -47,8 +64,8 @@ are exact opposites, so a mono sum of that model cancels.
 
 Four voices, always. A fifth strike takes over the voice that was struck
 longest ago. There is no note-off: a struck resonator rings until it has
-decayed, and Damping decides how long. At full Damping the string models and
-the FM voice sustain without end.
+decayed, and Damping decides how long. At Damping 0 the string models and the
+FM voice sustain without end.
 
 **No reverb.** The plug-in computes none, holds no reverb memory and has no
 reverb or dry/wet control. Add one in the DAW if wanted.
@@ -88,7 +105,9 @@ The signal passes three stages on its way out:
 1. The firmware's output stage, at 48 kHz: Volume times 0.8, linear up to 0.6
    of full scale, then a soft knee that stays below 0.8.
 2. The **filter**, at the host's sample rate: a 12 dB per octave low-pass
-   without resonance. Fully open (the default) it does nothing at all.
+   without resonance. Fully open (the default) it does nothing at all. It
+   keeps following the signal while it is open, so closing it again never
+   brings back sound from the last time it was closed.
 3. A **limiter**, last in the chain: no sample leaves the plug-in above 0.5 of
    full scale (−6 dBFS), at any sample rate. When a peak exceeds that, both
    channels are turned down together at once and recover over about 0.15 s.
@@ -97,7 +116,9 @@ The signal passes three stages on its way out:
    be heard as a slight edge on very loud strikes.
 
 The ceiling is a constant (`OutputStage::kCeiling`). 100 % Volume is the
-firmware's level; there is no gain above it.
+firmware's level; there is no gain above it. The two stages take any input:
+a sample that is not a number or infinite counts as silence, so nothing but
+finite samples leaves the plug-in.
 ## MIDI
 
 | MIDI | Effect |
@@ -135,6 +156,11 @@ Screen keys sound from the next audio block on. A key clicked while the host
 renders no audio is dropped after half a second instead of sounding later, and
 so is a key clicked before a state is loaded. If the host offers no messages
 between the two halves of a plug-in, screen keys do nothing.
+
+Up to 64 strikes can wait for the next audio block; a strike beyond that is
+dropped. Letting go of a key is never dropped: every note-on the host got is
+followed by its note-off. If the host's output list has no room for it, or the
+host offers none in a block, the note-off comes in a later block.
 ### Window
 
 Resizable between 50 % and 200 %, aspect ratio kept, drawn as vectors; on top
@@ -233,7 +259,7 @@ every time; two instances given the same notes sound identical.
 * Each instance has its own noise generator; the firmware has one.
 ## Install
 
-Nothing is installed automatically. Copy the bundle `Torus Classic.vst3`
+Nothing is installed automatically. Copy the bundle `Kekule.vst3`
 (the whole folder) from `build/windows-vs2026-x64/VST3/Release/`, or from
 `out/torus-classic-<version>/` after a release build was staged there, to a
 VST3 folder, then let the DAW rescan: `%LOCALAPPDATA%\Programs\Common\VST3\`
@@ -241,10 +267,14 @@ for the current user (no administrator rights; where Toy Piano Classic sits on
 the development machine) or `C:\Program Files\Common Files\VST3\` for all
 users. The plug-in needs no Visual C++ redistributable.
 
+Remove an older `Torus Classic.vst3` from the VST3 folders first. Both
+bundles carry the same class IDs, so a host would find the same plug-in
+twice and use either of them.
+
 ## Build and test
 
 See the [repository README](../../README.md). The presets build Toy Piano
-Classic and Torus Classic together; Steinberg's validator runs on each bundle
+Classic and Kekulé together; Steinberg's validator runs on each bundle
 at the end of the build.
 
 ```bash

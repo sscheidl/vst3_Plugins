@@ -13,7 +13,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -765,6 +767,105 @@ void TestOutputStage() {
         CHECK(stage.FilterValue() == 1.0f);
         CHECK(std::equal(out.begin() + 48000, out.end(), quiet.begin() + 48000));
     }
+    // The glide lands exactly on its target at every rate, both ways, also
+    // where float steps near the target would be too small to add (TC-R05).
+    for(const double rate : {1000.0, 44100.0, 48000.0, 88200.0, 96000.0, 192000.0, 4000000.0}) {
+        const float glides[][2] = {{0.2f, 1.0f}, {1.0f, 0.2f}, {1.0f, 0.0f}, {0.0f, 1.0f},
+                                   {0.5f, 0.99f}, {0.99f, 0.5f}};
+        for(const auto& glide : glides) {
+            OutputStage stage;
+            stage.Prepare(rate);
+            stage.JumpFilter(glide[0]);
+            stage.SetFilter(glide[1]);
+            // 0.2 s: forty time constants of the 5 ms glide.
+            const int limit = static_cast<int>(0.2 * rate);
+            for(int n = 0; n < limit && stage.FilterValue() != glide[1]; ++n) {
+                float l = 0.1f, r = -0.1f;
+                stage.Process(l, r);
+            }
+            CHECK(stage.FilterValue() == glide[1]);
+            if(glide[1] == 1.0f) { // fully open again: untouched
+                float l = 0.1f, r = -0.1f;
+                stage.Process(l, r);
+                CHECK(stage.FilterMix() == 0.0f && l == 0.1f && r == -0.1f);
+            }
+        }
+    }
+    // Faded out, the filter keeps following the signal: closed again after a
+    // long silence it gives silence, not what it held when it was last closed
+    // (TC-R06). A tone and a constant, stopped at different phases.
+    for(const bool constant : {false, true}) {
+        for(const int phase : {0, 7, 13, 29}) {
+            OutputStage stage;
+            stage.Prepare(48000.0);
+            stage.JumpFilter(0.5f);
+            int n = 0;
+            const auto signal = [&] {
+                return constant ? 0.3f
+                                : static_cast<float>(0.3 * std::sin(2.0 * kPi * 1000.0 * n / 48000.0));
+            };
+            for(; n < 48000 + phase; ++n) {
+                float l = signal(), r = l;
+                stage.Process(l, r);
+            }
+            stage.SetFilter(1.0f);
+            for(int i = 0; i < 48000; ++i, ++n) {
+                float l = signal(), r = l;
+                stage.Process(l, r);
+            }
+            CHECK(stage.FilterValue() == 1.0f);
+            for(int i = 0; i < 10 * 48000; ++i) {
+                float l = 0.0f, r = 0.0f;
+                stage.Process(l, r);
+                CHECK(l == 0.0f && r == 0.0f);
+            }
+            stage.SetFilter(0.5f);
+            float peak = 0.0f;
+            for(int i = 0; i < 48000; ++i) {
+                float l = 0.0f, r = 0.0f;
+                stage.Process(l, r);
+                peak = std::max({peak, std::fabs(l), std::fabs(r)});
+            }
+            CHECK(stage.FilterValue() == 0.5f && peak < 1e-20f);
+        }
+    }
+    // Whatever comes in, finite samples go out, none above the ceiling; once
+    // that is over the stage works as before (TC-R09).
+    for(const float filter : {1.0f, 0.3f}) {
+        constexpr float kInf = std::numeric_limits<float>::infinity();
+        constexpr float kMax = std::numeric_limits<float>::max();
+        const float faults[] = {std::nanf(""), kInf, -kInf, kMax, -kMax, 1e30f, -1e30f,
+                                std::numeric_limits<float>::denorm_min(), 0.0f};
+        OutputStage stage, clean;
+        stage.Prepare(48000.0);
+        clean.Prepare(48000.0);
+        stage.JumpFilter(filter);
+        clean.JumpFilter(filter);
+        for(const float a : faults) {
+            for(const float b : faults) {
+                float l = a, r = b;
+                stage.Process(l, r);
+                CHECK(std::isfinite(l) && std::isfinite(r));
+                CHECK(std::fabs(l) <= OutputStage::kCeiling && std::fabs(r) <= OutputStage::kCeiling);
+            }
+        }
+        std::vector<float> quiet(static_cast<std::size_t>(2 * 4 * 48000));
+        for(float& v : quiet)
+            v = (random.Unit() * 2.0f - 1.0f) * 0.2f;
+        const auto out = ThroughStage(stage, quiet);
+        const auto expected = ThroughStage(clean, quiet); // never saw a fault
+        CHECK(stage.Gain() == 1.0f);
+        float worst = 0.0f;
+        for(std::size_t i = 0; i < out.size(); ++i) {
+            CHECK(std::isfinite(out[i]));
+            if(i >= out.size() / 2)
+                worst = std::max(worst, std::fabs(out[i] - expected[i]));
+        }
+        if(filter == 1.0f)
+            CHECK(worst == 0.0f);
+        else
+            CHECK(worst < 1e-6f); // the old state has decayed below float resolution
+    }
     // Through the adapter the filter control is an event like the others: it
     // changes when its quantum is rendered, not before the sample it was sent
     // for, and not later than grid and latency allow.
@@ -786,8 +887,9 @@ void TestOutputStage() {
         CHECK(adapter.Output().FilterValue() == 0.5f);
     }
     std::printf("output stage: untouched below the ceiling with the filter open; no sample "
-                "above %.2f whatever comes in, exact again after the release; low-pass 12 dB "
-                "per octave\n",
+                "above %.2f whatever comes in, finite even for faulty input, exact again after "
+                "the release; low-pass 12 dB per octave, its glide exact at every rate, no old "
+                "state after a bypass\n",
                 OutputStage::kCeiling);
 }
 

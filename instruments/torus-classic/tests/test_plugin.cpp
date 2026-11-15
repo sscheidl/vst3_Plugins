@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <bitset>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -924,19 +925,29 @@ void TestKeyboardMidiOut() {
     data.outputEvents = &out;
     data.numSamples = 64;
     // What one block sends: 'N' and the pitch for a note-on, 'F' for a note-off.
-    const auto block = [&] {
-        out.clear();
+    // Across all blocks the host never gets a second note-on for a key it
+    // holds, nor a note-off for one it does not.
+    std::bitset<128> host_holds;
+    const auto block = [&](EventList* list = nullptr) {
+        list = list ? list : &out;
+        list->clear();
+        data.outputEvents = list;
         CHECK(processor->process(data) == kResultOk);
+        data.outputEvents = &out;
         std::string sent;
-        for(int32 i = 0; i < out.getEventCount(); ++i) {
+        for(int32 i = 0; i < list->getEventCount(); ++i) {
             Event event{};
-            CHECK(out.getEvent(i, event) == kResultOk);
+            CHECK(list->getEvent(i, event) == kResultOk);
             CHECK(event.busIndex == 0 && event.sampleOffset == 0);
             if(event.type == Event::kNoteOnEvent) {
                 CHECK(std::fabs(event.noteOn.velocity - kKeyboardVelocity / 127.0f) < 1e-6f);
+                CHECK(!host_holds.test(event.noteOn.pitch));
+                host_holds.set(event.noteOn.pitch);
                 sent += "N" + std::to_string(event.noteOn.pitch) + " ";
             } else {
                 CHECK(event.type == Event::kNoteOffEvent);
+                CHECK(host_holds.test(event.noteOff.pitch));
+                host_holds.reset(event.noteOff.pitch);
                 sent += "F" + std::to_string(event.noteOff.pitch) + " ";
             }
         }
@@ -967,14 +978,65 @@ void TestKeyboardMidiOut() {
     CHECK(processor->setActive(true) == kResultOk);
     CHECK(block() == "F62 F65 ");
     CHECK(block().empty());
-    // A host that offers no output list: nothing breaks, the strike sounds.
+    // A strike and its release in one block: a short tap.
+    CHECK(SendNote(*processor, 66) == kResultOk && SendNote(*processor, 66, 0) == kResultOk);
+    CHECK(block() == "N66 F66 ");
+
+    // The release of a key is never refused, not even with the queue full of
+    // strikes (TC-R08). The strike the host's list has no room for does not
+    // reach the host, so it needs no note-off either.
+    CHECK(SendNote(*processor, 64) == kResultOk);
+    CHECK(block() == "N64 ");
+    for(int i = 0; i < 64; ++i)
+        CHECK(SendNote(*processor, i) == kResultOk);
+    CHECK(SendNote(*processor, 100) == kResultFalse); // full
+    CHECK(SendNote(*processor, 64, 0) == kResultOk);
+    std::string expected = "F64 ";
+    for(int i = 0; i < 63; ++i) // 64 places in the list, the note-off first
+        expected += "N" + std::to_string(i) + " ";
+    CHECK(block() == expected);
+    for(int i = 0; i < 64; ++i)
+        CHECK(SendNote(*processor, i, 0) == kResultOk);
+    expected.clear();
+    for(int i = 0; i < 63; ++i)
+        expected += "F" + std::to_string(i) + " ";
+    CHECK(block() == expected && host_holds.none());
+    CHECK(block().empty());
+
+    // A host list with room for one event: what does not fit comes later.
+    EventList tight(1);
+    CHECK(SendNote(*processor, 60) == kResultOk && SendNote(*processor, 62) == kResultOk);
+    CHECK(block() == "N60 N62 ");
+    CHECK(SendNote(*processor, 60, 0) == kResultOk && SendNote(*processor, 62, 0) == kResultOk);
+    CHECK(SendNote(*processor, 61) == kResultOk);
+    CHECK(block(&tight) == "F60 "); // the note-on of 61 is lost, 61 still sounds
+    CHECK(block(&tight) == "F62 ");
+    CHECK(block(&tight).empty() && host_holds.none());
+    // Struck again while held, the note-off finds no room: the host keeps the
+    // old note until the next block and gets no second note-on.
+    CHECK(SendNote(*processor, 67) == kResultOk && SendNote(*processor, 68) == kResultOk);
+    CHECK(block() == "N67 N68 ");
+    CHECK(SendNote(*processor, 68, 0) == kResultOk && SendNote(*processor, 67) == kResultOk);
+    CHECK(block(&tight) == "F68 ");
+    CHECK(block(&tight) == "F67 ");
+    CHECK(block().empty() && host_holds.none());
+
+    // A host that offers no output list: nothing breaks, the strike sounds;
+    // a note-off due meanwhile goes out with the next list.
+    CHECK(SendNote(*processor, 69) == kResultOk);
+    CHECK(block() == "N69 ");
+    CHECK(SendNote(*processor, 69, 0) == kResultOk);
     data.outputEvents = nullptr;
     CHECK(SendNote(*processor, 70) == kResultOk);
-    CHECK(processor->process(data) == kResultOk && processor->Engine().TriggerCount() == 1);
+    const uint32 struck = processor->Engine().TriggerCount();
+    CHECK(processor->process(data) == kResultOk);
+    CHECK(processor->Engine().TriggerCount() == struck + 1);
+    data.outputEvents = &out;
+    CHECK(block() == "F69 " && host_holds.none());
     processor->setActive(false);
     processor->terminate();
-    std::printf("screen keyboard MIDI out: note-on per strike, note-off per release, none left "
-                "hanging after deactivation\n");
+    std::printf("screen keyboard MIDI out: note-on per strike, note-off per release; no release "
+                "is refused, a note-off the host has no room for comes in a later block\n");
 }
 
 void TestPauseAndFlush() {
@@ -1656,6 +1718,58 @@ void TestController() {
 
 // --- Window geometry ----------------------------------------------------------
 
+// Tune on both sides of every half semitone: the semitone the controller
+// shows is the one the engine plays, as automation and from a loaded state;
+// with FREE on the engine gets the value itself (TC-R07).
+void TestTuneRounding() {
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(nullptr) == kResultOk);
+    PluginHost host({48000.0, 2048, false, kRealtime});
+    Processor& processor = *host.processor;
+    std::vector<double> values = {0.51041666249999995, 0.48958332916666669}; // Codex' cases
+    for(int semitone = -24; semitone < 24; ++semitone) {
+        const double edge = TuneNormalized(semitone + 0.5);
+        const auto as_float = static_cast<float>(edge);
+        for(const double at : {edge, static_cast<double>(as_float),
+                               static_cast<double>(std::nextafter(as_float, 0.0f)),
+                               static_cast<double>(std::nextafter(as_float, 1.0f))}) {
+            for(const double v : {at, std::nextafter(at, 0.0), std::nextafter(at, 1.0), at - 1e-9,
+                                  at + 1e-9})
+                values.push_back(v);
+        }
+    }
+    std::vector<double> state;
+    for(const int index : kSavedIndex)
+        state.push_back(kDefaults[index]);
+    int mismatches = 0;
+    for(const double v : values) {
+        const int shown = std::stoi(Text(*controller, kParamTune, v));
+        const auto expected = static_cast<float>(TuneNormalized(shown));
+        CHECK(shown == TuneStep(v));
+        // Loaded with FREE on, then off: the engine starts from the value.
+        state[0] = v;
+        state[kSavedParamCount - 1] = 1.0;
+        CHECK(LoadState(processor, MakeState(kStateVersion, state)) == kResultOk);
+        host.Run(12);
+        CHECK(processor.Engine().ControlValue(Control::Tune) == static_cast<float>(v));
+        state[kSavedParamCount - 1] = 0.0;
+        CHECK(LoadState(processor, MakeState(kStateVersion, state)) == kResultOk);
+        host.Run(12);
+        mismatches += processor.Engine().ControlValue(Control::Tune) != expected;
+        // As automation, from the semitone below the edge's.
+        host.AddScore({Param(host.position, kParamTune, TuneNormalized(shown - 1))});
+        host.Run(4800);
+        host.AddScore({Param(host.position, kParamTune, v)});
+        host.Run(4800);
+        mismatches += processor.Engine().ControlValue(Control::Tune) != expected;
+    }
+    CHECK(mismatches == 0);
+    CHECK(host.allocations == 0);
+    std::printf("tune rounding: %zu values at the 48 half-semitone edges; display, automation "
+                "and loaded state agree on the semitone\n",
+                values.size());
+}
+
 void TestViewLayout() {
     constexpr double width = 620.0, height = 68.0;
     int white = 0, black = 0;
@@ -2159,6 +2273,7 @@ int main() {
     TestActivationAndRateChange();
     TestState();
     TestController();
+    TestTuneRounding();
     TestViewLayout();
     TestEditorResize();
     TestEditorInWindow();

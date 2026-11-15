@@ -1,4 +1,4 @@
-# Writes components.json and SHA256SUMS.upstream for Torus Classic: where every
+# Writes components.json and SHA256SUMS.upstream for Torus Classic (Kekule): where every
 # copied file comes from, and the hashes that tie the copies to their origin.
 #
 # Run it again after taking over a newer state of the Daisy sources or after
@@ -90,7 +90,7 @@ $adapterVersion = ([regex]'kAdapterVersion = "([^"]+)"').Match(
 $manifest = [ordered]@{
     schema = 1
     product = [ordered]@{
-        id = 'torus-classic'; name = 'Torus Classic'; version = $version; vendor = 'TAUREON'
+        id = 'torus-classic'; name = "Kekul$([char]0xE9)"; version = $version; vendor = 'TAUREON'
         format = 'VST3'; platform = 'Windows x64'; license = 'MIT'
     }
     components = @(

@@ -5,7 +5,9 @@
 // One thing is decided here rather than in the engine: Tune sounds in whole
 // semitones unless free tuning is on. Both arrive as events and are combined
 // when their quantum comes, so the result does not depend on the order in
-// which a host block delivered them.
+// which a host block delivered them. The semitone itself is not rounded
+// here: a Tune event (TuneEvent) carries the step TuneStep() found in the
+// host's double value, beside the value for free tuning.
 #pragma once
 
 #include "dry_engine.h"
@@ -28,6 +30,7 @@ class EngineBridge final : public QuantumEngine {
             case EngineEvent::kControl:
                 if(event.index == static_cast<unsigned>(Control::Tune)) {
                     tune_ = event.value;
+                    tune_step_ = static_cast<int>(event.data) - kTuneStepOffset;
                     engine_.SetControl(Control::Tune, SoundingTune());
                 } else if(event.index == kTuneFreeControl) {
                     tune_free_ = event.value >= 0.5f;
@@ -45,19 +48,37 @@ class EngineBridge final : public QuantumEngine {
     void Render(float* left, float* right) override { engine_.Render(left, right); }
 
     // Tune and its switch at once, without a glide: for a start from a known state.
-    void JumpTune(float tune, bool free) {
-        tune_ = tune;
+    void JumpTune(double tune, bool free) {
+        tune_ = static_cast<float>(Clamp01(tune));
+        tune_step_ = TuneStep(tune);
         tune_free_ = free;
         engine_.JumpControl(Control::Tune, SoundingTune());
     }
 
+    // How a Tune event carries its semitone step in EngineEvent::data.
+    static constexpr int kTuneStepOffset = static_cast<int>(kTuneRange);
+
   private:
-    float SoundingTune() const { return static_cast<float>(TuneSounding(tune_, tune_free_)); }
+    float SoundingTune() const {
+        return static_cast<float>(tune_free_ ? Clamp01(tune_) : TuneNormalized(tune_step_));
+    }
 
     DryEngine& engine_;
-    float tune_ = static_cast<float>(kDefaultTune);
+    float tune_ = static_cast<float>(kDefaultTune); // for free tuning
+    int tune_step_ = TuneStep(kDefaultTune);       // for tuning in semitones
     bool tune_free_ = false;
 };
+
+// Tune, from the host's normalized value: the value itself for free tuning,
+// and the semitone step, rounded in double precision as the display does.
+inline EngineEvent TuneEvent(double normalized) {
+    EngineEvent event;
+    event.type = EngineEvent::kControl;
+    event.index = static_cast<std::uint8_t>(Control::Tune);
+    event.value = static_cast<float>(Clamp01(normalized));
+    event.data = static_cast<std::uint16_t>(TuneStep(normalized) + EngineBridge::kTuneStepOffset);
+    return event;
+}
 
 static_assert(StreamAdapter::kQuantum == DryEngine::kQuantum);
 static_assert(kTuneFreeControl < StreamAdapter::kControlKinds);
@@ -70,6 +91,7 @@ inline EngineEvent NoteEvent(unsigned note, unsigned velocity) {
     return event;
 }
 
+// Any control but Tune, which needs TuneEvent.
 inline EngineEvent ControlEvent(Control control, float value) {
     EngineEvent event;
     event.type = EngineEvent::kControl;

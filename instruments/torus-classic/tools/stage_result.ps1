@@ -1,4 +1,4 @@
-# Puts a built Torus Classic bundle, the license texts that must accompany it
+# Puts a built Kekule bundle, the license texts that must accompany it
 # and the documents for the DAW test into out/torus-classic-<version>/, and
 # writes SHA256SUMS.txt over everything there. Installs nothing.
 #
@@ -14,14 +14,17 @@ $plugin = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $repo = (Resolve-Path (Join-Path $plugin '..\..')).Path
 $version = ([regex]'FULL_VERSION_STR "([^"]+)"').Match(
     [IO.File]::ReadAllText((Join-Path $plugin 'source\version.h'))).Groups[1].Value
-$bundle = Join-Path $repo "build\$Preset\VST3\Release\Torus Classic.vst3"
-if (-not (Test-Path (Join-Path $bundle 'Contents\x86_64-win\Torus Classic.vst3'))) {
+$bundle = Join-Path $repo "build\$Preset\VST3\Release\Kekule.vst3"
+if (-not (Test-Path (Join-Path $bundle 'Contents\x86_64-win\Kekule.vst3'))) {
     throw "No Release bundle at $bundle. Build the preset first."
 }
 $target = Join-Path $repo "out\torus-classic-$version"
 New-Item -ItemType Directory -Force $target, (Join-Path $target 'licenses') | Out-Null
 
-# The bundle, with its hidden desktop.ini and icon.
+# The bundle, with its hidden desktop.ini and icon. A bundle staged under the
+# former name would otherwise stay beside it.
+$former = Join-Path $target 'Torus Classic.vst3'
+if (Test-Path $former) { Remove-Item $former -Recurse -Force }
 Copy-Item $bundle $target -Recurse -Force
 
 $licenses = @(
@@ -37,7 +40,8 @@ foreach ($entry in $licenses) {
 }
 foreach ($document in 'README.md', 'CHANGELOG.md', 'UPSTREAM.md', 'components.json', 'docs\DAW_TEST_0.1.0.md',
     'docs\BUILD_REPORT_0.1.0.md', 'docs\CODEX_REVIEW_0.1.0.md',
-    'docs\CODEX_REVIEW_0.1.0_UMSETZUNG.md', 'docs\editor.png') {
+    'docs\CODEX_REVIEW_0.1.0_UMSETZUNG.md', 'docs\CODEX_REVIEW_0.2.0.md',
+    'docs\CODEX_REVIEW_0.2.0_UMSETZUNG.md', 'docs\CODEX_REVIEW_0.2.1.md', 'docs\editor.png') {
     $source = Join-Path $plugin $document
     if (Test-Path $source) { Copy-Item $source (Join-Path $target (Split-Path $document -Leaf)) -Force }
 }
@@ -52,4 +56,4 @@ $lines = Get-ChildItem $target -Recurse -File -Force |
         '{0} *{1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $relative
     }
 [IO.File]::WriteAllText($sums, ($lines -join "`n") + "`n")
-"Staged Torus Classic $version from $Preset in $target ($($lines.Count) files)."
+"Staged Kekule $version from $Preset in $target ($($lines.Count) files)."

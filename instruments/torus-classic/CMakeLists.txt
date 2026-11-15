@@ -1,5 +1,6 @@
-# Torus Classic: VST3 instrument around the dry Rings/Torus keyboard engine of
-# the Daisy Seed3 firmware "Physical Modeling". Four layers, each a target:
+# Kekule (internal project name: Torus Classic): VST3 instrument around the dry
+# Rings/Torus keyboard engine of the Daisy Seed3 firmware "Physical Modeling".
+# Only the plug-in target carries the product name. Four layers, each a target:
 #
 #   torus_classic_core     hardware-free Torus DSP and its stmlib parts (vendored)
 #   torus_classic_engine   dry instrument: notes, voices, parameters, output stage
@@ -8,7 +9,7 @@
 #
 # Its own version; moduleinfo.json takes it from here. Keep it equal to
 # FULL_VERSION_STR in source/version.h and to components.json.
-project(TorusClassic VERSION 0.2.0 LANGUAGES CXX)
+project(TorusClassic VERSION 0.2.2 LANGUAGES CXX)
 
 # The SDK compiles everything with /fp:fast. The DSP, the adapter and their
 # tests use /fp:precise instead: the engine's guard against non-finite samples
@@ -111,11 +112,14 @@ target_link_libraries(torus_classic_shell PUBLIC
     torus_classic_adapter torus_classic_engine sdk vstgui_support)
 set_target_properties(torus_classic_shell PROPERTIES FOLDER "Torus Classic")
 
-smtg_add_vst3plugin(TorusClassic
-    PACKAGE_NAME "Torus Classic"
+# The target name is the name of the bundle and of the binary in it: the
+# product name without its accent, which some hosts and tools mishandle in
+# file names (see source/version.h).
+smtg_add_vst3plugin(Kekule
+    PACKAGE_NAME "Kekule"
     SOURCES_LIST source/factory.cpp)
-target_link_libraries(TorusClassic PRIVATE torus_classic_shell sdk)
-set_target_properties(TorusClassic PROPERTIES FOLDER "Torus Classic")
+target_link_libraries(Kekule PRIVATE torus_classic_shell sdk)
+set_target_properties(Kekule PROPERTIES FOLDER "Torus Classic")
 
 if(BUILD_TESTING)
     # The pinned firmware engine, reverb included, for the dry reference

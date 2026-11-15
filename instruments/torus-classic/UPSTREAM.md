@@ -1,6 +1,6 @@
 # Where the code comes from
 
-Torus Classic contains code copied from the Daisy Seed3 firmware *Physical
+Kekulé (project name Torus Classic) contains code copied from the Daisy Seed3 firmware *Physical
 Modeling* in the neighbouring repository
 [sscheidl/Daisy-Seed](https://github.com/sscheidl/Daisy-Seed). This file says
 what was taken, from which state, and what was changed. The same facts are in

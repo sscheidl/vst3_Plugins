@@ -110,9 +110,17 @@ inline double TuneNormalized(double semitones) {
     return Clamp01((semitones / kTuneRange + 1.0) * 0.5);
 }
 
+// The whole semitone nearest to a normalized Tune, -24..24. The one place
+// that decides it: the display, the text input and the engine all round
+// here, from the host's double value, so they cannot fall on different
+// sides of a half semitone.
+inline int TuneStep(double normalized) {
+    return static_cast<int>(std::lround(TuneSemitones(normalized)));
+}
+
 // Tune as it sounds: the nearest whole semitone, unless free tuning is on.
 inline double TuneSounding(double normalized, bool free) {
-    return free ? Clamp01(normalized) : TuneNormalized(std::round(TuneSemitones(normalized)));
+    return free ? Clamp01(normalized) : TuneNormalized(TuneStep(normalized));
 }
 
 // Since 0.2.0 a higher Damping means more damping, a shorter sound. The

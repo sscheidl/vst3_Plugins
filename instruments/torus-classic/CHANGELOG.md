@@ -1,5 +1,55 @@
 # Changes
 
+## 0.2.2 (2026-11-15)
+
+The plug-in is now called **Kekulé**, after August Kekulé, who found the
+benzene ring (Rings, ring, Kekulé). Decision of the owner. Nothing else
+changes: no DSP, parameter or state code is touched.
+
+* Hosts show Kekulé with the accent. The Unicode class info carries it; the
+  8-bit class info, which has no defined encoding for an accent, says
+  Kekule. The window title shows Kekulé.
+* The bundle is `Kekule.vst3`, without the accent. Remove an installed
+  `Torus Classic.vst3`: both have the same class IDs.
+* Class IDs, parameters and the saved state are unchanged, so projects and
+  presets saved with Torus Classic load.
+* "Torus Classic" stays the internal name: directory, branch, library and
+  test targets, namespaces.
+* Codex's review of 0.2.1 is included ([review](docs/CODEX_REVIEW_0.2.1.md)):
+  released for the DAW test; its point TC-R10 (P3) is not addressed here.
+
+## 0.2.1 (2026-11-14)
+
+Fixes from the Codex review of 0.2.0 ([review](docs/CODEX_REVIEW_0.2.0.md),
+[what was done](docs/CODEX_REVIEW_0.2.0_UMSETZUNG.md)). No new features.
+
+* **Filter after a bypass (TC-R06).** The low-pass kept its old state while
+  fully open and gave it back when it was closed again, even after a long
+  silence. Its integrators now run all the time; fully open the samples
+  still pass exactly as they came.
+* **Filter glide at high sample rates (TC-R05).** At 88.2 kHz and above the
+  filter control stopped just short of its target, so "off" was never quite
+  off. The glide now runs in double precision and lands exactly, at every
+  supported rate.
+* **Tune at the half semitone (TC-R07).** In a very narrow range around each
+  half semitone, the display and the engine could round to different
+  semitones. There is now one rounding, from the host's double value, used
+  by the display, by automation and by a loaded state.
+* **Note-offs of the screen keys (TC-R08).** Letting go of a key could be
+  lost when 64 strikes were waiting, or when the host's MIDI output list had
+  no room. Releases no longer wait in the queue and are never refused; a
+  note-off the host cannot take now comes in a later block, and the host
+  never gets a second note-on for a key it already holds.
+* **Faulty samples at the output stage (TC-R09).** Filter and limiter now
+  turn a sample that is not a number or infinite into silence and bound
+  finite ones, so only finite samples leave the plug-in. The engine already
+  delivered finite samples; this is a safeguard.
+* README and a code comment still said full Damping sustains; since 0.2.0 it
+  is Damping 0.
+
+Not changed: engine, sample rate conversion, latency, parameters, state
+format, window.
+
 ## 0.2.0 (2026-11-14)
 
 Additions asked for after the first DAW test in Studio One.
