@@ -58,14 +58,16 @@ Bei der Umsetzung selbst festgelegt, weil die Vorgaben es offen ließen:
 | Klaviatur: Vorgabe | Eingeblendet; der Zustand wird mit dem Projekt gespeichert | Projekte aus 0.2.0 öffnen mit Klaviatur |
 | Oberton an der Abschaltgrenze (Review R07) | Seit 0.3.2 im Plugin linear ausgeblendet zwischen 0,20 und 0,25 der Abtastrate; Firmware vorerst unverändert | Billigste Lösung: keine Rechenlast pro Sample. Vom Nutzer so entschieden (2026-11-14). Noten 123–126 (48 kHz) klingen dadurch anders als in der Firmware |
 
-### Torus Classic
+### Kekulé (Projektname Torus Classic)
 
 Zweiter Port, Auftrag vom 2026-11-14
 ([Buildauftrag](CLAUDE_BUILDAUFTRAG_TORUS_CLASSIC_0.1.0.md)). Version 0.1.0 lädt
 und spielt in Studio One (erster DAW-Test des Nutzers am 2026-11-14). Codex
 fand in 0.1.0 vier Fehler; sie sind seit 0.1.1 behoben. 0.2.0 bringt die
 Ergänzungen aus dem DAW-Test und ist gebaut und automatisch geprüft, in
-einer DAW aber noch nicht ausprobiert. Was sich wann geändert hat, steht im
+einer DAW aber noch nicht ausprobiert. Codex hat 0.2.1 für den DAW-Test
+freigegeben; ein Punkt der Priorität P3 (TC-R10) ist offen. Seit 0.2.2 heißt
+das Plugin Kekulé. Was sich wann geändert hat, steht im
 [Änderungsprotokoll](../instruments/torus-classic/CHANGELOG.md). Einzelheiten und Messwerte stehen im
 [Build-Bericht](../instruments/torus-classic/docs/BUILD_REPORT_0.1.0.md), die
 offene Abnahme in der
@@ -77,6 +79,7 @@ Auftrag es offen ließ:
 
 | Thema | Festlegung | Begründung |
 | --- | --- | --- |
+| Name | Das Plugin heißt seit 0.2.2 „Kekulé" (Anzeigename mit Akzent, Fenstertitel); das Bundle heißt `Kekule.vst3`. „Torus Classic" bleibt interner Projektname: Verzeichnis, Branch, Build-Targets, Namensräume, Testnamen | **Entscheidung des Nutzers vom 2026-11-15:** nach August Kekulé, dem Entdecker des Benzolrings (Rings, Ring, Kekulé). Der Akzent steht nur in der Unicode-Klasseninfo, die heutige Hosts lesen; die 8-Bit-Klasseninfo und der Dateiname bleiben ASCII. Klassen-IDs, Parameter und Zustandsformat sind die von Torus Classic, alte Projekte laden |
 | Sampleratenwandlung | Eigener Kaiser-Fenster-Sinc mit 96 Abgriffen im Plugin, keine fremde Bibliothek | Das SDK enthält keinen Resampler. Rund 300 Zeilen, mit Messungen an 15 Raten geprüft (endliches Frequenzraster, keine Schranke für jede Zwischenfrequenz), keine neue Abhängigkeit und kein Download. Abweichung vom Wortlaut des Auftrags („kleine geeignete Abhängigkeit"); bei Bedarf austauschbar, die Schnittstelle des Adapters bleibt |
 | Latenz | 0 bei 48 kHz, sonst rund 1 ms (49/90/97/195 Samples bei 44,1/88,2/96/192 kHz) | Kleinste Verzögerung, bei der kein Ausgabe-Sample ein Quantum braucht, in das ein späterer Block noch Ereignisse legen könnte |
 | Parameterautomation | Jeder Punkt wirkt als Stufe am nächsten 12-Sample-Raster; keine Rampen zwischen Punkten | Die Engine glättet ohnehin über 5 ms; nur so ist das Ergebnis unabhängig von der Blockgröße |

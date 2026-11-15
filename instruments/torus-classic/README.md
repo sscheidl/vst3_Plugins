@@ -1,11 +1,20 @@
-# Torus Classic
+# Kekulé
 
-VST3 instrument, version 0.2.1, Windows x64. The Rings/Torus keyboard engine
+VST3 instrument, version 0.2.2, Windows x64. The Rings/Torus keyboard engine
 of the Daisy Seed3 firmware *Physical Modeling*, without its reverb, inside a
 native plug-in: six synthesis models, four voices, dry stereo output, with a
 low-pass and a limiter at the end.
 
 ![The plug-in window](docs/editor.png)
+
+**Name:** Kekulé, after August Kekulé, who found the benzene ring: Rings,
+ring, Kekulé. Hosts show it with the accent; the bundle is `Kekule.vst3`,
+without it, because some hosts and tools mishandle accents in file names.
+Up to 0.2.1 the plug-in was called Torus Classic, and that stays the internal
+name of the project: this directory, the branch, the build targets, the
+namespaces and the test names. The class IDs, the parameters and the saved
+state are those of Torus Classic, so projects and presets saved with it load
+in Kekulé.
 
 **Status:** built and tested automatically on one machine; passes Steinberg's
 validator.
@@ -24,8 +33,12 @@ validator.
   the [change log](CHANGELOG.md).
 * Codex re-reviewed 0.2.0: the four defects of 0.1.0 are fixed; it found five
   new ones ([review](docs/CODEX_REVIEW_0.2.0.md)). 0.2.1 fixes them
-  ([what was done](docs/CODEX_REVIEW_0.2.0_UMSETZUNG.md)); the fixes have not
-  been re-reviewed.
+  ([what was done](docs/CODEX_REVIEW_0.2.0_UMSETZUNG.md)).
+* Codex re-reviewed 0.2.1 and released it for the DAW test
+  ([review](docs/CODEX_REVIEW_0.2.1.md)): the five defects are fixed, nothing
+  new of priority P0 to P2. One minor point (TC-R10, P3) concerns a test and
+  an internal helper, not the plug-in's own path; it is still open.
+* 0.2.2 only renames the plug-in to Kekulé.
 * The [build report](docs/BUILD_REPORT_0.1.0.md) describes 0.1.0: what was
   verified then and what was not.
 
@@ -246,7 +259,7 @@ every time; two instances given the same notes sound identical.
 * Each instance has its own noise generator; the firmware has one.
 ## Install
 
-Nothing is installed automatically. Copy the bundle `Torus Classic.vst3`
+Nothing is installed automatically. Copy the bundle `Kekule.vst3`
 (the whole folder) from `build/windows-vs2026-x64/VST3/Release/`, or from
 `out/torus-classic-<version>/` after a release build was staged there, to a
 VST3 folder, then let the DAW rescan: `%LOCALAPPDATA%\Programs\Common\VST3\`
@@ -254,10 +267,14 @@ for the current user (no administrator rights; where Toy Piano Classic sits on
 the development machine) or `C:\Program Files\Common Files\VST3\` for all
 users. The plug-in needs no Visual C++ redistributable.
 
+Remove an older `Torus Classic.vst3` from the VST3 folders first. Both
+bundles carry the same class IDs, so a host would find the same plug-in
+twice and use either of them.
+
 ## Build and test
 
 See the [repository README](../../README.md). The presets build Toy Piano
-Classic and Torus Classic together; Steinberg's validator runs on each bundle
+Classic and Kekulé together; Steinberg's validator runs on each bundle
 at the end of the build.
 
 ```bash

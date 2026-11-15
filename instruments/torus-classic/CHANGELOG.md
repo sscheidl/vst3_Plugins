@@ -1,5 +1,23 @@
 # Changes
 
+## 0.2.2 (2026-11-15)
+
+The plug-in is now called **Kekulé**, after August Kekulé, who found the
+benzene ring (Rings, ring, Kekulé). Decision of the owner. Nothing else
+changes: no DSP, parameter or state code is touched.
+
+* Hosts show Kekulé with the accent. The Unicode class info carries it; the
+  8-bit class info, which has no defined encoding for an accent, says
+  Kekule. The window title shows Kekulé.
+* The bundle is `Kekule.vst3`, without the accent. Remove an installed
+  `Torus Classic.vst3`: both have the same class IDs.
+* Class IDs, parameters and the saved state are unchanged, so projects and
+  presets saved with Torus Classic load.
+* "Torus Classic" stays the internal name: directory, branch, library and
+  test targets, namespaces.
+* Codex's review of 0.2.1 is included ([review](docs/CODEX_REVIEW_0.2.1.md)):
+  released for the DAW test; its point TC-R10 (P3) is not addressed here.
+
 ## 0.2.1 (2026-11-14)
 
 Fixes from the Codex review of 0.2.0 ([review](docs/CODEX_REVIEW_0.2.0.md),

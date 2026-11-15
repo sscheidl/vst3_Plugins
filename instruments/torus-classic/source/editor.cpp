@@ -121,7 +121,7 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
     const auto name_font = makeOwned<CFontDesc>("Segoe UI", 10, kBoldFace);
     const auto value_font = makeOwned<CFontDesc>("Segoe UI", 13);
 
-    frame->addView(MakeLabel(CRect(kMargin, 14, kWidth / 2, 42), stringPluginName, title_font,
+    frame->addView(MakeLabel(CRect(kMargin, 14, kWidth / 2, 42), stringPluginNameUtf8, title_font,
                              kText, kLeftText));
     const CCoord button_left = kWidth - kMargin - kButtonWidth;
     frame->addView(MakeLabel(CRect(kWidth / 2, 18, button_left - 12, 40),

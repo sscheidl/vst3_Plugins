@@ -2,8 +2,8 @@
   "schema": 1,
   "product": {
     "id": "torus-classic",
-    "name": "Torus Classic",
-    "version": "0.2.1",
+    "name": "Kekulé",
+    "version": "0.2.2",
     "vendor": "TAUREON",
     "format": "VST3",
     "platform": "Windows x64",
@@ -44,7 +44,7 @@
       "id": "torus-classic.shell",
       "path": "source/",
       "layer": 4,
-      "version": "0.2.1",
+      "version": "0.2.2",
       "description": "VST3 processor, controller, state and editor",
       "depends_on": [
         "torus-classic.engine",

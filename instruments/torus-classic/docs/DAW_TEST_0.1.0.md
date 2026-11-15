@@ -1,4 +1,4 @@
-# DAW test list: Torus Classic 0.1.0
+# DAW test list: Torus Classic 0.1.0 (Kekulé since 0.2.2)
 
 The automatic tests and Steinberg's validator cannot answer these questions:
 they need the three hosts and ears.
@@ -40,18 +40,21 @@ for that host; note the last step.
 | 8.6 | Open a project saved with 0.1.0 | Sounds as before (apart from the limiter); Damping knob shows the mirrored value | | | |
 | 8.7 | Record automation by moving a knob (2.4 again) | One clean automation pass; 0.1.0 reported every knob edit twice | | | |
 | 8.8 | 0.2.1: play with FILTER half closed, open it fully, wait in silence, close it again | No short burst of old sound when closing it again | | | |
+| 8.9 | 0.2.2: remove `Torus Classic.vst3`, install `Kekule.vst3`, rescan | Listed once, as **Kekulé** with the accent, vendor TAUREON; the window title reads Kekulé | | | |
+| 8.10 | 0.2.2: open a project saved with Torus Classic | The instrument loads as Kekulé with its settings; no "plug-in missing" | | | |
 
 ## Before starting
 
-1. The folder `Torus Classic.vst3` from `out/torus-classic-0.1.0/` belongs in
-   a VST3 folder. On the development machine it was copied to
+1. The folder `Kekule.vst3` (up to 0.2.1 `Torus Classic.vst3`) from
+   `out/torus-classic-<version>/` belongs in a VST3 folder, and only one of
+   the two: they carry the same class IDs. On the development machine it was copied to
    `%LOCALAPPDATA%\Programs\Common\VST3\` on 2026-11-14, next to Toy Piano
    Classic. Elsewhere that folder or `C:\Program Files\Common Files\VST3\`
    will do.
 2. Compare its files with `SHA256SUMS.txt` in that folder if in doubt about
    the copy.
-3. Let the host rescan. Expected entry: **Torus Classic**, vendor TAUREON,
-   instrument.
+3. Let the host rescan. Expected entry: **Kekulé** (up to 0.2.1 **Torus
+   Classic**), vendor TAUREON, instrument.
 
 ## 1. Loading and playing
 
