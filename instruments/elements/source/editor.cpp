@@ -194,12 +194,17 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         "Planned: cycle 1 / 2 / 4 / 8 voices, following the Kekule findings", "Generative sequences"};
     for(int i = 0; i < 4; ++i) {
         const CCoord left = button_left + i * (kButtonWidth + 6);
-        const int panel = i < 2 ? i : 2;
+        const bool poly = i == 2;
+        // POLY will cycle the voices, not switch panels: no panel callback.
+        // ENG, MOD and GEN are the panels 0, 1 and 2.
+        const int panel = i < 2 ? i : i - 1;
+        std::function<void(bool)> clicked;
+        if(!poly)
+            clicked = [this, panel](bool) { SetPanel(static_cast<EditorPanel>(panel)); };
         auto* button = new ToggleButton(CRect(left, 18, left + kButtonWidth, 40),
-                                         panel_names[i], false,
-                                         [this, panel](bool) { SetPanel(static_cast<EditorPanel>(panel)); });
+                                         panel_names[i], false, std::move(clicked));
         button->setTooltipText(panel_tips[i]);
-        if(i == 2)
+        if(poly)
             button->setMouseEnabled(false); // enable with the actual voice allocator
         else
             panel_buttons_[panel] = button;
@@ -269,8 +274,7 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         knob->setHandleLineWidth(4);
         knob->setCoronaInset(5);
         knob->setInsetValue(14);
-        knob->setDefaultValue(static_cast<float>(KnobValue(static_cast<ParamId>(spec.id),
-                                                           DefaultOf(Index(static_cast<ParamId>(spec.id))))));
+        knob->setDefaultValue(static_cast<float>(DefaultOf(Index(static_cast<ParamId>(spec.id)))));
         // One semitone per wheel step for Coarse, one hundredth for the others.
         knob->setWheelInc(spec.id == kParamCoarse ? static_cast<float>(1.0 / kCoarseSteps) : 0.01f);
         frame->addView(knob);
@@ -292,7 +296,7 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
 
         knobs_[i] = {spec.id, knob, value};
         const ParamValue normalized = controller ? controller->getParamNormalized(spec.id) : 0.0;
-        knob->setValue(static_cast<float>(KnobValue(static_cast<ParamId>(spec.id), normalized)));
+        knob->setValue(static_cast<float>(normalized));
         ShowValue(knobs_[i], normalized);
     }
 
@@ -558,7 +562,7 @@ void Editor::valueChanged(CControl* control) {
     if(!controller || !control)
         return;
     const auto id = static_cast<ParamID>(control->getTag());
-    ParamValue normalized = KnobValue(static_cast<ParamId>(id), control->getValueNormalized());
+    ParamValue normalized = control->getValueNormalized();
     // Coarse moves in whole semitones.
     if(id == kParamCoarse)
         normalized = CoarseNormalized(CoarseSemitones(normalized));
@@ -609,7 +613,7 @@ void Editor::ParameterChanged(ParamID id, ParamValue normalized) {
     for(Knob& knob : knobs_) {
         if(knob.id != id || !knob.knob)
             continue;
-        const auto value = static_cast<float>(KnobValue(static_cast<ParamId>(id), normalized));
+        const auto value = static_cast<float>(normalized);
         if(knob.knob->getValue() != value) {
             knob.knob->setValue(value);
             knob.knob->invalid();

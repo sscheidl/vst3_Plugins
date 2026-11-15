@@ -276,7 +276,8 @@ std::vector<char> MakeState(int32 version, const std::vector<double>& values) {
 
 // A dry, struck patch: the right channel is the resonator.
 HostScore DryPatch() {
-    return {Param(0, kParamSpace, 0.0), Param(0, kParamDamping, 0.6), Param(0, kParamVelocity, 0.0)};
+    // Damping 0.4 is the hardware's 0.6 (see EngineValue).
+    return {Param(0, kParamSpace, 0.0), Param(0, kParamDamping, 0.4), Param(0, kParamVelocity, 0.0)};
 }
 
 // --- Tests -------------------------------------------------------------------
@@ -355,7 +356,7 @@ void TestNotes() {
     // The pitch wheel arrives as a parameter.
     {
         HostScore bend = DryPatch();
-        bend.push_back(Param(0, kParamDamping, 0.8));
+        bend.push_back(Param(0, kParamDamping, 0.2)); // little damping: a long tone
         bend.push_back(NoteOn(0, 69, 100));
         bend.push_back(Param(24000, kParamPitchBend, 1.0));
         bend.push_back(Param(72000, kParamPitchBend, 0.0));
@@ -470,6 +471,8 @@ void TestState() {
             value = 0.0;
         if(kFirstParam + i == kParamStrikeLevel)
             value = 0.9;
+        if(kFirstParam + i == kParamDamping)
+            value = 1.0 - value; // the engine gets what it got before 0.1.4: a tone long enough to measure
         expected.push_back(value);
         moved.push_back(Param(0, kFirstParam + i, value));
     }
@@ -504,7 +507,7 @@ void TestState() {
                                 NoteOn(0, 57, 100), Param(0, kParamPitchBend, 1.0)});
     ringing.Run(24000);
     CHECK(Energy(ringing.Stereo()) > 1e-3 && ringing.processor->SynthEngine().Gate());
-    CHECK(LoadState(*ringing.processor, MakeState(kStateVersion, std::vector<double>(kControlDefaults, kControlDefaults + kSavedParamCount))) == kResultOk);
+    CHECK(LoadState(*ringing.processor, MakeState(kStateVersion, std::vector<double>(kDefaults, kDefaults + kSavedParamCount))) == kResultOk);
     ringing.Clear();
     ringing.Run(4800);
     CHECK(Energy(ringing.Stereo()) == 0.0 && !ringing.processor->SynthEngine().Gate());
@@ -525,6 +528,7 @@ void TestState() {
     CHECK(LoadState(*host.processor, {}) != kResultOk);
     CHECK(LoadState(*host.processor, MakeState(kStateVersion + 1, expected)) != kResultOk);
     CHECK(LoadState(*host.processor, MakeState(0, expected)) != kResultOk);
+    CHECK(LoadState(*host.processor, MakeState(-1, expected)) != kResultOk);
     bad.pop_back();
     CHECK(LoadState(*host.processor, MakeState(kStateVersion, bad)) != kResultOk);
     for(const double poison : {-0.01, 1.01, std::numeric_limits<double>::quiet_NaN(),
@@ -544,6 +548,25 @@ void TestState() {
     bad[Index(kParamFreeze)] = 1.0;
     CHECK(SavedState(*host.processor) == MakeState(kStateVersion, bad));
 
+    // A state of 0.1.0 to 0.1.3 (version 1) has Damping in the hardware's
+    // sense. It comes back mirrored, is saved as version 2, and the engine
+    // gets the very value it got before: an old project sounds the same.
+    std::vector<double> old = expected;
+    old[Index(kParamDamping)] = 0.9;
+    std::vector<double> mirrored = old;
+    mirrored[Index(kParamDamping)] = 1.0 - 0.9;
+    {
+        PluginHost v1({rate});
+        CHECK(LoadState(*v1.processor, MakeState(1, old)) == kResultOk);
+        CHECK(SavedState(*v1.processor) == MakeState(kStateVersion, mirrored));
+        v1.Run(64);
+        CHECK(v1.processor->SynthEngine().ControlTarget(Control::Damping) == 0.9f);
+        PluginHost v2({rate});
+        CHECK(LoadState(*v2.processor, MakeState(kStateVersion, old)) == kResultOk);
+        v2.Run(64);
+        CHECK(std::fabs(v2.processor->SynthEngine().ControlTarget(Control::Damping) - 0.1f) < 1e-6f);
+    }
+
     // The controller reads the same state; the wheel returns to its centre.
     IPtr<Controller> controller = owned(new Controller());
     CHECK(controller->initialize(nullptr) == kResultOk);
@@ -559,6 +582,17 @@ void TestState() {
     for(int i = 0; i < kSavedParamCount; ++i)
         CHECK(controller->getParamNormalized(kFirstParam + i) == expected[i]);
     CHECK(controller->getParamNormalized(kParamPitchBend) == kDefaultPitchBend);
+    {
+        // The controller mirrors a version 1 state the same way.
+        const std::vector<char> v1 = MakeState(1, old);
+        MemoryStream stream;
+        int32 written = 0;
+        stream.write(const_cast<char*>(v1.data()), static_cast<int32>(v1.size()), &written);
+        int64 start = 0;
+        stream.seek(0, IBStream::kIBSeekSet, &start);
+        CHECK(controller->setComponentState(&stream) == kResultOk);
+        CHECK(controller->getParamNormalized(kParamDamping) == mirrored[Index(kParamDamping)]);
+    }
     {
         MemoryStream stream;
         CHECK(controller->setComponentState(&stream) != kResultOk); // empty
@@ -577,7 +611,7 @@ void TestState() {
     CHECK(controller->terminate() == kResultOk);
     std::printf("state: all 19 saved parameters come back exactly; a loaded state sounds like "
                 "the same values set by hand; loading and activation end every note; damaged "
-                "states are refused\n");
+                "states are refused; a version 1 state comes back with Damping mirrored\n");
 }
 
 std::string Text(Controller& controller, ParamID id, double normalized) {
@@ -616,9 +650,12 @@ void TestController() {
         CHECK(info.defaultNormalizedValue == kDefaults[i]);
         CHECK(controller->getParamNormalized(info.id) == kDefaults[i]);
     }
-    // The defaults are the hardware's start-up patch.
+    // The defaults are the hardware's start-up patch; its damping 0.25 is
+    // today's 0.75, the engine still gets 0.25.
     CHECK(kDefaults[Index(kParamStrikeLevel)] == 0.8 && kDefaults[Index(kParamGeometry)] == 0.2);
-    CHECK(kDefaults[Index(kParamDamping)] == 0.25 && kDefaults[Index(kParamPosition)] == 0.3);
+    CHECK(kDefaults[Index(kParamDamping)] == 0.75 && kDefaults[Index(kParamPosition)] == 0.3);
+    CHECK(EngineValue(Index(kParamDamping), kDefaults[Index(kParamDamping)]) == kControlDefaults[Index(kParamDamping)]);
+    CHECK(EngineValue(Index(kParamGeometry), 0.3) == 0.3);
 
     // Values as text, and text as values.
     CHECK(Text(*controller, kParamCoarse, 0.5) == "0" && Text(*controller, kParamCoarse, 1.0) == "30");
@@ -626,8 +663,8 @@ void TestController() {
     CHECK(Text(*controller, kParamFine, 0.5) == "0.00" && Text(*controller, kParamFine, 1.0) == "2.00");
     CHECK(Text(*controller, kParamVolume, 1.0) == "100.0" && Text(*controller, kParamGeometry, 0.2) == "0.200");
     CHECK(Text(*controller, kParamFreeze, 0.0) == "Off" && Text(*controller, kParamFreeze, 1.0) == "On");
-    CHECK(Text(*controller, kParamDamping, 0.0) == "1.000");
-    CHECK(Text(*controller, kParamDamping, 1.0) == "0.000");
+    CHECK(Text(*controller, kParamDamping, 0.0) == "0.000");
+    CHECK(Text(*controller, kParamDamping, 0.75) == "0.750");
     CHECK(Text(*controller, kParamPitchBend, 1.0) == "2.00" && Text(*controller, kParamPitchBend, 0.0) == "-2.00");
     ParamValue value = -1.0;
     CHECK(Typed(*controller, kParamCoarse, "7 st", value) && CoarseSemitones(value) == 7);
@@ -636,7 +673,7 @@ void TestController() {
     CHECK(Typed(*controller, kParamVolume, "50 %", value) && value == 0.5);
     CHECK(Typed(*controller, kParamFreeze, "on", value) && value == 1.0);
     CHECK(Typed(*controller, kParamGeometry, "0,25", value) && value == 0.25);
-    CHECK(Typed(*controller, kParamDamping, "0.75", value) && value == 0.25);
+    CHECK(Typed(*controller, kParamDamping, "0.75", value) && value == 0.75);
     value = 0.123;
     CHECK(!Typed(*controller, kParamGeometry, "foo", value) && !Typed(*controller, kParamCoarse, "12junk", value));
     CHECK(!Typed(*controller, kParamFreeze, "maybe", value) && value == 0.123);
@@ -650,6 +687,9 @@ void TestController() {
               && id == kParamBrightness);
         CHECK(controller->getMidiControllerAssignment(0, channel, kMidiCcSpace, id) == kResultTrue
               && id == kParamSpace);
+        // CC 23 drives the parameter itself, so it turns the way the knob does.
+        CHECK(controller->getMidiControllerAssignment(0, channel, kMidiCcDamping, id) == kResultTrue
+              && id == kParamDamping);
     }
     CHECK(controller->getMidiControllerAssignment(0, 0, kCtrlModWheel, id) == kResultFalse);
     CHECK(controller->getMidiControllerAssignment(1, 0, kPitchBend, id) == kResultFalse);
@@ -673,10 +713,11 @@ void TestEditorControls() {
     IPtr<Editor> editor = Steinberg::owned(new Editor(controller, {}, {}, {}));
     auto knob = VSTGUI::owned(new VSTGUI::CKnob(VSTGUI::CRect(0, 0, 54, 54), nullptr,
                                                kParamDamping, nullptr, nullptr));
+    // The Damping knob is the parameter as it is: clockwise, more damping.
     for(const float amount : {0.0f, 0.25f, 1.0f}) {
         knob->setValue(amount);
         editor->valueChanged(knob);
-        CHECK(controller->getParamNormalized(kParamDamping) == 1.0 - amount);
+        CHECK(controller->getParamNormalized(kParamDamping) == amount);
     }
     // Panel changes and keyboard visibility are independent.
     editor->SetPanel(EditorPanel::Mod);
@@ -742,7 +783,7 @@ void TestEditorControls() {
     CHECK(controller->setState(truncated.get()) != kResultOk);
     CHECK(controller->WindowSettings().transpose == 24);
     CHECK(controller->terminate() == kResultOk);
-    std::printf("editor controls: inverted damping, independent panels/keyboard, octave releases, v1/v2 state\n");
+    std::printf("editor controls: damping knob as the parameter, independent panels/keyboard, octave releases, v1/v2 state\n");
 }
 
 void TestKeyboardAndStatus() {

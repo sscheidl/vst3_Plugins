@@ -214,9 +214,7 @@ tresult PLUGIN_API Controller::initialize(FUnknown* context) {
                 {STR16("Position"), kParamPosition},
                 {STR16("Space"), kParamSpace}};
     for(const auto& pot : more)
-        parameters.addParameter(new LinearParameter(pot.title, pot.id, "", nullptr,
-                                                    pot.id == kParamDamping ? 1.0 : 0.0,
-                                                    pot.id == kParamDamping ? -1.0 : 1.0,
+        parameters.addParameter(new LinearParameter(pot.title, pot.id, "", nullptr, 0.0, 1.0,
                                                     "%.3f", DefaultOf(Index(static_cast<ParamId>(pot.id)))));
     parameters.addParameter(
         new SwitchParameter(STR16("Freeze"), kParamFreeze, DefaultOf(Index(kParamFreeze))));

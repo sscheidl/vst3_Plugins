@@ -18,8 +18,11 @@ the fix of the first, fixed in 0.1.2, which Codex checked and found fixed
 ([check of 0.1.2](docs/CODEX_REVIEW_0.1.2_NACHPRUEFUNG.md)). 0.1.3 only
 colours knobs in the window. The user's DAW test on 2026-11-15 confirmed
 playability and low observed CPU load, and raised high-note distortion for
-investigation. 0.1.4 adds keyboard range controls, logical damping direction
-and navigation for future functions; independent review by Claude is pending.**
+investigation. 0.1.4 adds keyboard range controls, reverses Damping (higher
+damps more, as in Kekulé) and navigation for future functions. Codex built
+it; Claude reviewed it ([review](docs/CLAUDE_REVIEW_0.1.4.md)) and, at the
+user's decision, reversed Damping in the parameter itself; Codex's check of
+that is open.**
 Details and every measured number are in the
 [build report](docs/BUILD_REPORT_0.1.0.md); the measurements of 0.1.1 are in
 [DSP_MEASUREMENTS_0.1.1.md](docs/DSP_MEASUREMENTS_0.1.1.md).
@@ -52,7 +55,8 @@ Details and every measured number are in the
 
 ## Parameters
 
-Parameter IDs are fixed. The values from 0 to 1 are the hardware's pots.
+Parameter IDs are fixed. The values from 0 to 1 are the hardware's pots,
+except Damping, which turns the other way (see below).
 
 | ID | Name | Range | Default | |
 | --- | --- | --- | --- | --- |
@@ -69,7 +73,7 @@ Parameter IDs are fixed. The values from 0 to 1 are the hardware's pots.
 | 110 | Fine | −2..+2 st | 0 | |
 | 111 | Geometry | 0..1 | 0.2 | From plates over strings to bars and bells |
 | 112 | Brightness | 0..1 | 0.5 | |
-| 113 | Damping | 0..1 shown | 0.75 shown | **Higher means stronger damping**; legacy normalized default remains 0.25 |
+| 113 | Damping | 0..1 | 0.75 | **Higher damps more**, the sound gets shorter; the hardware's pot is the mirror image (its 0.25 is this 0.75) |
 | 114 | Position | 0..1 | 0.3 | Where the structure is excited |
 | 115 | Space | 0..1 | 0.5 | Below 0.1 dry with the exciter on the left; then stereo width; above 0.6 reverb |
 | 116 | Freeze | Off, On | Off | Freezes the reverb: what the hardware does when a voltage pushes SPACE to the top |
@@ -91,7 +95,9 @@ The screen keyboard starts at **C3..C5**. Its `<<` / `>>` buttons move it by
 key is released before a range change. This changes only screen-keyboard
 notes (including their MIDI output), not external MIDI or the Coarse control.
 Range, zoom, keyboard visibility and selected panel are saved with the project;
-version 1 window states remain readable.
+version 1 window states remain readable. A project from 0.1.3 or before has no
+range saved and opens at the new start, C3..C5, one octave below what it
+showed.
 
 The five equal-sized header buttons have separate roles:
 
@@ -103,13 +109,14 @@ The five equal-sized header buttons have separate roles:
 | GEN | Replace synthesis controls with the future generative view; currently a planning placeholder |
 | KEYS | Show/hide the keyboard independently of the selected panel |
 
-Damping now turns clockwise towards **more absorption / shorter ringing**,
-including its numeric display and text entry. To preserve existing patches,
-recorded automation and CC assignments, parameter ID 113 retains its legacy
-normalized value internally: displayed damping = `1 - normalized`. Thus an old
-0.25 patch still sounds the same, with the knob and value now at 0.75. Raw host
-automation curves and MIDI CC 23 still run in the legacy direction (higher raw
-value rings longer). The other parameters and the DSP are unchanged.
+Damping turns towards **more damping, a shorter sound**, as in Kekulé since
+its 0.2.0. The parameter itself has the new sense, so the knob, its value, a
+host's automation lane, its generic sliders and MIDI CC 23 all go the same
+way; the engine still gets the hardware's value, `1 − Damping`. Projects and
+presets saved with 0.1.0 to 0.1.3 (sound state version 1) are mirrored when
+they load and sound as before; they are saved again as version 2.
+Automation recorded with those versions is not converted and now runs the
+other way. The other parameters and the DSP are unchanged.
 
 Freeze is a circular snowflake button next to the SPACE label. Exciter colours
 retain the 0.1.3 hardware-inspired white/magenta/turquoise scheme.
@@ -118,7 +125,8 @@ MOD is intended for a modulation matrix and LFOs; GEN for melodic MIDI
 sequences, stochastic choices and probability. Both remain unimplemented.
 The low CPU load observed in the DAW is encouraging, but voice counts and
 mixing/headroom rules will follow Kekulé's polyphony results, then be measured
-with this engine. [Claude review brief](docs/CLAUDE_PRUEFAUFTRAG_0.1.4.md).
+with this engine. [Claude review brief](docs/CLAUDE_PRUEFAUFTRAG_0.1.4.md),
+[review](docs/CLAUDE_REVIEW_0.1.4.md).
 
 The high-note investigation is recorded in
 [DSP_INVESTIGATION_0.1.4.md](docs/DSP_INVESTIGATION_0.1.4.md). It adds measurements

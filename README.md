@@ -14,7 +14,7 @@ prove and records what was learned.
 | Project | Kind | Status |
 | --- | --- | --- |
 | [Toy Piano Classic](instruments/toy-piano-classic/) | Instrument | 0.3.2: builds, validated, tested and code-reviewed; 0.1.0 loads in Studio One, not yet listened to |
-| [Mendelejew](instruments/elements/) | Instrument | 0.1.4: true 48 kHz Elements DSP; octave keyboard controls, inverted damping presentation, snowflake Freeze and future-function navigation; high-note investigation without DSP changes; Claude review pending. Earlier build played in the user's DAW |
+| [Mendelejew](instruments/elements/) | Instrument | 0.1.4: true 48 kHz Elements DSP; octave keyboard controls, Damping reversed as in Kekulé, snowflake Freeze and future-function navigation; high-note investigation without DSP changes; reviewed by Claude, Codex's check of the Damping change open. Earlier build played in the user's DAW |
 | [Kekulé](instruments/torus-classic/) | Instrument | 0.2.2: builds, validated and tested automatically; 0.1.0 loads and plays in Studio One; Codex released 0.2.1 for the DAW test (one P3 point open); the additions of 0.2.0 not yet tried in a DAW |
 
 ## Layout

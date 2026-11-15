@@ -44,7 +44,7 @@ entfernen: Alle haben dieselben Klassen-IDs.
 | 12 | Blow allein: Luftrauschen durch den Resonator; über etwa 2/3 kommt die Röhre hinzu | offen |
 | 13 | Strike mit Mallet von links nach rechts: Samples, Schlägel, Plektrum, Partikel | offen |
 | 14 | Geometry, Brightness, Damping, Position verändern den Klang wie erwartet | offen |
-| 15 | Damping: höherer Reglerstand und angezeigter Wert dämpfen stärker; alter Klang und rohe Automation bleiben erhalten (Anzeige = 1 − alter Wert) | offen |
+| 15 | Damping: höherer Wert dämpft stärker, im Fenster wie in der Automationsspur und am MIDI-CC 23; ein mit 0.1.3 oder früher gespeichertes Projekt klingt wie vorher (sein Damping steht jetzt gespiegelt, z. B. 0,25 → 0,75) | offen |
 | 16 | Space: unten trocken, Mitte breit, oben Hall; Schneeflocke neben SPACE hält den Hall, berührt den Reglerring nicht und bleibt beim Skalieren lesbar | offen |
 | 16a | Hohen verzerrten Klang erneut einstellen und Patch/MIDI-Note/Hostrate festhalten; mit schwächerem Anreger vergleichen. Volume liegt hinter der Sättigung und kann sie nicht rückgängig machen | offen |
 | 17 | Kein Knacksen beim Drehen der Regler während eines Tons | offen |

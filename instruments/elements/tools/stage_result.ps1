@@ -44,7 +44,8 @@ foreach ($document in 'README.md', 'CHANGELOG.md', 'UPSTREAM.md', 'SHA256SUMS.up
     'docs\CODEX_REVIEW_0.1.0.md', 'docs\CODEX_REVIEW_0.1.0_UMSETZUNG.md',
     'docs\CODEX_REVIEW_0.1.1_NACHPRUEFUNG.md', 'docs\CODEX_REVIEW_0.1.1_UMSETZUNG.md',
     'docs\CODEX_REVIEW_0.1.2_NACHPRUEFUNG.md', 'docs\CODEX_PRUEFAUFTRAG_0.1.3.md',
-    'docs\CLAUDE_PRUEFAUFTRAG_0.1.4.md', 'docs\DSP_INVESTIGATION_0.1.4.md') {
+    'docs\CLAUDE_PRUEFAUFTRAG_0.1.4.md', 'docs\DSP_INVESTIGATION_0.1.4.md',
+    'docs\CLAUDE_REVIEW_0.1.4.md', 'docs\CODEX_PRUEFAUFTRAG_0.1.4.md') {
     $source = Join-Path $plugin $document
     if (Test-Path $source) { Copy-Item $source (Join-Path $target (Split-Path $document -Leaf)) -Force }
 }
