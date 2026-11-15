@@ -1,14 +1,15 @@
-# DAW-Prüfliste: Mendelejew 0.1.2 (Projekt Elements)
+# DAW-Prüfliste: Mendelejew 0.1.3 (Projekt Elements)
 
-Gilt für 0.1.2, die Fassung mit den Korrekturen aus dem Codex-Review und
-seiner Nachprüfung; der Dateiname bleibt der der ersten Fassung.
+Gilt für 0.1.3: die Fassung mit den Korrekturen aus dem Codex-Review und
+seinen Nachprüfungen (0.1.2), dazu die Reglerfarben (0.1.3); der Dateiname
+bleibt der der ersten Fassung.
 
 Was automatisch nicht prüfbar ist und in der DAW (Studio One) noch aussteht.
 Ergebnisse bitte hier eintragen: PASS, FAIL mit kurzer Beschreibung, oder
 offen.
 
 Installation: den Ordner `Mendelejew.vst3` aus
-`build\windows-vs2026-x64\VST3\Release\` (oder aus `out\elements-0.1.2\`) nach
+`build\windows-vs2026-x64\VST3\Release\` (oder aus `out\elements-0.1.3\`) nach
 `C:\Program Files\Common Files\VST3\` kopieren (braucht Adminrechte), DAW neu
 scannen lassen. Eine Kopie unter dem Arbeitstitel (`Elements.vst3`) oder eine
 zweite im Benutzer-Ordner `%LOCALAPPDATA%\Programs\Common\VST3\` vorher
@@ -21,6 +22,7 @@ entfernen: Alle haben dieselben Klassen-IDs.
 | 1 | Plugin erscheint als Instrument „Mendelejew" (Hersteller TAUREON) | offen |
 | 2 | Lädt auf einer Instrumentenspur ohne Fehlermeldung | offen |
 | 3 | Fenster öffnet, Regler und Beschriftung vollständig sichtbar, nichts überlappt | offen |
+| 3a | Neu in 0.1.3: Ringe und Gruppennamen der Anreger farbig (Envelope und Bow weiß, Blow magenta, Strike türkis), die übrigen orange; Farben gut lesbar, gefallen | offen |
 | 4 | Fenster lässt sich an der Ecke ziehen (50 bis 200 %) | offen |
 | 5 | MIDI-Keyboard: jede Taste schlägt an (Standardklang: Strike) | offen |
 | 6 | Loslassen der Taste: Bow/Blow klingen aus (Bow oder Blow aufdrehen, Contour mittig) | offen |
@@ -55,4 +57,4 @@ entfernen: Alle haben dieselben Klassen-IDs.
 | 24 | Transport Stopp/Start: kein hängender Ton | offen |
 | 25 | Zwei Instanzen gleichzeitig | offen |
 | 26 | CPU-Last im Leerlauf und beim Spielen plausibel (Messwert im Bericht: rund 3 % eines Kerns) | offen |
-| 27 | Toy Piano Classic und Torus Classic laden und spielen weiterhin | offen |
+| 27 | Toy Piano Classic und Kekulé laden und spielen weiterhin | offen |

@@ -51,43 +51,55 @@ constexpr CColor kAccent(236, 172, 64);
 constexpr CColor kText(232, 232, 236);
 constexpr CColor kDimText(150, 156, 168);
 
+// The exciter knobs take their colours from the hardware module, in memory of
+// Mutable Instruments: white for the envelope and the bow, magenta for the
+// blow, turquoise for the strike. Our own shades, chosen for the dark
+// background; only the colours are borrowed, nothing of the panel itself.
+constexpr CColor kExciterWhite(226, 228, 234);
+constexpr CColor kBlowMagenta(222, 78, 162);
+constexpr CColor kStrikeTurquoise(52, 196, 196);
+
 struct KnobSpec {
     ParamID id;
     const char* name;
     bool bipolar;
+    CColor ring;
 };
 
 // Row by row, left to right.
 constexpr KnobSpec kKnobs[Editor::kKnobCount] = {
-    {kParamContour, "CONTOUR", false},
-    {kParamBowLevel, "BOW", false},
-    {kParamBowTimbre, "TIMBRE", false},
-    {kParamBlowLevel, "BLOW", false},
-    {kParamBlowFlow, "FLOW", false},
-    {kParamBlowTimbre, "TIMBRE", false},
-    {kParamStrikeLevel, "STRIKE", false},
-    {kParamStrikeMallet, "MALLET", false},
-    {kParamStrikeTimbre, "TIMBRE", false},
-    {kParamGeometry, "GEOMETRY", false},
-    {kParamBrightness, "BRIGHTNESS", false},
-    {kParamDamping, "DAMPING", false},
-    {kParamPosition, "POSITION", false},
-    {kParamSpace, "SPACE", false},
-    {kParamVolume, "VOLUME", false},
-    {kParamCoarse, "COARSE", true},
-    {kParamFine, "FINE", true},
-    {kParamVelocity, "VELOCITY", false},
+    {kParamContour, "CONTOUR", false, kExciterWhite},
+    {kParamBowLevel, "BOW", false, kExciterWhite},
+    {kParamBowTimbre, "TIMBRE", false, kExciterWhite},
+    {kParamBlowLevel, "BLOW", false, kBlowMagenta},
+    {kParamBlowFlow, "FLOW", false, kBlowMagenta},
+    {kParamBlowTimbre, "TIMBRE", false, kBlowMagenta},
+    {kParamStrikeLevel, "STRIKE", false, kStrikeTurquoise},
+    {kParamStrikeMallet, "MALLET", false, kStrikeTurquoise},
+    {kParamStrikeTimbre, "TIMBRE", false, kStrikeTurquoise},
+    {kParamGeometry, "GEOMETRY", false, kAccent},
+    {kParamBrightness, "BRIGHTNESS", false, kAccent},
+    {kParamDamping, "DAMPING", false, kAccent},
+    {kParamPosition, "POSITION", false, kAccent},
+    {kParamSpace, "SPACE", false, kAccent},
+    {kParamVolume, "VOLUME", false, kAccent},
+    {kParamCoarse, "COARSE", true, kAccent},
+    {kParamFine, "FINE", true, kAccent},
+    {kParamVelocity, "VELOCITY", false, kAccent},
 };
 
-// The names above groups of knobs: row, first column, number of columns.
+// The names above groups of knobs: row, first column, number of columns, and
+// the colour of their knobs.
 struct GroupSpec {
     int row, column, columns;
     const char* name;
+    CColor color;
 };
 constexpr GroupSpec kGroups[] = {
-    {0, 0, 1, "ENVELOPE"}, {0, 1, 2, "BOW"},   {0, 3, 3, "BLOW"},
-    {0, 6, 3, "STRIKE"},   {1, 0, 4, "RESONATOR"}, {1, 4, 2, "SPACE"},
-    {1, 6, 3, "PERFORMANCE"},
+    {0, 0, 1, "ENVELOPE", kExciterWhite},  {0, 1, 2, "BOW", kExciterWhite},
+    {0, 3, 3, "BLOW", kBlowMagenta},       {0, 6, 3, "STRIKE", kStrikeTurquoise},
+    {1, 0, 4, "RESONATOR", kAccent},       {1, 4, 2, "SPACE", kAccent},
+    {1, 6, 3, "PERFORMANCE", kAccent},
 };
 
 CTextLabel* MakeLabel(const CRect& size, const char* text, CFontRef font, CColor color,
@@ -187,7 +199,7 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         frame->addView(MakeLabel(CRect(left, kRowTop[group.row],
                                        left + group.columns * kColumnWidth,
                                        kRowTop[group.row] + 16),
-                                 group.name, group_font, kAccent, kCenterText));
+                                 group.name, group_font, group.color, kCenterText));
     }
 
     for(std::size_t i = 0; i < knobs_.size(); ++i) {
@@ -208,7 +220,7 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
                                      knob_top + kKnobSize),
                                this, static_cast<int32_t>(spec.id), nullptr, nullptr, CPoint(0, 0),
                                style);
-        knob->setCoronaColor(kAccent);
+        knob->setCoronaColor(spec.ring);
         knob->setColorShadowHandle(kTrack);
         knob->setColorHandle(kText);
         knob->setHandleLineWidth(4);

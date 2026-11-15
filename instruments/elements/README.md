@@ -2,7 +2,7 @@
 
 A VST3 instrument around the modal synthesis DSP of the Mutable Instruments
 Elements module: bow, blow and strike exciters, a modal resonator, a stereo
-reverb. Monophonic, played from MIDI. Version 0.1.2, phase 1 of the project,
+reverb. Monophonic, played from MIDI. Version 0.1.3, phase 1 of the project,
 with the fixes from the Codex review of 0.1.0
 ([review](docs/CODEX_REVIEW_0.1.0.md), [what was done](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md))
 and from its follow-up check
@@ -15,7 +15,8 @@ form that later serves firmware (Daisy Seed3, ESP32-S3) as well as a plug-in.
 **Status: built, validated and tested automatically; 0.1.0 reviewed by Codex,
 its five findings fixed in 0.1.1; the follow-up check found one fault in
 the fix of the first, fixed in 0.1.2, which Codex checked and found fixed
-([check of 0.1.2](docs/CODEX_REVIEW_0.1.2_NACHPRUEFUNG.md)). Not yet played
+([check of 0.1.2](docs/CODEX_REVIEW_0.1.2_NACHPRUEFUNG.md)). 0.1.3 only
+colours knobs in the window, not yet checked by Codex. Not yet played
 in a DAW, not listened to.** Details and every measured number are in the
 [build report](docs/BUILD_REPORT_0.1.0.md); the measurements of 0.1.1 are in
 [DSP_MEASUREMENTS_0.1.1.md](docs/DSP_MEASUREMENTS_0.1.1.md).
@@ -28,6 +29,12 @@ in a DAW, not listened to.** Details and every measured number are in the
 > trademark). In this repository "elements" is the internal name of the
 > project only: its directory, branch, build targets and namespaces. This
 > software is not made, endorsed or supported by Mutable Instruments.
+>
+> **The knob colours** are a homage to Mutable Instruments and its founder's
+> work: the exciter knobs recall the colours of the Elements module, white
+> for contour and bow, magenta for blow, turquoise for strike. Only the
+> colours are borrowed, in shades of our own; the window takes nothing else
+> from the module's panel, its graphics or its layout.
 
 ## What you get
 
@@ -38,7 +45,7 @@ in a DAW, not listened to.** Details and every measured number are in the
 | MIDI out | The screen keyboard's notes, for the host to record. A note-off that the host's list cannot take is sent again in the next blocks, before any new note-on of that key |
 | MIDI | Notes with velocity, note-off, pitch wheel (±2 semitones), six controllers. One voice, last-note priority |
 | Sample rate | The engine always runs at 48 kHz. A 48 kHz host gets its output as it is; at any other host rate a sinc converter follows (about 1 ms latency, reported to the host) |
-| Window | Two rows of knobs, a status line with the rates in use, a screen keyboard. Its notes reach the audio thread through a queue of 256 that always keeps room for the release of every key held down; a strike that would take that room is dropped |
+| Window | Two rows of knobs, the exciters' rings white, magenta and turquoise, the others orange; a status line with the rates in use, a screen keyboard. Its notes reach the audio thread through a queue of 256 that always keeps room for the release of every key held down; a strike that would take that room is dropped |
 
 ## Parameters
 
