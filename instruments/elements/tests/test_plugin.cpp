@@ -14,6 +14,10 @@
 #include "state_io.h"
 #include "value_text.h"
 #include "view_layout.h"
+#include "widgets.h"
+#include "vstgui/lib/events.h"
+#include "vstgui/lib/controls/cknob.h"
+#include <windows.h>
 
 #include "public.sdk/source/common/memorystream.h"
 #include "public.sdk/source/vst/hosting/eventlist.h"
@@ -45,6 +49,8 @@ using namespace test_support;
 // In a plug-in the SDK's DLL entry point defines this handle. The test links
 // the plug-in's classes into an executable, so it has to provide it itself.
 void* moduleHandle = nullptr;
+bool InitModule();
+bool DeinitModule();
 
 namespace {
 
@@ -620,6 +626,8 @@ void TestController() {
     CHECK(Text(*controller, kParamFine, 0.5) == "0.00" && Text(*controller, kParamFine, 1.0) == "2.00");
     CHECK(Text(*controller, kParamVolume, 1.0) == "100.0" && Text(*controller, kParamGeometry, 0.2) == "0.200");
     CHECK(Text(*controller, kParamFreeze, 0.0) == "Off" && Text(*controller, kParamFreeze, 1.0) == "On");
+    CHECK(Text(*controller, kParamDamping, 0.0) == "1.000");
+    CHECK(Text(*controller, kParamDamping, 1.0) == "0.000");
     CHECK(Text(*controller, kParamPitchBend, 1.0) == "2.00" && Text(*controller, kParamPitchBend, 0.0) == "-2.00");
     ParamValue value = -1.0;
     CHECK(Typed(*controller, kParamCoarse, "7 st", value) && CoarseSemitones(value) == 7);
@@ -628,6 +636,7 @@ void TestController() {
     CHECK(Typed(*controller, kParamVolume, "50 %", value) && value == 0.5);
     CHECK(Typed(*controller, kParamFreeze, "on", value) && value == 1.0);
     CHECK(Typed(*controller, kParamGeometry, "0,25", value) && value == 0.25);
+    CHECK(Typed(*controller, kParamDamping, "0.75", value) && value == 0.25);
     value = 0.123;
     CHECK(!Typed(*controller, kParamGeometry, "foo", value) && !Typed(*controller, kParamCoarse, "12junk", value));
     CHECK(!Typed(*controller, kParamFreeze, "maybe", value) && value == 0.123);
@@ -656,6 +665,84 @@ void TestController() {
     CHECK(controller->terminate() == kResultOk);
     std::printf("controller: 20 parameters with the IDs 100..119, typed values read strictly, "
                 "pitch wheel and six MIDI controllers assigned\n");
+}
+
+void TestEditorControls() {
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(nullptr) == kResultOk);
+    IPtr<Editor> editor = Steinberg::owned(new Editor(controller, {}, {}, {}));
+    auto knob = VSTGUI::owned(new VSTGUI::CKnob(VSTGUI::CRect(0, 0, 54, 54), nullptr,
+                                               kParamDamping, nullptr, nullptr));
+    for(const float amount : {0.0f, 0.25f, 1.0f}) {
+        knob->setValue(amount);
+        editor->valueChanged(knob);
+        CHECK(controller->getParamNormalized(kParamDamping) == 1.0 - amount);
+    }
+    // Panel changes and keyboard visibility are independent.
+    editor->SetPanel(EditorPanel::Mod);
+    editor->SetKeyboardVisible(false);
+    CHECK(editor->Settings().panel == EditorPanel::Mod && !editor->KeyboardVisible());
+    editor->SetKeyboardVisible(true);
+    editor->SetPanel(EditorPanel::Gen);
+    CHECK(editor->KeyboardVisible());
+    editor->SetPanel(EditorPanel::Engine);
+    CHECK(editor->KeyboardVisible());
+
+    // A range change releases the OLD pitch exactly once, including a drag.
+    std::vector<int> notes;
+    auto keyboard = VSTGUI::owned(new KeyboardView(VSTGUI::CRect(0, 0, 600, 60),
+        [&](int note) { notes.push_back(note); }, [&](int note) { notes.push_back(-note); }));
+    for(const int transpose : {-24, -12, 0, 12, 24}) {
+        notes.clear();
+        keyboard->SetTranspose(transpose);
+        VSTGUI::MouseDownEvent down({10, 50}, VSTGUI::MouseButton::Left);
+        keyboard->onMouseDownEvent(down);
+        CHECK(notes == std::vector<int>{60 + transpose});
+        keyboard->SetTranspose(transpose == 24 ? -24 : transpose + 12);
+        CHECK(notes == (std::vector<int>{60 + transpose, -(60 + transpose)}));
+        VSTGUI::MouseUpEvent up({10, 50}, VSTGUI::MouseButton::Left);
+        keyboard->onMouseUpEvent(up);
+        CHECK(notes.size() == 2);
+    }
+    // Old editor states load; new range and panel survive save/load. Invalid
+    // or truncated states leave ALL settings untouched.
+    auto state = [](int version, int transpose, int panel) {
+        auto stream = std::make_unique<MemoryStream>();
+        IBStreamer writer(stream.get(), kLittleEndian);
+        writer.writeInt32(version);
+        writer.writeDouble(1.25);
+        writer.writeInt8(0);
+        if(version >= 2) {
+            writer.writeInt32(transpose);
+            writer.writeInt32(panel);
+        }
+        stream->seek(0, IBStream::kIBSeekSet, nullptr);
+        return stream;
+    };
+    auto old = state(1, 0, 0);
+    CHECK(controller->setState(old.get()) == kResultOk);
+    CHECK(controller->WindowSettings().transpose == -12);
+    CHECK(controller->WindowSettings().panel == EditorPanel::Engine);
+    auto current = state(2, 24, 2);
+    CHECK(controller->setState(current.get()) == kResultOk);
+    MemoryStream saved;
+    CHECK(controller->getState(&saved) == kResultOk);
+    saved.seek(0, IBStream::kIBSeekSet, nullptr);
+    CHECK(controller->setState(&saved) == kResultOk);
+    CHECK(controller->WindowSettings().transpose == 24);
+    CHECK(controller->WindowSettings().panel == EditorPanel::Gen);
+    for(const auto [transpose, panel] : {std::pair{25, 2}, {-36, 0}, {12, 3}, {1, 0}}) {
+        auto bad = state(2, transpose, panel);
+        CHECK(controller->setState(bad.get()) != kResultOk);
+        CHECK(controller->WindowSettings().transpose == 24);
+        CHECK(controller->WindowSettings().panel == EditorPanel::Gen);
+    }
+    auto truncated = state(1, 0, 0);
+    truncated->getData()[0] = 2;
+    CHECK(controller->setState(truncated.get()) != kResultOk);
+    CHECK(controller->WindowSettings().transpose == 24);
+    CHECK(controller->terminate() == kResultOk);
+    std::printf("editor controls: inverted damping, independent panels/keyboard, octave releases, v1/v2 state\n");
 }
 
 void TestKeyboardAndStatus() {
@@ -935,9 +1022,13 @@ void TestParameterState() {
 } // namespace
 
 int main() {
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    moduleHandle = GetModuleHandleW(nullptr);
+    CHECK(InitModule()); // the executable must do the DLL's VSTGUI setup itself
     TestBuses();
     TestParameterState();
     TestController();
+    TestEditorControls();
     TestNotes();
     TestAutomation();
     TestState();
@@ -945,6 +1036,7 @@ int main() {
     TestKeyboardLimits();
     TestOutputBound();
     TestBlockSizesAndRates();
+    CHECK(DeinitModule());
     std::printf("PASS\n");
     return 0;
 }

@@ -83,6 +83,12 @@ inline bool IsOn(double normalized) {
     return ControlIsOn(normalized);
 }
 
+// Preserve the sound/automation meaning of ID 113, but present damping as
+// absorption: clockwise means more damping. This mapping is its own inverse.
+inline double KnobValue(ParamId id, double normalized) {
+    return id == kParamDamping ? 1.0 - Clamp01(normalized) : Clamp01(normalized);
+}
+
 // The pitch wheel as MIDI has it: 14 bits, 8192 in the middle. The two halves
 // differ by one step, so the centre is exactly 0 semitones.
 constexpr int kPitchBendCentreRaw = 8192;
@@ -113,9 +119,9 @@ inline double PitchBendNormalized(double semitones) {
 // Layout of the saved state, version 1: the normalized values of the
 // parameters 100..118 as doubles, in that order.
 constexpr std::int32_t kStateVersion = 1;
-// Layout of the controller's own state: version, the editor zoom as a double,
-// the keyboard as one byte (1 for shown).
-constexpr std::int32_t kControllerStateVersion = 1;
+// Controller state v2: version, zoom (double), keyboard shown (byte), keyboard
+// transposition and panel (int32 each). Version 1 remains readable.
+constexpr std::int32_t kControllerStateVersion = 2;
 
 // The message that carries a key of the screen keyboard from the controller
 // to the processor. Velocity 1..127 is a key going down, 0 its release.

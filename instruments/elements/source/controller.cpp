@@ -214,7 +214,9 @@ tresult PLUGIN_API Controller::initialize(FUnknown* context) {
                 {STR16("Position"), kParamPosition},
                 {STR16("Space"), kParamSpace}};
     for(const auto& pot : more)
-        parameters.addParameter(new LinearParameter(pot.title, pot.id, "", nullptr, 0.0, 1.0,
+        parameters.addParameter(new LinearParameter(pot.title, pot.id, "", nullptr,
+                                                    pot.id == kParamDamping ? 1.0 : 0.0,
+                                                    pot.id == kParamDamping ? -1.0 : 1.0,
                                                     "%.3f", DefaultOf(Index(static_cast<ParamId>(pot.id)))));
     parameters.addParameter(
         new SwitchParameter(STR16("Freeze"), kParamFreeze, DefaultOf(Index(kParamFreeze))));
@@ -256,7 +258,8 @@ tresult PLUGIN_API Controller::getState(IBStream* state) {
         return kInvalidArgument;
     IBStreamer stream(state, kLittleEndian);
     if(!stream.writeInt32(kControllerStateVersion) || !stream.writeDouble(editor_.zoom)
-       || !stream.writeInt8(editor_.keyboard ? 1 : 0))
+       || !stream.writeInt8(editor_.keyboard ? 1 : 0) || !stream.writeInt32(editor_.transpose)
+       || !stream.writeInt32(static_cast<int32>(editor_.panel)))
         return kResultFalse;
     return kResultOk;
 }
@@ -269,13 +272,21 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
     int32 version = 0;
     double zoom = 1.0;
     int8 keyboard = 1;
-    if(!stream.readInt32(version) || version != kControllerStateVersion
+    int32 transpose = kKeyboardDefaultTranspose;
+    int32 panel = 0;
+    if(!stream.readInt32(version) || (version != 1 && version != kControllerStateVersion)
        || !stream.readDouble(zoom) || !stream.readInt8(keyboard))
+        return kResultFalse;
+    if(version >= 2 && (!stream.readInt32(transpose) || transpose < -kKeyboardTransposeLimit
+                        || transpose > kKeyboardTransposeLimit || transpose % 12 != 0
+                        || !stream.readInt32(panel) || panel < 0 || panel > 2))
         return kResultFalse;
     if(!std::isfinite(zoom) || (keyboard != 0 && keyboard != 1))
         return kResultFalse;
     editor_.zoom = ClampEditorZoom(zoom); // a finite zoom outside 50..200 % is pulled in
     editor_.keyboard = keyboard != 0;
+    editor_.transpose = transpose;
+    editor_.panel = static_cast<EditorPanel>(panel);
     for(const OpenEditor& open : editors_)
         open.editor->ApplySettings(editor_);
     return kResultOk;

@@ -15,6 +15,7 @@
 
 #include "elements/dsp/part.h"
 #include "elements/dsp/resonator.h"
+#include "stmlib/dsp/dsp.h"
 
 #include <algorithm>
 #include <cmath>
@@ -930,6 +931,75 @@ void MeasureSpectra(bool exciter) {
     CHECK(failures == 0);
 }
 
+void MeasureHighNotes() {
+    Report("");
+    Report("### High-note investigation (0.1.4, no DSP changes)");
+    Report("");
+    Report("48 kHz core, dry, brightness 0.9, strike timbre 0.9, strength 0.5.");
+    Report("Mixed adds bow/blow at 0.7 and holds the gate for 1 s; strike uses 10 ms.");
+    Report("Damping here is the LEGACY DSP value: 0.9995 means almost no damping.");
+    Report("Core peak is AFTER the core's pre-reverb SoftLimit. Output applies the");
+    Report("existing engine stage: clamp(SoftLimit(core * 0.5), -1, 1), at Volume 1.");
+    Report("Stage change is output energy relative to core * 0.5, in dB.");
+    Report("This sweep cannot distinguish inharmonic modes from aliasing by itself.");
+    Report("");
+    Report("| Exciters | MIDI | Geometry | Legacy damping | Core peak R | Output peak R | Stage change dB | Hard-clipped samples R %% | Tail RMS R dBFS | Compare 96k tail dBFS | 48k 16-24k dBFS |");
+    Report("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
+    for(const bool mixed : {false, true})
+        for(const int note : {84, 96})
+            for(const float geometry : {0.0f, 0.5f, 0.9995f})
+                for(const float damping : {0.25f, 0.9995f}) {
+                    auto patch = DryPatch();
+                    patch.resonator_geometry = geometry;
+                    patch.resonator_damping = damping;
+                    patch.resonator_brightness = 0.9f;
+                    patch.exciter_strike_timbre = 0.9f;
+                    if(mixed) {
+                        patch.exciter_bow_level = patch.exciter_blow_level = 0.7f;
+                        patch.exciter_envelope_shape = 0.5f;
+                    }
+                    const Take take = Play(48000, patch, static_cast<float>(note), 0.5f,
+                                           mixed ? 1.0 : 0.01, 2.0);
+                    const Take high = Play(96000, patch, static_cast<float>(note), 0.5f,
+                                           mixed ? 1.0 : 0.01, 2.0);
+                    std::vector<float> output(take.main.size());
+                    std::size_t clipped = 0;
+                    for(std::size_t i = 0; i < output.size(); ++i) {
+                        const float shaped = stmlib::SoftLimit(take.main[i] * 0.5f);
+                        clipped += std::fabs(shaped) > 1.0f;
+                        output[i] = std::clamp(shaped, -1.0f, 1.0f);
+                    }
+                    const auto band = BandPower(output, 48000, 0, 2, {16000, 24000});
+                    Report("| %s | %d | %.3f | %.4f | %.3f | %.3f | %+.2f | %.4f | %.2f | %.2f | %.2f |",
+                        mixed ? "mixed" : "strike", note, geometry, damping,
+                        test_support::Peak(take.main), test_support::Peak(output),
+                        test_support::Decibel(test_support::Rms(output) /
+                            std::max(1e-20, 0.5 * test_support::Rms(take.main))),
+                        100.0 * clipped / output.size(),
+                        test_support::Decibel(test_support::Rms(take.main, 48000) * 0.5),
+                        test_support::Decibel(test_support::Rms(high.main, 96000) * 0.5), Db(band[0]));
+                }
+
+    // Isolate just the EXISTING output nonlinearity. A 10 kHz sine has no
+    // 18 kHz component; its third harmonic at 30 kHz folds there at 48 kHz.
+    Report("");
+    Report("Output SoftLimit only: 10 kHz sine, peak 0.8 before the half-gain stage.");
+    double alias[2]{};
+    int index = 0;
+    for(const int rate : {48000, 192000}) {
+        std::vector<float> output(rate);
+        for(int i = 0; i < rate; ++i)
+            output[i] = stmlib::SoftLimit(static_cast<float>(0.4 *
+                std::sin(2.0 * test_support::kPi * 10000 * i / rate)));
+        alias[index++] = test_support::ToneAmplitude(output, 18000, rate, 0, output.size());
+        Report("At %d Hz: 18 kHz component %.2f dBFS.", rate,
+                test_support::Decibel(alias[index - 1]));
+    }
+    CHECK(alias[0] > 1e-4 && alias[0] > alias[1] * 100);
+    Report("This proves aliasing is possible in the existing output stage, not that");
+    Report("it caused the user's particular sound. The core has further nonlinearities.");
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
@@ -954,6 +1024,7 @@ int main(int argc, char** argv) {
     MeasureDecay();
     MeasureSpectra(true);
     MeasureSpectra(false);
+    MeasureHighNotes();
 #endif
     if(g_report)
         std::fclose(g_report);

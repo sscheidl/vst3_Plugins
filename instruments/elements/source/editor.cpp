@@ -136,6 +136,8 @@ Editor::Editor(EditController* controller, const EditorSettings& settings,
 : VSTGUIEditor(controller), status_(status), callbacks_(std::move(callbacks)) {
     settings_.zoom = ClampEditorZoom(settings.zoom);
     settings_.keyboard = settings.keyboard;
+    settings_.transpose = ClampKeyboardTranspose(settings.transpose);
+    settings_.panel = settings.panel;
     setRect(ScaledSize());
 }
 
@@ -156,12 +158,18 @@ void Editor::ForgetViews() {
     keyboard_view_ = nullptr;
     keyboard_button_ = nullptr;
     freeze_button_ = nullptr;
+    octave_down_ = nullptr;
+    octave_up_ = nullptr;
+    panel_buttons_ = {};
+    for(auto& views : panel_views_)
+        views.clear();
     status_label_ = nullptr;
 }
 
 bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
     frame = new CFrame(CRect(0, 0, kWidth, EditorBaseHeight(settings_.keyboard)), this);
     frame->setBackgroundColor(kBackground);
+    frame->enableTooltips(true);
     applied_zoom_ = 1.0;
     drag_ = DragConstraint{};
 
@@ -169,18 +177,36 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
     const auto name_font = makeOwned<CFontDesc>("Segoe UI", 10, kBoldFace);
     const auto value_font = makeOwned<CFontDesc>("Segoe UI", 13);
 
-    frame->addView(MakeLabel(CRect(kMargin, 14, kWidth / 2, 42), stringPluginName, title_font,
+    frame->addView(MakeLabel(CRect(kMargin, 14, 230, 42), stringPluginName, title_font,
                              kText, kLeftText));
-    const CCoord button_left = kWidth - kMargin - kButtonWidth;
-    frame->addView(MakeLabel(CRect(kWidth / 2, 18, button_left - 12, 40),
+    const CCoord button_left = kWidth - kMargin - 5 * kButtonWidth - 24;
+    frame->addView(MakeLabel(CRect(238, 18, button_left - 12, 40),
                              stringCompanyName "  " FULL_VERSION_STR, name_font, kDimText,
                              kRightText));
-    keyboard_button_ = new ToggleButton(CRect(button_left, 18, kWidth - kMargin, 40), "KEYS",
+    const CCoord keys_left = button_left + 4 * (kButtonWidth + 6);
+    keyboard_button_ = new ToggleButton(CRect(keys_left, 18, keys_left + kButtonWidth, 40), "KEYS",
                                         settings_.keyboard,
                                         [this](bool on) { SetKeyboardVisible(on); });
     frame->addView(keyboard_button_);
+    keyboard_button_->setTooltipText("Show or hide keyboard in any panel");
+    const char* panel_names[] = {"ENG", "MOD", "POLY", "GEN"};
+    const char* panel_tips[] = {"Engine", "Modulation",
+        "Planned: cycle 1 / 2 / 4 / 8 voices, following the Kekule findings", "Generative sequences"};
+    for(int i = 0; i < 4; ++i) {
+        const CCoord left = button_left + i * (kButtonWidth + 6);
+        const int panel = i < 2 ? i : 2;
+        auto* button = new ToggleButton(CRect(left, 18, left + kButtonWidth, 40),
+                                         panel_names[i], false,
+                                         [this, panel](bool) { SetPanel(static_cast<EditorPanel>(panel)); });
+        button->setTooltipText(panel_tips[i]);
+        if(i == 2)
+            button->setMouseEnabled(false); // enable with the actual voice allocator
+        else
+            panel_buttons_[panel] = button;
+        frame->addView(button);
+    }
 
-    keyboard_view_ = new KeyboardView(CRect(kMargin, kKeyboardTop, kWidth - kMargin,
+    keyboard_view_ = new KeyboardView(CRect(kMargin + 40, kKeyboardTop, kWidth - kMargin - 40,
                                             kKeyboardBottom),
                                       [this](int note) {
                                           if(callbacks_.strike)
@@ -190,8 +216,23 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
                                           if(callbacks_.release)
                                               callbacks_.release(note);
                                       });
+    keyboard_view_->SetTranspose(settings_.transpose);
     keyboard_view_->setVisible(settings_.keyboard);
     frame->addView(keyboard_view_);
+    octave_down_ = new ToggleButton(CRect(kMargin, kKeyboardTop + 22, kMargin + 32,
+                                          kKeyboardTop + 46), "<<", false,
+                                    [this](bool) { SetKeyboardTranspose(settings_.transpose - 12); },
+                                    ToggleButton::Style::Action);
+    octave_up_ = new ToggleButton(CRect(kWidth - kMargin - 32, kKeyboardTop + 22,
+                                        kWidth - kMargin, kKeyboardTop + 46), ">>", false,
+                                  [this](bool) { SetKeyboardTranspose(settings_.transpose + 12); },
+                                  ToggleButton::Style::Action);
+    octave_down_->setTooltipText("Keyboard down one octave (minimum -24 semitones)");
+    octave_up_->setTooltipText("Keyboard up one octave (maximum +24 semitones)");
+    frame->addView(octave_down_);
+    frame->addView(octave_up_);
+
+    const auto first_engine_view = frame->getNbViews();
 
     const auto group_font = makeOwned<CFontDesc>("Segoe UI", 10, kBoldFace);
     for(const GroupSpec& group : kGroups) {
@@ -209,7 +250,9 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         const CCoord knob_left = left + (kColumnWidth - kKnobSize) / 2;
         const CCoord knob_top = top + kKnobOffset;
 
-        frame->addView(MakeLabel(CRect(left, top + kNameOffset, left + kColumnWidth,
+        // SPACE and its freeze icon share one label row, centred as a group.
+        const CCoord name_right = left + kColumnWidth - (spec.id == kParamSpace ? 28 : 0);
+        frame->addView(MakeLabel(CRect(left, top + kNameOffset, name_right,
                                        top + kNameOffset + 16),
                                  spec.name, name_font, kDimText, kCenterText));
 
@@ -226,17 +269,19 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         knob->setHandleLineWidth(4);
         knob->setCoronaInset(5);
         knob->setInsetValue(14);
-        knob->setDefaultValue(static_cast<float>(DefaultOf(Index(static_cast<ParamId>(spec.id)))));
+        knob->setDefaultValue(static_cast<float>(KnobValue(static_cast<ParamId>(spec.id),
+                                                           DefaultOf(Index(static_cast<ParamId>(spec.id))))));
         // One semitone per wheel step for Coarse, one hundredth for the others.
         knob->setWheelInc(spec.id == kParamCoarse ? static_cast<float>(1.0 / kCoarseSteps) : 0.01f);
         frame->addView(knob);
         if(spec.id == kParamSpace) {
-            // A small switch at the knob's lower right: the reverb frozen.
+            // Keep the freeze circle clear of both the corona and the value.
             const bool frozen = controller && IsOn(controller->getParamNormalized(kParamFreeze));
             freeze_button_ = new ToggleButton(
-                CRect(left + kColumnWidth - 30, knob_top + kKnobSize - 8, left + kColumnWidth + 14,
-                      knob_top + kKnobSize + 6),
-                "FREEZE", frozen, [this](bool on) { SetFreeze(on); });
+                CRect(left + kColumnWidth - 27, top + kNameOffset - 2,
+                      left + kColumnWidth - 7, top + kNameOffset + 18),
+                "", frozen, [this](bool on) { SetFreeze(on); }, ToggleButton::Style::Snowflake);
+            freeze_button_->setTooltipText("Freeze reverb");
             frame->addView(freeze_button_);
         }
 
@@ -247,9 +292,25 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
 
         knobs_[i] = {spec.id, knob, value};
         const ParamValue normalized = controller ? controller->getParamNormalized(spec.id) : 0.0;
-        knob->setValue(static_cast<float>(normalized));
+        knob->setValue(static_cast<float>(KnobValue(static_cast<ParamId>(spec.id), normalized)));
         ShowValue(knobs_[i], normalized);
     }
+
+    for(auto i = first_engine_view; i < frame->getNbViews(); ++i)
+        panel_views_[0].push_back(frame->getView(i));
+    const char* panel_titles[] = {"", "MODULATION", "GENERATIVE"};
+    const char* panel_descriptions[] = {"", "Planned: modulation matrix and LFOs.",
+        "Planned: melodic MIDI sequences and probability."};
+    for(int i = 1; i < 3; ++i) {
+        auto* title = MakeLabel(CRect(kMargin, 112, kWidth - kMargin, 146), panel_titles[i],
+                                title_font, kText, kCenterText);
+        auto* description = MakeLabel(CRect(kMargin, 164, kWidth - kMargin, 190),
+                                      panel_descriptions[i], value_font, kDimText, kCenterText);
+        frame->addView(title);
+        frame->addView(description);
+        panel_views_[i] = {title, description};
+    }
+    ShowPanel();
 
     status_label_ = MakeLabel(CRect(kMargin, kStatusTop, kWidth - kMargin, kStatusTop + 16),
                               StatusText(status_).c_str(), name_font, kDimText, kLeftText);
@@ -289,10 +350,23 @@ double Editor::DisplayZoom(int32 width, int32 height) const {
 void Editor::LayOut(int32 width, int32 height) {
     if(!frame)
         return;
-    if(keyboard_view_)
+    if(keyboard_view_) {
+        if(!settings_.keyboard && keyboard_view_->isVisible())
+            keyboard_view_->ReleaseHeld();
         keyboard_view_->setVisible(settings_.keyboard);
+    }
     if(keyboard_button_)
         keyboard_button_->SetOn(settings_.keyboard);
+    if(octave_down_) {
+        octave_down_->setVisible(settings_.keyboard);
+        octave_down_->setMouseEnabled(settings_.transpose > -kKeyboardTransposeLimit);
+        octave_down_->invalid();
+    }
+    if(octave_up_) {
+        octave_up_->setVisible(settings_.keyboard);
+        octave_up_->setMouseEnabled(settings_.transpose < kKeyboardTransposeLimit);
+        octave_up_->invalid();
+    }
     // Zooming invalidates and repaints the whole window, so only when needed.
     const double total = DisplayZoom(width, height);
     if(total != applied_zoom_) {
@@ -336,6 +410,46 @@ void Editor::UserChanged() {
         callbacks_.changed(settings_);
     settle_pending_ = true;
     last_change_ = std::chrono::steady_clock::now();
+}
+
+void Editor::SetKeyboardTranspose(int semitones) {
+    const int transpose = ClampKeyboardTranspose(semitones);
+    if(transpose == settings_.transpose)
+        return;
+    if(keyboard_view_)
+        keyboard_view_->SetTranspose(transpose);
+    settings_.transpose = transpose;
+    if(frame)
+        LayOut(rect.getWidth(), rect.getHeight());
+    UserChanged();
+}
+
+void Editor::ShowPanel() {
+    // Also covers a panel restored by ApplySettings while a wheel edit is
+    // pending. Hidden controls must not leave the host's gesture open.
+    if(settings_.panel != EditorPanel::Engine)
+        for(const Knob& knob : knobs_)
+            while(knob.knob && knob.knob->isEditing())
+                knob.knob->endEdit();
+    for(std::size_t i = 0; i < panel_views_.size(); ++i) {
+        const bool selected = i == static_cast<std::size_t>(settings_.panel);
+        for(auto* view : panel_views_[i])
+            view->setVisible(selected);
+        if(panel_buttons_[i])
+            panel_buttons_[i]->SetOn(selected);
+    }
+}
+
+void Editor::SetPanel(EditorPanel panel) {
+    if(static_cast<int>(panel) < 0 || static_cast<int>(panel) > 2)
+        return;
+    if(panel == settings_.panel) {
+        ShowPanel(); // clicking the selected tab must not turn it off
+        return;
+    }
+    settings_.panel = panel;
+    ShowPanel();
+    UserChanged();
 }
 
 CMessageResult Editor::notify(CBaseObject* sender, const char* message) {
@@ -388,10 +502,17 @@ tresult PLUGIN_API Editor::onSize(ViewRect* newSize) {
 
 void Editor::ApplySettings(const EditorSettings& settings) {
     const double zoom = ClampEditorZoom(settings.zoom);
-    if(zoom == settings_.zoom && settings.keyboard == settings_.keyboard)
+    const int transpose = ClampKeyboardTranspose(settings.transpose);
+    if(zoom == settings_.zoom && settings.keyboard == settings_.keyboard
+       && transpose == settings_.transpose && settings.panel == settings_.panel)
         return;
     settings_.zoom = zoom;
     settings_.keyboard = settings.keyboard;
+    settings_.transpose = transpose;
+    settings_.panel = settings.panel;
+    ShowPanel();
+    if(keyboard_view_)
+        keyboard_view_->SetTranspose(transpose);
     // A loaded project decides. If the host keeps the window size, the
     // content fits into it as it is.
     if(frame && !Resize())
@@ -437,7 +558,7 @@ void Editor::valueChanged(CControl* control) {
     if(!controller || !control)
         return;
     const auto id = static_cast<ParamID>(control->getTag());
-    ParamValue normalized = control->getValueNormalized();
+    ParamValue normalized = KnobValue(static_cast<ParamId>(id), control->getValueNormalized());
     // Coarse moves in whole semitones.
     if(id == kParamCoarse)
         normalized = CoarseNormalized(CoarseSemitones(normalized));
@@ -488,7 +609,7 @@ void Editor::ParameterChanged(ParamID id, ParamValue normalized) {
     for(Knob& knob : knobs_) {
         if(knob.id != id || !knob.knob)
             continue;
-        const auto value = static_cast<float>(normalized);
+        const auto value = static_cast<float>(KnobValue(static_cast<ParamId>(id), normalized));
         if(knob.knob->getValue() != value) {
             knob.knob->setValue(value);
             knob.knob->invalid();

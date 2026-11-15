@@ -1,5 +1,22 @@
 # Changes
 
+## 0.1.4 (2026-11-15)
+
+* Screen keyboard starts at C3..C5; octave buttons cover -24..+24 semitones
+  relative to the former C4..C6 range, releasing the old note before shifting.
+* Damping knob, display and text entry now mean stronger damping at higher
+  positions. Legacy normalized parameter 113, saved sounds, automation and
+  MIDI CC direction are retained; the displayed value is their complement.
+* ENG/MOD/GEN switch the body of the panel. MOD and GEN are explicit planning
+  placeholders. KEYS independently shows/hides the keyboard in each panel.
+* POLY is reserved and disabled pending the Kekulé results: planned cycle
+  1 -> 2 -> 4 -> 8 -> 1, without replacing the current panel.
+* Freeze is a circular vector snowflake beside the SPACE label, clear of the
+  knob ring. The existing 0.1.3 exciter colours are retained.
+* Window state v2 stores range and panel, and still reads v1.
+* Added high-note measurements and an isolated output-stage aliasing probe;
+  no DSP, limiter or anti-aliasing changes. Claude review is pending.
+
 ## 0.1.3 (2026-11-15)
 
 * The window colours the exciter knobs, in memory of Mutable Instruments:

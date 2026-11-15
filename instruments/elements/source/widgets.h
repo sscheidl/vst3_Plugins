@@ -19,6 +19,7 @@ class KeyboardView : public VSTGUI::CView {
 
     // Lets go of the key that is held, if any: before the view goes away.
     void ReleaseHeld();
+    void SetTranspose(int semitones);
 
     void draw(VSTGUI::CDrawContext* context) override;
     void onMouseDownEvent(VSTGUI::MouseDownEvent& event) override;
@@ -35,13 +36,15 @@ class KeyboardView : public VSTGUI::CView {
     VSTGUI::SharedPointer<VSTGUI::CFontDesc> label_font_;
     bool dragging_ = false;
     int pressed_ = -1; // the key under the held mouse button, -1 for none
+    int transpose_ = 0;
 };
 
 // A small switch drawn as a rounded label: filled when on, outlined when off.
 class ToggleButton : public VSTGUI::CView {
   public:
+    enum class Style { Toggle, Action, Snowflake };
     ToggleButton(const VSTGUI::CRect& size, const char* title, bool on,
-                 std::function<void(bool on)> toggled);
+                 std::function<void(bool on)> toggled, Style style = Style::Toggle);
 
     void SetOn(bool on);
     void draw(VSTGUI::CDrawContext* context) override;
@@ -50,6 +53,7 @@ class ToggleButton : public VSTGUI::CView {
   private:
     const char* title_;
     bool on_;
+    Style style_;
     std::function<void(bool)> toggled_;
     VSTGUI::SharedPointer<VSTGUI::CFontDesc> font_;
 };
