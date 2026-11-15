@@ -9,9 +9,10 @@ offen.
 
 Installation: den Ordner `Mendelejew.vst3` aus
 `build\windows-vs2026-x64\VST3\Release\` (oder aus `out\elements-0.1.2\`) nach
-`%LOCALAPPDATA%\Programs\Common\VST3\` kopieren, DAW neu scannen lassen. Eine
-dort liegende Kopie unter dem Arbeitstitel (`Elements.vst3`) vorher entfernen:
-Beide haben dieselben Klassen-IDs.
+`C:\Program Files\Common Files\VST3\` kopieren (braucht Adminrechte), DAW neu
+scannen lassen. Eine Kopie unter dem Arbeitstitel (`Elements.vst3`) oder eine
+zweite im Benutzer-Ordner `%LOCALAPPDATA%\Programs\Common\VST3\` vorher
+entfernen: Alle haben dieselben Klassen-IDs.
 
 ## Laden und Spielen
 

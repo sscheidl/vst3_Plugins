@@ -115,7 +115,9 @@ dessen fünf Befunde
 Die Nachprüfung fand in der Lösung für die Bildschirm-Klaviatur einen neuen
 Fehler (EL-R06); 0.1.2 behebt ihn
 ([Umsetzung](../instruments/elements/docs/CODEX_REVIEW_0.1.1_UMSETZUNG.md)),
-deren Prüfung steht aus. In einer DAW gespielt und angehört ist das Plugin
+und Codex hat bestätigt, dass er behoben ist
+([Nachprüfung 0.1.2](../instruments/elements/docs/CODEX_REVIEW_0.1.2_NACHPRUEFUNG.md)).
+In einer DAW gespielt und angehört ist das Plugin
 noch nicht. Messwerte und Testprotokoll stehen im
 [Build-Bericht](../instruments/elements/docs/BUILD_REPORT_0.1.0.md), die
 offene Abnahme in der

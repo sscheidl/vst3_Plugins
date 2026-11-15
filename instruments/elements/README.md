@@ -14,7 +14,8 @@ form that later serves firmware (Daisy Seed3, ESP32-S3) as well as a plug-in.
 
 **Status: built, validated and tested automatically; 0.1.0 reviewed by Codex,
 its five findings fixed in 0.1.1; the follow-up check found one fault in
-the fix of the first, fixed in 0.1.2, which awaits its check. Not yet played
+the fix of the first, fixed in 0.1.2, which Codex checked and found fixed
+([check of 0.1.2](docs/CODEX_REVIEW_0.1.2_NACHPRUEFUNG.md)). Not yet played
 in a DAW, not listened to.** Details and every measured number are in the
 [build report](docs/BUILD_REPORT_0.1.0.md); the measurements of 0.1.1 are in
 [DSP_MEASUREMENTS_0.1.1.md](docs/DSP_MEASUREMENTS_0.1.1.md).
@@ -167,8 +168,9 @@ DAW:
 ```
 
 To install, copy the `Mendelejew.vst3` folder into a VST3 folder the DAW scans,
-for one user `%LOCALAPPDATA%\Programs\Common\VST3\`. Nothing is installed
-automatically.
+usually `C:\Program Files\Common Files\VST3\` (needs administrator rights) or,
+for one user, `%LOCALAPPDATA%\Programs\Common\VST3\`. Keep only one copy: both
+have the same class IDs. Nothing is installed automatically.
 
 ## Layout
 
