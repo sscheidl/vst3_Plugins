@@ -1,5 +1,15 @@
 # Changes
 
+## 0.1.3 (2026-11-15)
+
+* The window colours the exciter knobs, in memory of Mutable Instruments:
+  white rings for Contour and the bow, magenta for the blow, turquoise for
+  the strike, the group names above them in the same colour. The other
+  knobs keep the orange ring. Only the colours are borrowed, in shades of
+  our own; nothing of the hardware's panel.
+
+No change to the sound, the parameters or the DSP.
+
 ## 0.1.2 (2026-11-15)
 
 Fix from Codex's follow-up check of 0.1.1

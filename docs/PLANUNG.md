@@ -120,7 +120,10 @@ Fehler (EL-R06); 0.1.2 behebt ihn
 ([Umsetzung](../instruments/elements/docs/CODEX_REVIEW_0.1.1_UMSETZUNG.md)),
 und Codex hat bestätigt, dass er behoben ist
 ([Nachprüfung 0.1.2](../instruments/elements/docs/CODEX_REVIEW_0.1.2_NACHPRUEFUNG.md)).
-In einer DAW gespielt und angehört ist das Plugin
+0.1.2 ist auf main. 0.1.3 färbt auf Wunsch des Nutzers (2026-11-15) die
+Regler der Anreger in Erinnerung an Mutable Instruments: weiß, magenta,
+türkis wie auf dem Modul, nur die Farben, nichts vom Panel. Diese Fassung hat
+Codex noch nicht geprüft. In einer DAW gespielt und angehört ist das Plugin
 noch nicht. Messwerte und Testprotokoll stehen im
 [Build-Bericht](../instruments/elements/docs/BUILD_REPORT_0.1.0.md), die
 offene Abnahme in der

@@ -14,7 +14,7 @@ prove and records what was learned.
 | Project | Kind | Status |
 | --- | --- | --- |
 | [Toy Piano Classic](instruments/toy-piano-classic/) | Instrument | 0.3.2: builds, validated, tested and code-reviewed; 0.1.0 loads in Studio One, not yet listened to |
-| [Mendelejew](instruments/elements/) | Instrument | 0.1.2: the Mutable Instruments Elements DSP at a true 48 kHz; builds, validated and tested automatically against the original code; findings of the Codex review of 0.1.0 and of its follow-up fixed, confirmed by Codex; not yet played in a DAW |
+| [Mendelejew](instruments/elements/) | Instrument | 0.1.3: the Mutable Instruments Elements DSP at a true 48 kHz; builds, validated and tested automatically against the original code; findings of the Codex review of 0.1.0 and of its follow-up fixed, confirmed by Codex in 0.1.2; 0.1.3 adds knob colours, not yet checked; not yet played in a DAW |
 | [Kekulé](instruments/torus-classic/) | Instrument | 0.2.2: builds, validated and tested automatically; 0.1.0 loads and plays in Studio One; Codex released 0.2.1 for the DAW test (one P3 point open); the additions of 0.2.0 not yet tried in a DAW |
 
 ## Layout
