@@ -1,0 +1,72 @@
+# Elements: files taken from
+#   eurorack  https://github.com/pichenettes/eurorack  f4cfa7697095a28d292bff758beb51deb49b5a86
+#   stmlib    https://github.com/pichenettes/stmlib    e3bd7c9cc00e4364166f9905c0509b6ffd0535ec
+#             (the commit eurorack pins as its submodule)
+# SHA-256 of the upstream file's content with CRLF replaced by LF, the relation
+# of the local file to it, the local path, and the upstream path.
+#   verbatim  the local file has that same hash
+#   patched   the local file was changed (rng.h: derived); see UPSTREAM.md
+# Written by tools/update_provenance.py; checked by the test elements.provenance.
+df8d626a36beb95df94792d6d21552a085adbcb6e30d3359b42ca2de42885f10  patched  core/elements/dsp/dsp.h  eurorack:elements/dsp/dsp.h
+b757322bd6706a7e4204710edba450c998fff366f556559a48fe56d92eb61fb2  patched  core/elements/dsp/exciter.cc  eurorack:elements/dsp/exciter.cc
+42c53263a6f5440bc64a3a8e4cf217e2bb6b45d696250f012b0b5db782ea32a8  patched  core/elements/dsp/exciter.h  eurorack:elements/dsp/exciter.h
+e57ed81f0fb4ad5645a1b3dc71ce283b51ab35d141850150f3f2a6f692984084  patched  core/elements/dsp/fx/diffuser.h  eurorack:elements/dsp/fx/diffuser.h
+64ad3f311e90ed69f5c105b6084f1180f0e02128d4b3640df48908b5087c8677  patched  core/elements/dsp/fx/fx_engine.h  eurorack:elements/dsp/fx/fx_engine.h
+a004c7230ea922ebdacb7d75aa645e430f0030656ff1e3bcb29f113dc1a896f3  patched  core/elements/dsp/fx/reverb.h  eurorack:elements/dsp/fx/reverb.h
+1728205b6e2b7a289cfce19df269c1893316fc47070dd9fe11b7150ddc48be03  patched  core/elements/dsp/multistage_envelope.cc  eurorack:elements/dsp/multistage_envelope.cc
+4f882b1ac54c7c603ae08d8b8df164db8579ac0f6565650e4d704fb3bd41df12  verbatim  core/elements/dsp/multistage_envelope.h  eurorack:elements/dsp/multistage_envelope.h
+f36b48a2155a631b8ce52bcec32fd7cedc30c9276e6c5bb09129899c4a7224a8  patched  core/elements/dsp/part.cc  eurorack:elements/dsp/part.cc
+05057110780d807d87b0e5697f77bfb963339eb6577a3b80281db55a998e65f0  patched  core/elements/dsp/part.h  eurorack:elements/dsp/part.h
+2c60d997a980a13b0b929e5c9b5caa336809b0c6fe92eb552e95dd5a0f66f425  verbatim  core/elements/dsp/patch.h  eurorack:elements/dsp/patch.h
+98f0bcb7c948f2ba5cbb9c368dd1689f1ddfde9d05dade7c551ab5f351a070ee  patched  core/elements/dsp/resonator.cc  eurorack:elements/dsp/resonator.cc
+21f3fc8b389862eae4139704eb790d575d3ca502e860dd2fa36e8149cd4e624f  patched  core/elements/dsp/resonator.h  eurorack:elements/dsp/resonator.h
+423f01e905fa279864878f34e42136ad1eb37a33dad58739affaaab06b793e5d  patched  core/elements/dsp/rng.h  stmlib:utils/random.h
+c1bad82db0c62e44355c6eac6187c1c5b39be436e128d96ff253f11a00ad02e0  patched  core/elements/dsp/tube.cc  eurorack:elements/dsp/tube.cc
+49abfd6f688f3296a2601a4efca1f4968f598c6bfbec23698dde74299b1c7a11  patched  core/elements/dsp/tube.h  eurorack:elements/dsp/tube.h
+960636e412017f1cef2ffb4dc0709b8e4ce1debfd607ff7f67abc2b0d2af866e  patched  core/elements/dsp/voice.cc  eurorack:elements/dsp/voice.cc
+7c0fbcab7b0207f9077bc14c30b6869c8db90495fd51314f3f2c048cdeecd068  patched  core/elements/dsp/voice.h  eurorack:elements/dsp/voice.h
+21352e0f4ad57028434194a30d337dcd8e6396d0e27492c1b28f38126b371203  verbatim  core/elements/resources.cc  eurorack:elements/resources.cc
+51dd331d43320f69689bb978f6d81d877338d6db3edef33dc19afbb4c0279a45  verbatim  core/elements/resources.h  eurorack:elements/resources.h
+6fde7600ac71ff9e4bdc28b642063d1a65e195f28bb07fb52a9b476efb5aa791  verbatim  core/stmlib/LICENSE  stmlib:LICENSE
+a7f6429e8bca85aa19ce91e3f1908fd7fb1fdf378a61fe2c87717a94d6f30a97  verbatim  core/stmlib/dsp/cosine_oscillator.h  stmlib:dsp/cosine_oscillator.h
+d6d1bb8e33dedf80bfca976ca1d544fc6ef01bcb1d71a45f3946a0682fd68dcb  verbatim  core/stmlib/dsp/delay_line.h  stmlib:dsp/delay_line.h
+98b42900c4accbe9fbb2cfe2ec6fada024b57ec9a1becff008b0f35bd4fd8ddb  verbatim  core/stmlib/dsp/dsp.h  stmlib:dsp/dsp.h
+f4bbf97ac8dfdea255b8a37e179ba0286978c01a12ad8d3362eaa5862cf7c326  verbatim  core/stmlib/dsp/filter.h  stmlib:dsp/filter.h
+0acbe230ffaa2d181ba285fce54f2fd0b2339b3ec163a1dd00c946e6bf82ea4a  verbatim  core/stmlib/dsp/units.cc  stmlib:dsp/units.cc
+70cf104c06f0e34ada90416f121417a13d17b6736116f0fc07063c1cd2084877  verbatim  core/stmlib/dsp/units.h  stmlib:dsp/units.h
+3afc8589a951e882d9eea16b3eda8623dd6fb0079dd11dfbce817e65be6cfba9  verbatim  core/stmlib/stmlib.h  stmlib:stmlib.h
+6fde7600ac71ff9e4bdc28b642063d1a65e195f28bb07fb52a9b476efb5aa791  verbatim  licenses/stmlib-LICENSE.txt  stmlib:LICENSE
+13d18229dd5a0502c27d0770d4a7be4eba0340830d3709e531e9390041e8e860  verbatim  tests/reference/eurorack/elements/drivers/debug_pin.h  eurorack:elements/drivers/debug_pin.h
+df8d626a36beb95df94792d6d21552a085adbcb6e30d3359b42ca2de42885f10  verbatim  tests/reference/eurorack/elements/dsp/dsp.h  eurorack:elements/dsp/dsp.h
+b757322bd6706a7e4204710edba450c998fff366f556559a48fe56d92eb61fb2  verbatim  tests/reference/eurorack/elements/dsp/exciter.cc  eurorack:elements/dsp/exciter.cc
+42c53263a6f5440bc64a3a8e4cf217e2bb6b45d696250f012b0b5db782ea32a8  verbatim  tests/reference/eurorack/elements/dsp/exciter.h  eurorack:elements/dsp/exciter.h
+e57ed81f0fb4ad5645a1b3dc71ce283b51ab35d141850150f3f2a6f692984084  verbatim  tests/reference/eurorack/elements/dsp/fx/diffuser.h  eurorack:elements/dsp/fx/diffuser.h
+64ad3f311e90ed69f5c105b6084f1180f0e02128d4b3640df48908b5087c8677  verbatim  tests/reference/eurorack/elements/dsp/fx/fx_engine.h  eurorack:elements/dsp/fx/fx_engine.h
+a004c7230ea922ebdacb7d75aa645e430f0030656ff1e3bcb29f113dc1a896f3  verbatim  tests/reference/eurorack/elements/dsp/fx/reverb.h  eurorack:elements/dsp/fx/reverb.h
+1728205b6e2b7a289cfce19df269c1893316fc47070dd9fe11b7150ddc48be03  verbatim  tests/reference/eurorack/elements/dsp/multistage_envelope.cc  eurorack:elements/dsp/multistage_envelope.cc
+4f882b1ac54c7c603ae08d8b8df164db8579ac0f6565650e4d704fb3bd41df12  verbatim  tests/reference/eurorack/elements/dsp/multistage_envelope.h  eurorack:elements/dsp/multistage_envelope.h
+c4805441a254cdc47588d07a31079fbd01d52ccf3081a5c2dd47669c4dfdd82c  verbatim  tests/reference/eurorack/elements/dsp/ominous_voice.cc  eurorack:elements/dsp/ominous_voice.cc
+d8cb83dd1bfeda15e543ad68f3ab6f3d01a491258381e6627ac4725658c40f41  verbatim  tests/reference/eurorack/elements/dsp/ominous_voice.h  eurorack:elements/dsp/ominous_voice.h
+f36b48a2155a631b8ce52bcec32fd7cedc30c9276e6c5bb09129899c4a7224a8  verbatim  tests/reference/eurorack/elements/dsp/part.cc  eurorack:elements/dsp/part.cc
+05057110780d807d87b0e5697f77bfb963339eb6577a3b80281db55a998e65f0  verbatim  tests/reference/eurorack/elements/dsp/part.h  eurorack:elements/dsp/part.h
+2c60d997a980a13b0b929e5c9b5caa336809b0c6fe92eb552e95dd5a0f66f425  verbatim  tests/reference/eurorack/elements/dsp/patch.h  eurorack:elements/dsp/patch.h
+98f0bcb7c948f2ba5cbb9c368dd1689f1ddfde9d05dade7c551ab5f351a070ee  verbatim  tests/reference/eurorack/elements/dsp/resonator.cc  eurorack:elements/dsp/resonator.cc
+21f3fc8b389862eae4139704eb790d575d3ca502e860dd2fa36e8149cd4e624f  verbatim  tests/reference/eurorack/elements/dsp/resonator.h  eurorack:elements/dsp/resonator.h
+b710651bcac80e10f09d20fbfbe0fd00dc0873ca6dac0a6bd5011470b2baba72  verbatim  tests/reference/eurorack/elements/dsp/string.cc  eurorack:elements/dsp/string.cc
+5cb5e354d17d38e445c4c4b659b6fff172ee5e213a9d8135e7a7ebf9fd586982  verbatim  tests/reference/eurorack/elements/dsp/string.h  eurorack:elements/dsp/string.h
+c1bad82db0c62e44355c6eac6187c1c5b39be436e128d96ff253f11a00ad02e0  verbatim  tests/reference/eurorack/elements/dsp/tube.cc  eurorack:elements/dsp/tube.cc
+49abfd6f688f3296a2601a4efca1f4968f598c6bfbec23698dde74299b1c7a11  verbatim  tests/reference/eurorack/elements/dsp/tube.h  eurorack:elements/dsp/tube.h
+960636e412017f1cef2ffb4dc0709b8e4ce1debfd607ff7f67abc2b0d2af866e  verbatim  tests/reference/eurorack/elements/dsp/voice.cc  eurorack:elements/dsp/voice.cc
+7c0fbcab7b0207f9077bc14c30b6869c8db90495fd51314f3f2c048cdeecd068  verbatim  tests/reference/eurorack/elements/dsp/voice.h  eurorack:elements/dsp/voice.h
+51dd331d43320f69689bb978f6d81d877338d6db3edef33dc19afbb4c0279a45  verbatim  tests/reference/eurorack/elements/resources.h  eurorack:elements/resources.h
+6fde7600ac71ff9e4bdc28b642063d1a65e195f28bb07fb52a9b476efb5aa791  verbatim  tests/reference/eurorack/stmlib/LICENSE  stmlib:LICENSE
+a7f6429e8bca85aa19ce91e3f1908fd7fb1fdf378a61fe2c87717a94d6f30a97  verbatim  tests/reference/eurorack/stmlib/dsp/cosine_oscillator.h  stmlib:dsp/cosine_oscillator.h
+d6d1bb8e33dedf80bfca976ca1d544fc6ef01bcb1d71a45f3946a0682fd68dcb  verbatim  tests/reference/eurorack/stmlib/dsp/delay_line.h  stmlib:dsp/delay_line.h
+98b42900c4accbe9fbb2cfe2ec6fada024b57ec9a1becff008b0f35bd4fd8ddb  verbatim  tests/reference/eurorack/stmlib/dsp/dsp.h  stmlib:dsp/dsp.h
+f4bbf97ac8dfdea255b8a37e179ba0286978c01a12ad8d3362eaa5862cf7c326  verbatim  tests/reference/eurorack/stmlib/dsp/filter.h  stmlib:dsp/filter.h
+4b05028c320e6946418a36e9662a4e5a142e5bfab0423835a77d074d9c7fc217  verbatim  tests/reference/eurorack/stmlib/dsp/parameter_interpolator.h  stmlib:dsp/parameter_interpolator.h
+0acbe230ffaa2d181ba285fce54f2fd0b2339b3ec163a1dd00c946e6bf82ea4a  verbatim  tests/reference/eurorack/stmlib/dsp/units.cc  stmlib:dsp/units.cc
+70cf104c06f0e34ada90416f121417a13d17b6736116f0fc07063c1cd2084877  verbatim  tests/reference/eurorack/stmlib/dsp/units.h  stmlib:dsp/units.h
+3afc8589a951e882d9eea16b3eda8623dd6fb0079dd11dfbce817e65be6cfba9  verbatim  tests/reference/eurorack/stmlib/stmlib.h  stmlib:stmlib.h
+145c4d7a30e373d001fd664ce6f97a475458f7dc8286252d24ca6f592e0cdb93  verbatim  tests/reference/eurorack/stmlib/utils/random.cc  stmlib:utils/random.cc
+423f01e905fa279864878f34e42136ad1eb37a33dad58739affaaab06b793e5d  verbatim  tests/reference/eurorack/stmlib/utils/random.h  stmlib:utils/random.h
