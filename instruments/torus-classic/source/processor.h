@@ -48,7 +48,9 @@ class Processor : public Steinberg::Vst::AudioEffect {
     // sample rate alone, which the host only changes while the plug-in is
     // inactive, and is valid from setupProcessing() on.
     Steinberg::uint32 PLUGIN_API getLatencySamples() SMTG_OVERRIDE;
-    // Resonators ring on after the last note, at Damping 0 without end.
+    // Resonators ring on after the last note, at Damping 0 without end. A
+    // fixed value: hosts read the tail when they set up processing, not after
+    // every block.
     Steinberg::uint32 PLUGIN_API getTailSamples() SMTG_OVERRIDE {
         return Steinberg::Vst::kInfiniteTail;
     }
@@ -100,7 +102,7 @@ class Processor : public Steinberg::Vst::AudioEffect {
     StreamAdapter adapter_{bridge_};
     std::atomic<Steinberg::uint32> latency_{0};
 
-    // The normalized values of the parameters 100..108 and the hand-over of
+    // The normalized values of the parameters 100..111 and the hand-over of
     // loaded states, see parameter_state.h.
     ParameterState state_;
 

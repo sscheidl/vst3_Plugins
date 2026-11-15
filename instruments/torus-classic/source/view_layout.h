@@ -11,6 +11,16 @@ constexpr int kKeyboardLowNote = 60;  // C4
 constexpr int kKeyboardHighNote = 84; // C6
 constexpr int kKeyboardWhiteKeys = 15;
 constexpr int kKeyboardVelocity = 100;
+// The octave keys beside the keyboard move its range by whole octaves, at
+// most two either way from C4..C6. As in Mendelejew, it starts one octave
+// down, at C3..C5.
+constexpr int kKeyboardDefaultTranspose = -12;
+constexpr int kKeyboardTransposeLimit = 24;
+
+constexpr int ClampKeyboardTranspose(int semitones) {
+    const int octaves = semitones / 12;
+    return (octaves < -2 ? -2 : (octaves > 2 ? 2 : octaves)) * 12;
+}
 
 // Black keys relative to the white ones.
 constexpr double kBlackKeyWidth = 0.62;  // of a white key's width

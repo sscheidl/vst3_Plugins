@@ -46,27 +46,37 @@ constexpr auto kSettleDelay = std::chrono::milliseconds(400);
 
 constexpr CColor kBackground(28, 30, 36);
 constexpr CColor kTrack(64, 68, 80);
-constexpr CColor kAccent(236, 172, 64);
 constexpr CColor kText(232, 232, 236);
 constexpr CColor kDimText(150, 156, 168);
+
+// The rings of the knobs: three colours, by what a knob acts on. All three
+// stand out clearly from the dark background (contrast above 4.5 to 1).
+constexpr CColor kKnobWhite(226, 228, 234);     // the frame: pitch at one end, output at the other
+constexpr CColor kKnobMagenta(222, 78, 162);    // the resonator: what rings, how bright, how long
+constexpr CColor kKnobTurquoise(52, 196, 196);  // the strike: where and how hard
 
 struct KnobSpec {
     ParamID id;
     const char* name;
     double default_value;
     bool bipolar;
+    CColor ring;
 };
 
 constexpr KnobSpec kKnobs[Editor::kKnobCount] = {
-    {kParamTune, "TUNE", kDefaultTune, true},
-    {kParamStructure, "STRUCTURE", kDefaultStructure, false},
-    {kParamBrightness, "BRIGHTNESS", kDefaultBrightness, false},
-    {kParamDamping, "DAMPING", kDefaultDamping, false},
-    {kParamPosition, "POSITION", kDefaultPosition, false},
-    {kParamExcitation, "EXCITATION", kDefaultExcitation, false},
-    {kParamFilter, "FILTER", kDefaultFilter, false},
-    {kParamVolume, "VOLUME", kDefaultVolume, false},
+    {kParamTune, "TUNE", kDefaultTune, true, kKnobWhite},
+    {kParamStructure, "STRUCTURE", kDefaultStructure, false, kKnobMagenta},
+    {kParamBrightness, "BRIGHTNESS", kDefaultBrightness, false, kKnobMagenta},
+    {kParamDamping, "DAMPING", kDefaultDamping, false, kKnobMagenta},
+    {kParamPosition, "POSITION", kDefaultPosition, false, kKnobTurquoise},
+    {kParamExcitation, "EXCITATION", kDefaultExcitation, false, kKnobTurquoise},
+    {kParamFilter, "FILTER", kDefaultFilter, false, kKnobWhite},
+    {kParamVolume, "VOLUME", kDefaultVolume, false, kKnobWhite},
 };
+
+// The choices of the voice selector, in the order of kPolyphonyVoices.
+constexpr const char* kVoiceLabels[kPolyphonyChoices] = {"4", "8", "16"};
+constexpr CCoord kLockSize = 20;
 
 CTextLabel* MakeLabel(const CRect& size, const char* text, CFontRef font, CColor color,
                       CHoriTxtAlign align) {
@@ -88,6 +98,7 @@ Editor::Editor(EditController* controller, const EditorSettings& settings,
 : VSTGUIEditor(controller), callbacks_(std::move(callbacks)) {
     settings_.zoom = ClampEditorZoom(settings.zoom);
     settings_.keyboard = settings.keyboard;
+    settings_.transpose = ClampKeyboardTranspose(settings.transpose);
     setRect(ScaledSize());
 }
 
@@ -107,13 +118,17 @@ void Editor::ForgetViews() {
     knobs_ = {};
     keyboard_view_ = nullptr;
     keyboard_button_ = nullptr;
-    tune_free_button_ = nullptr;
+    octave_down_ = nullptr;
+    octave_up_ = nullptr;
+    tune_lock_ = nullptr;
     model_selector_ = nullptr;
+    voice_selector_ = nullptr;
 }
 
 bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
     frame = new CFrame(CRect(0, 0, kWidth, EditorBaseHeight(settings_.keyboard)), this);
     frame->setBackgroundColor(kBackground);
+    frame->enableTooltips(true);
     applied_zoom_ = 1.0;
     drag_ = DragConstraint{};
 
@@ -121,8 +136,17 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
     const auto name_font = makeOwned<CFontDesc>("Segoe UI", 10, kBoldFace);
     const auto value_font = makeOwned<CFontDesc>("Segoe UI", 13);
 
-    frame->addView(MakeLabel(CRect(kMargin, 14, kWidth / 2, 42), stringPluginNameUtf8, title_font,
+    frame->addView(MakeLabel(CRect(kMargin, 14, 140, 42), stringPluginNameUtf8, title_font,
                              kText, kLeftText));
+    // The number of voices, beside the title.
+    frame->addView(MakeLabel(CRect(140, 18, 196, 40), "VOICES", name_font, kDimText, kRightText));
+    const ParamValue polyphony =
+        controller ? controller->getParamNormalized(kParamPolyphony) : kDefaultPolyphony;
+    voice_selector_ = new ChoiceSelector(CRect(204, 19, 300, 39), kVoiceLabels, kPolyphonyChoices,
+                                         PolyphonyIndex(polyphony),
+                                         [this](int choice) { ChoosePolyphony(choice); });
+    voice_selector_->setTooltipText("Number of voices. More voices let more notes ring at once.");
+    frame->addView(voice_selector_);
     const CCoord button_left = kWidth - kMargin - kButtonWidth;
     frame->addView(MakeLabel(CRect(kWidth / 2, 18, button_left - 12, 40),
                              stringCompanyName "  " FULL_VERSION_STR, name_font, kDimText,
@@ -138,7 +162,7 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         [this](int chosen) { ChooseModel(chosen); });
     frame->addView(model_selector_);
 
-    keyboard_view_ = new KeyboardView(CRect(kMargin, kKeyboardTop, kWidth - kMargin,
+    keyboard_view_ = new KeyboardView(CRect(kMargin + 40, kKeyboardTop, kWidth - kMargin - 40,
                                             kKeyboardBottom),
                                       [this](int note) {
                                           if(callbacks_.strike)
@@ -148,8 +172,24 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
                                           if(callbacks_.release)
                                               callbacks_.release(note);
                                       });
+    keyboard_view_->SetTranspose(settings_.transpose);
     keyboard_view_->setVisible(settings_.keyboard);
     frame->addView(keyboard_view_);
+    // The octave keys, as in Mendelejew.
+    octave_down_ = new ToggleButton(CRect(kMargin, kKeyboardTop + 22, kMargin + 32,
+                                          kKeyboardTop + 46),
+                                    "<<", false,
+                                    [this](bool) { SetKeyboardTranspose(settings_.transpose - 12); },
+                                    ToggleButton::Style::Action);
+    octave_up_ = new ToggleButton(CRect(kWidth - kMargin - 32, kKeyboardTop + 22, kWidth - kMargin,
+                                        kKeyboardTop + 46),
+                                  ">>", false,
+                                  [this](bool) { SetKeyboardTranspose(settings_.transpose + 12); },
+                                  ToggleButton::Style::Action);
+    octave_down_->setTooltipText("Keyboard down one octave (lowest: C2 to C4)");
+    octave_up_->setTooltipText("Keyboard up one octave (highest: C6 to C8)");
+    frame->addView(octave_down_);
+    frame->addView(octave_up_);
 
     for(std::size_t i = 0; i < knobs_.size(); ++i) {
         const KnobSpec& spec = kKnobs[i];
@@ -166,7 +206,7 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
                                      kKnobTop + kKnobSize),
                                this, static_cast<int32_t>(spec.id), nullptr, nullptr, CPoint(0, 0),
                                style);
-        knob->setCoronaColor(kAccent);
+        knob->setCoronaColor(spec.ring);
         knob->setColorShadowHandle(kTrack);
         knob->setColorHandle(kText);
         knob->setHandleLineWidth(4);
@@ -177,13 +217,16 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         knob->setWheelInc(spec.id == kParamTune ? static_cast<float>(0.5 / kTuneRange) : 0.01f);
         frame->addView(knob);
         if(spec.id == kParamTune) {
-            // A small switch at the knob's lower right: free tuning on or off.
+            // A small lock at the knob's lower right: closed, Tune moves in
+            // semitones; open, it is free. The parameter behind it is Tune
+            // Free, so the lock shows its opposite.
             const bool free = controller && IsOn(controller->getParamNormalized(kParamTuneFree));
-            tune_free_button_ = new ToggleButton(
-                CRect(left + kColumnWidth - 32, kKnobTop + kKnobSize - 8, left + kColumnWidth + 2,
-                      kKnobTop + kKnobSize + 6),
-                "FREE", free, [this](bool on) { SetTuneFree(on); });
-            frame->addView(tune_free_button_);
+            const CCoord lock_left = left + kColumnWidth - kLockSize - 2;
+            const CCoord lock_top = kKnobTop + kKnobSize - 14;
+            tune_lock_ = new LockButton(
+                CRect(lock_left, lock_top, lock_left + kLockSize, lock_top + kLockSize), !free,
+                [this](bool locked) { SetTuneFree(!locked); });
+            frame->addView(tune_lock_);
         }
 
         auto* value = MakeLabel(CRect(left, kValueTop, left + kColumnWidth, kValueTop + 20), "",
@@ -234,6 +277,14 @@ void Editor::LayOut(int32 width, int32 height) {
         keyboard_view_->setVisible(settings_.keyboard);
     if(keyboard_button_)
         keyboard_button_->SetOn(settings_.keyboard);
+    for(ToggleButton* octave : {octave_down_, octave_up_}) {
+        if(!octave)
+            continue;
+        const int limit = octave == octave_down_ ? -kKeyboardTransposeLimit : kKeyboardTransposeLimit;
+        octave->setVisible(settings_.keyboard);
+        octave->setMouseEnabled(settings_.transpose != limit);
+        octave->invalid();
+    }
     // Zooming invalidates and repaints the whole window, so only when needed.
     const double total = DisplayZoom(width, height);
     if(total != applied_zoom_) {
@@ -269,6 +320,18 @@ void Editor::SetKeyboardVisible(bool show) {
             keyboard_button_->SetOn(before.keyboard);
         return;
     }
+    UserChanged();
+}
+
+void Editor::SetKeyboardTranspose(int semitones) {
+    const int transpose = ClampKeyboardTranspose(semitones);
+    if(transpose == settings_.transpose)
+        return;
+    if(keyboard_view_)
+        keyboard_view_->SetTranspose(transpose);
+    settings_.transpose = transpose;
+    if(frame)
+        LayOut(rect.getWidth(), rect.getHeight());
     UserChanged();
 }
 
@@ -329,10 +392,15 @@ tresult PLUGIN_API Editor::onSize(ViewRect* newSize) {
 
 void Editor::ApplySettings(const EditorSettings& settings) {
     const double zoom = ClampEditorZoom(settings.zoom);
-    if(zoom == settings_.zoom && settings.keyboard == settings_.keyboard)
+    const int transpose = ClampKeyboardTranspose(settings.transpose);
+    if(zoom == settings_.zoom && settings.keyboard == settings_.keyboard
+       && transpose == settings_.transpose)
         return;
     settings_.zoom = zoom;
     settings_.keyboard = settings.keyboard;
+    settings_.transpose = transpose;
+    if(keyboard_view_)
+        keyboard_view_->SetTranspose(transpose);
     // A loaded project decides. If the host keeps the window size, the
     // content fits into it as it is.
     if(frame && !Resize())
@@ -408,8 +476,26 @@ void Editor::SetTuneFree(bool free) {
     controller->endEdit(kParamTuneFree);
 }
 
+void Editor::ChoosePolyphony(int choice) {
+    if(!controller || choice < 0 || choice >= kPolyphonyChoices)
+        return;
+    const ParamValue normalized = PolyphonyNormalized(choice);
+    controller->beginEdit(kParamPolyphony);
+    controller->setParamNormalized(kParamPolyphony, normalized);
+    controller->performEdit(kParamPolyphony, normalized);
+    controller->endEdit(kParamPolyphony);
+}
+
 int Editor::ShownModel() const {
     return model_selector_ ? model_selector_->Model() : -1;
+}
+
+int Editor::ShownPolyphony() const {
+    return voice_selector_ ? voice_selector_->Choice() : -1;
+}
+
+int Editor::ShownTuneLock() const {
+    return tune_lock_ ? (tune_lock_->Locked() ? 1 : 0) : -1;
 }
 
 CKnob* Editor::KnobOf(ParamID id) const {
@@ -432,9 +518,14 @@ void Editor::ParameterChanged(ParamID id, ParamValue normalized) {
             model_selector_->SetModel(ModelIndex(normalized));
         return;
     }
+    if(id == kParamPolyphony) {
+        if(voice_selector_)
+            voice_selector_->SetChoice(PolyphonyIndex(normalized));
+        return;
+    }
     if(id == kParamTuneFree) {
-        if(tune_free_button_)
-            tune_free_button_->SetOn(IsOn(normalized));
+        if(tune_lock_)
+            tune_lock_->SetLocked(!IsOn(normalized));
         // Tune reads in whole semitones or with decimals accordingly.
         for(Knob& knob : knobs_)
             if(knob.id == kParamTune && knob.knob && controller)

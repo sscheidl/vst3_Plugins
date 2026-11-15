@@ -3,13 +3,13 @@
 # Only the plug-in target carries the product name. Four layers, each a target:
 #
 #   torus_classic_core     hardware-free Torus DSP and its stmlib parts (vendored)
-#   torus_classic_engine   dry instrument: notes, voices, parameters, output stage
+#   torus_classic_engine   dry instrument: notes, 4 to 16 voices, parameters, output stage
 #   torus_classic_adapter  streaming: sample rate, 12-sample quanta, event time
 #   torus_classic_shell    VST3 processor, controller, state, editor
 #
 # Its own version; moduleinfo.json takes it from here. Keep it equal to
 # FULL_VERSION_STR in source/version.h and to components.json.
-project(TorusClassic VERSION 0.2.2 LANGUAGES CXX)
+project(TorusClassic VERSION 0.3.1 LANGUAGES CXX)
 
 # The SDK compiles everything with /fp:fast. The DSP, the adapter and their
 # tests use /fp:precise instead: the engine's guard against non-finite samples

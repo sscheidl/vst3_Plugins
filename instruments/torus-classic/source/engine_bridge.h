@@ -17,8 +17,9 @@
 namespace torus_classic {
 
 // The control index of the free-tuning switch among the adapter's control
-// events, after the engine's own controls.
+// events, after the engine's own controls; then that of the number of voices.
 constexpr unsigned kTuneFreeControl = kControlCount;
+constexpr unsigned kPolyphonyControl = kControlCount + 1;
 
 class EngineBridge final : public QuantumEngine {
   public:
@@ -35,6 +36,8 @@ class EngineBridge final : public QuantumEngine {
                 } else if(event.index == kTuneFreeControl) {
                     tune_free_ = event.value >= 0.5f;
                     engine_.SetControl(Control::Tune, SoundingTune());
+                } else if(event.index == kPolyphonyControl) {
+                    engine_.SetPolyphony(event.data);
                 } else if(event.index < kControlCount) {
                     engine_.SetControl(static_cast<Control>(event.index), event.value);
                 }
@@ -82,6 +85,7 @@ inline EngineEvent TuneEvent(double normalized) {
 
 static_assert(StreamAdapter::kQuantum == DryEngine::kQuantum);
 static_assert(kTuneFreeControl < StreamAdapter::kControlKinds);
+static_assert(kPolyphonyControl < StreamAdapter::kControlKinds);
 
 inline EngineEvent NoteEvent(unsigned note, unsigned velocity) {
     EngineEvent event;
@@ -91,8 +95,12 @@ inline EngineEvent NoteEvent(unsigned note, unsigned velocity) {
     return event;
 }
 
-// Any control but Tune, which needs TuneEvent.
+// A control by its engine value. Tune is passed on to TuneEvent, so that it
+// carries its semitone like every other Tune event: without it the bridge
+// would read the empty field as the lowest semitone.
 inline EngineEvent ControlEvent(Control control, float value) {
+    if(control == Control::Tune)
+        return TuneEvent(static_cast<double>(value));
     EngineEvent event;
     event.type = EngineEvent::kControl;
     event.index = static_cast<std::uint8_t>(control);
@@ -105,6 +113,15 @@ inline EngineEvent TuneFreeEvent(bool free) {
     event.type = EngineEvent::kControl;
     event.index = static_cast<std::uint8_t>(kTuneFreeControl);
     event.value = free ? 1.0f : 0.0f;
+    return event;
+}
+
+// The number of voices; it changes with its quantum like every control.
+inline EngineEvent PolyphonyEvent(unsigned voices) {
+    EngineEvent event;
+    event.type = EngineEvent::kControl;
+    event.index = static_cast<std::uint8_t>(kPolyphonyControl);
+    event.data = static_cast<std::uint16_t>(voices);
     return event;
 }
 

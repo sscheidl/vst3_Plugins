@@ -81,8 +81,24 @@ void DryEngine::JumpPitchBend(unsigned raw14) {
     impl_->synth->parameters.JumpBend(raw14);
 }
 
+void DryEngine::SetPolyphony(unsigned voices) {
+    impl_->synth->SetBanks(voices / kVoices);
+}
+
+void DryEngine::JumpPolyphony(unsigned voices) {
+    impl_->synth->JumpBanks(voices / kVoices);
+}
+
 void DryEngine::Render(float* left, float* right) {
     impl_->synth->Render(left, right);
+}
+
+unsigned DryEngine::Polyphony() const {
+    return impl_->synth->Banks() * kVoices;
+}
+
+unsigned DryEngine::RenderedBanks() const {
+    return impl_->synth->RenderedBanks();
 }
 
 unsigned DryEngine::Model() const {
@@ -106,7 +122,7 @@ std::uint32_t DryEngine::OverflowCount() const {
 }
 
 float DryEngine::VoiceNote(unsigned voice) const {
-    return voice < kVoices ? impl_->synth->VoiceNote(voice) : 0.0f;
+    return voice < kMaxVoices ? impl_->synth->VoiceNote(voice) : 0.0f;
 }
 
 float DryEngine::ControlValue(Control control) const {
@@ -114,13 +130,22 @@ float DryEngine::ControlValue(Control control) const {
     return parameter < Count ? impl_->synth->parameters.Get(parameter) : 0.0f;
 }
 
+float DryEngine::ControlTarget(Control control) const {
+    const unsigned parameter = ParameterOf(control);
+    return parameter < Count ? impl_->synth->parameters.Target(parameter) : 0.0f;
+}
+
 float DryEngine::PitchOffset() const {
     return impl_->synth->parameters.PitchOffset();
 }
 
-std::uint32_t DryEngine::NoiseState() const {
-    return impl_->synth->RngState();
+std::uint32_t DryEngine::NoiseState(unsigned bank) const {
+    return impl_->synth->RngState(bank < kMaxBanks ? bank : 0);
 }
+
+static_assert(DryEngine::kMaxBanks == Synth::kMaxBanks && DryEngine::kVoices == kVoices
+              && DryEngine::kQuietQuanta == Synth::kQuietQuanta
+              && DryEngine::kQuietLevel == Synth::kQuietLevel);
 
 std::size_t DryEngine::StateBytes() {
     return sizeof(Synth);

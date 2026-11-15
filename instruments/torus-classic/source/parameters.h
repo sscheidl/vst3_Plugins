@@ -23,14 +23,19 @@ enum ParamId : std::uint32_t {
     kParamPitchBend = 108, // fed by the MIDI pitch wheel; not saved
     kParamFilter = 109,    // since 0.2.0: low-pass over the whole output
     kParamTuneFree = 110,  // since 0.2.0: off = Tune in semitones
+    kParamPolyphony = 111, // since 0.3.0: 4, 8 or 16 voices; set in the window, not automated
 };
 constexpr std::uint32_t kFirstParam = kParamTune;
-constexpr int kParamCount = 11;
+constexpr int kParamCount = 12;
 
 // The parameters a project stores, as indices (ID minus kFirstParam), in the
 // order of the state file. The pitch wheel is not among them.
-constexpr int kSavedParamCount = 10;
-constexpr std::array<int, kSavedParamCount> kSavedIndex = {0, 1, 2, 3, 4, 5, 6, 7, 9, 10};
+constexpr int kSavedParamCount = 11;
+constexpr std::array<int, kSavedParamCount> kSavedIndex = {0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11};
+// Where the parameters added since 0.2.0 sit in that order.
+constexpr int kSavedFilter = 8;
+constexpr int kSavedTuneFree = 9;
+constexpr int kSavedPolyphony = 10;
 
 constexpr int Index(ParamId id) {
     return static_cast<int>(id) - static_cast<int>(kFirstParam);
@@ -39,7 +44,8 @@ constexpr int Index(ParamId id) {
 // MIDI controllers the host routes to the parameters, on every channel: the
 // numbers of the Daisy firmware, plus 74 (the usual "brightness" controller)
 // for the filter. The firmware's reverb controllers 26, 27, 30, 31, 32 and
-// its polyphony controller 29 have no counterpart here.
+// its polyphony controller 29 have no counterpart here: the number of voices
+// is chosen in the window and has no controller.
 constexpr int kMidiCcTune = 20;
 constexpr int kMidiCcStructure = 21;
 constexpr int kMidiCcBrightness = 22;
@@ -54,6 +60,13 @@ constexpr double kTuneRange = 24.0;      // semitones up and down
 constexpr double kPitchBendRange = 2.0;  // semitones up and down
 constexpr int kModelCount = 6;
 constexpr int kModelSteps = kModelCount - 1; // the VST3 step count
+
+// The number of voices: banks of four, see engine/synth.h. A list of three
+// choices today; a fourth (32) would need another bank count in the engine,
+// another entry here and a new state version, nothing else.
+constexpr int kPolyphonyChoices = 3;
+constexpr int kPolyphonySteps = kPolyphonyChoices - 1; // the VST3 step count
+constexpr int kPolyphonyVoices[kPolyphonyChoices] = {4, 8, 16};
 
 // In the order of torus::ResonatorModel. The last one is the dry synthesis
 // branch of the firmware's "String & Reverb"; here it has no reverb, hence
@@ -74,11 +87,12 @@ constexpr double kDefaultVolume = 1.0;    // 100 %: the firmware's level
 constexpr double kDefaultPitchBend = 0.5; // wheel centred
 constexpr double kDefaultFilter = 1.0;    // open: the filter does nothing
 constexpr double kDefaultTuneFree = 0.0;  // Tune moves in semitones
+constexpr double kDefaultPolyphony = 0.0; // four voices, as up to 0.2.x
 
 constexpr double kDefaults[kParamCount] = {
     kDefaultTune,       kDefaultStructure, kDefaultBrightness, kDefaultDamping,
     kDefaultPosition,   kDefaultExcitation, kDefaultModel,     kDefaultVolume,
-    kDefaultPitchBend,  kDefaultFilter,     kDefaultTuneFree};
+    kDefaultPitchBend,  kDefaultFilter,     kDefaultTuneFree,  kDefaultPolyphony};
 
 inline double Clamp01(double value) {
     return value >= 0.0 ? (value <= 1.0 ? value : 1.0) : 0.0; // NaN becomes 0
@@ -95,6 +109,21 @@ inline int ModelIndex(double normalized) {
 inline double ModelNormalized(int index) {
     const int clamped = index < 0 ? 0 : (index > kModelSteps ? kModelSteps : index);
     return static_cast<double>(clamped) / kModelSteps;
+}
+
+// The same for the number of voices: which of the choices a value stands for.
+inline int PolyphonyIndex(double normalized) {
+    const int step = static_cast<int>(Clamp01(normalized) * (kPolyphonySteps + 1));
+    return step < kPolyphonySteps ? step : kPolyphonySteps;
+}
+
+inline double PolyphonyNormalized(int index) {
+    const int clamped = index < 0 ? 0 : (index > kPolyphonySteps ? kPolyphonySteps : index);
+    return static_cast<double>(clamped) / kPolyphonySteps;
+}
+
+inline int PolyphonyVoices(double normalized) {
+    return kPolyphonyVoices[PolyphonyIndex(normalized)];
 }
 
 // A switch as a normalized value: on from the middle up (VST3 step rule).
@@ -178,17 +207,19 @@ inline double PitchBendNormalized(double semitones) {
 }
 
 // Layout of the saved state.
-//   Version 2 (since 0.2.0): the normalized values of the parameters
-//     100..107, 109 and 110 as doubles, in that order.
+//   Version 3 (since 0.3.0): the normalized values of the parameters
+//     100..107, 109, 110 and 111 as doubles, in that order.
+//   Version 2 (0.2.x): without 111; such a state has four voices.
 //   Version 1 (0.1.x): the parameters 100..107 only. Damping had Rings'
 //     sense then (1 sustained) and Tune was always free; a version 1 state
 //     is converted when read, so an old project sounds as it did.
-constexpr std::int32_t kStateVersion = 2;
+constexpr std::int32_t kStateVersion = 3;
 constexpr std::int32_t kOldestStateVersion = 1;
 constexpr int kStateV1Values = 8;
+constexpr int kStateV2Values = 10;
 // Layout of the controller's own state: version, the editor zoom as a double,
 // the keyboard as one byte (1 for shown).
-constexpr std::int32_t kControllerStateVersion = 1;
+constexpr std::int32_t kControllerStateVersion = 2; // 2: with the keyboard's transposition
 
 // The message that carries a key of the screen keyboard from the controller
 // to the processor. Velocity 1..127 is a strike, 0 the release of the key.

@@ -1,5 +1,55 @@
 # Changes
 
+## 0.3.0 (2026-11-15)
+
+The three steps agreed during the review of 0.2.0, the knob colours asked
+for on 2026-11-15, and the open point of the review of 0.2.1. Built and
+tested automatically; not in a DAW yet, and not reviewed yet
+([review brief](docs/CODEX_PRUEFAUFTRAG_0.3.0.md)).
+
+* **4, 8 or 16 voices.** Chosen in the window, beside the title; four is the
+  default and sounds as before. More voices are more of the same instrument:
+  banks of four, each one the firmware's unchanged four-voice engine. A note
+  is as loud as it was; a fifth note no longer takes over the first. The
+  number of voices is parameter 111, *Polyphony*: saved with the project,
+  not automatable, without a MIDI controller. Details in the README, section
+  Voices.
+* **Rest, for Plug-in Nap.** The plug-in now knows when nothing sounds and
+  nothing waits. It then puts out exact zeros, sets the silence flags and
+  reports no tail; while anything rings it reports an infinite tail as
+  before. A host can use that to stop processing an idle instance. Whether
+  Studio One 7 does is for the DAW test to show: PreSonus publishes no rule,
+  and its Plug-in Nap was for effects only when it was introduced. Details
+  and limits in the README, section Rest.
+* **A lock instead of FREE.** The switch beside TUNE is a small padlock in a
+  circle, without text: closed, Tune moves in semitones; open, it is free.
+  It has a tooltip. The parameter behind it is still 110, *Tune Free*, with
+  its meaning unchanged; the lock shows its opposite.
+* **Knob rings in three colours**, in memory of the modules this engine
+  descends from: white for pitch and output, magenta for the resonator,
+  turquoise for the strike. Colours only; see the README, section Window.
+* **Tune events of the internal helper (TC-R10).** `ControlEvent` built a
+  Tune event without its semitone, which the bridge read as −24. The plug-in
+  never used that path; a test did. The helper now passes Tune on to
+  `TuneEvent`, and the adapter test checks the semitone that arrives.
+* **State version 3**: the eleven saved values now include the number of
+  voices. States of versions 1 and 2 load with four voices.
+* Install folder in the documents: the development machine keeps its test
+  builds in `C:\Program Files\Common Files\VST3\` since 2026-11-15.
+
+One sentence of 0.1.0 to 0.2.2 no longer holds as it stood: the plug-in
+delivers the firmware engine's output sample for sample *except at rest*,
+where it puts out exact zeros and the firmware what is left of its
+resonators, below −180 dBFS. The first note after a rest is the firmware's
+again, bit for bit.
+
+Component versions: engine 0.2.0 (banks, rest), adapter 0.3.0 (rest; the
+output filter empties itself below −180 dBFS once exact zeros come in).
+
+Not changed: the vendored DSP, the sound of four voices, sample rate
+conversion, latency, the IDs and meaning of parameters 100 to 110, MIDI
+controllers.
+
 ## 0.2.2 (2026-11-15)
 
 The plug-in is now called **Kekulé**, after August Kekulé, who found the

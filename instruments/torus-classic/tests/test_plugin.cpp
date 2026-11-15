@@ -226,8 +226,11 @@ struct VaryingBlocks {
 // max_volume caps the Volume moves (the firmware comparison keeps the output
 // below the limiter's ceiling with it); with_filter adds moves of the
 // output filter, which the firmware does not have.
+// with_polyphony adds changes of the number of voices: sixteen from the
+// start, then down and up again while notes ring. The firmware has four.
 HostScore Performance(double rate, std::int64_t total, std::uint32_t seed,
-                      double max_volume = 1.0, bool with_filter = true) {
+                      double max_volume = 1.0, bool with_filter = true,
+                      bool with_polyphony = false) {
     HostScore score;
     Lcg random(seed);
     const auto scaled = [rate](std::int64_t at_48k) {
@@ -269,6 +272,15 @@ HostScore Performance(double rate, std::int64_t total, std::uint32_t seed,
         } else if(random.Below(3) == 0) {
             score.push_back(Param(t, kParamModel, random.Unit()));
         }
+    }
+    if(with_polyphony) {
+        static constexpr int kChoices[] = {2, 1, 2, 0, 2, 1, 0, 2};
+        for(std::size_t i = 0; i < std::size(kChoices); ++i)
+            score.push_back(
+                Param(total * static_cast<std::int64_t>(i) / std::int64_t{std::size(kChoices)} + (i ? 5 : 0),
+                      kParamPolyphony, PolyphonyNormalized(kChoices[i])));
+        std::stable_sort(score.begin(), score.end(),
+                         [](const Ev& a, const Ev& b) { return a.sample < b.sample; });
     }
     return score;
 }
@@ -424,9 +436,11 @@ void TestBlockSizes() {
 #else
         const auto total = static_cast<std::int64_t>(0.25 * rate);
 #endif
-        const HostScore score = Performance(rate, total, 77);
+        // With every number of voices in turn, changed while notes ring.
+        const HostScore score = Performance(rate, total, 77, 1.0, true, true);
         std::vector<float> reference;
         int variants = 0;
+        std::uint32_t triggers = 0;
         for(const bool double_precision : {false, true}) {
             for(int variant = 0; variant <= static_cast<int>(std::size(kBlockSizes)); ++variant) {
                 PluginHost host({rate, 2048, double_precision, kRealtime}, score);
@@ -438,11 +452,13 @@ void TestBlockSizes() {
                 const auto out = host.Stereo();
                 if(reference.empty()) {
                     reference = out;
+                    triggers = host.processor->Engine().TriggerCount();
                     CHECK(Energy(reference) > 1.0);
                     // Loud passages are in it; the limiter holds every sample.
                     CHECK(Peak(reference) <= OutputStage::kCeiling);
                 }
                 CHECK(out == reference);
+                CHECK(host.processor->Engine().TriggerCount() == triggers);
                 ++variants;
             }
         }
@@ -452,7 +468,8 @@ void TestBlockSizes() {
                     Peak(reference));
     }
     std::printf("block sizes: blocks of 1, 7, 12, 16, 48, 64, 333, 1024, 2048 and changing "
-                "lengths, 32 and 64 bit, give the same samples at all five rates\n");
+                "lengths, 32 and 64 bit, give the same samples at all five rates, with 4, 8 "
+                "and 16 voices in turn\n");
 }
 
 // --- Notes as hosts send them ------------------------------------------------
@@ -595,7 +612,7 @@ void TestSampleRates() {
     for(const auto& [rate, latency] : expected) {
         PluginHost host({rate, 2048, false, kRealtime});
         CHECK(host.processor->getLatencySamples() == latency);
-        CHECK(host.processor->getTailSamples() == kInfiniteTail);
+        CHECK(host.processor->getTailSamples() == kInfiniteTail); // fixed, whatever sounds
     }
     // Rates outside the supported range are refused at setup.
     IPtr<Processor> processor = owned(new Processor());
@@ -1183,17 +1200,21 @@ void TestState() {
     for(const int index : kSavedIndex)
         defaults.push_back(kDefaults[index]);
     CHECK(SavedState(processor) == MakeState(kStateVersion, defaults));
-    CHECK(SavedState(processor).size() == 4 + 8 * kSavedParamCount && kSavedParamCount == 10);
+    CHECK(SavedState(processor).size() == 4 + 8 * kSavedParamCount && kSavedParamCount == 11);
+    CHECK(kStateVersion == 3 && processor.Engine().Polyphony() == 4);
 
-    // A valid state is taken over; the model lands on its step.
-    // (Tune .. Volume, then the filter and the free-tuning switch.)
-    const std::vector<double> values = {0.1, 0.2, 0.3, 0.4, 0.55, 0.6, 0.5, 0.7, 0.9, 1.0};
+    // A valid state is taken over; the model and the number of voices land
+    // on their steps.
+    // (Tune .. Volume, then the filter, the free-tuning switch, the voices.)
+    const std::vector<double> values = {0.1, 0.2, 0.3, 0.4, 0.55, 0.6, 0.5, 0.7, 0.9, 1.0, 0.6};
     CHECK(LoadState(processor, MakeState(kStateVersion, values)) == kResultOk);
     std::vector<double> stored = values;
     stored[6] = ModelNormalized(ModelIndex(0.5)); // 0.5 falls on model 3 = 0.6
+    stored[10] = PolyphonyNormalized(1);          // 0.6 falls on the second choice = 0.5
     CHECK(SavedState(processor) == MakeState(kStateVersion, stored));
     host.Run(480);
     CHECK(processor.Engine().Model() == 3);
+    CHECK(processor.Engine().Polyphony() == 8);
     CHECK(processor.Engine().ControlValue(Control::Tune) == 0.1f);
     CHECK(processor.Engine().ControlValue(Control::Volume) == 0.7f);
     CHECK(processor.Engine().ControlValue(Control::Damping) == static_cast<float>(EngineDamping(0.4)));
@@ -1205,10 +1226,12 @@ void TestState() {
         PluginHost old({48000.0, 2048, false, kRealtime});
         const std::vector<double> v1 = {0.1, 0.2, 0.3, 0.4, 0.55, 0.6, 0.5, 0.7};
         CHECK(LoadState(*old.processor, MakeState(1, v1)) == kResultOk);
-        const std::vector<double> as_v2 = {0.1, 0.2, 0.3, 1.0 - 0.4, 0.55, 0.6,
-                                           ModelNormalized(3), 0.7, kDefaultFilter, 1.0};
-        CHECK(SavedState(*old.processor) == MakeState(kStateVersion, as_v2));
+        const std::vector<double> as_now = {0.1, 0.2, 0.3, 1.0 - 0.4, 0.55, 0.6,
+                                            ModelNormalized(3), 0.7, kDefaultFilter, 1.0,
+                                            kDefaultPolyphony};
+        CHECK(SavedState(*old.processor) == MakeState(kStateVersion, as_now));
         old.Run(480);
+        CHECK(old.processor->Engine().Polyphony() == 4);
         CHECK(old.processor->Engine().ControlValue(Control::Damping)
               == static_cast<float>(EngineDamping(1.0 - 0.4))); // the engine gets 0.4, as before
         CHECK(old.processor->Engine().ControlValue(Control::Tune) == 0.1f); // not rounded
@@ -1216,7 +1239,7 @@ void TestState() {
         std::vector<double> on_semitone = v1;
         on_semitone[0] = 0.75; // +12
         CHECK(LoadState(*old.processor, MakeState(1, on_semitone)) == kResultOk);
-        CHECK(SavedState(*old.processor)[4 + 8 * 9] == 0 && SavedState(*old.processor).size() == 84);
+        CHECK(SavedState(*old.processor)[4 + 8 * 9] == 0 && SavedState(*old.processor).size() == 92);
         double free_value = 1.0;
         const auto saved = SavedState(*old.processor);
         std::memcpy(&free_value, saved.data() + 4 + 8 * 9, sizeof(free_value));
@@ -1224,6 +1247,40 @@ void TestState() {
         // Cut short or with a bad value, version 1 is refused like any other.
         CHECK(LoadState(*old.processor, MakeState(1, {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.5})) != kResultOk);
         CHECK(LoadState(*old.processor, MakeState(1, {0.1, 0.2, 0.3, 1.4, 0.5, 0.6, 0.5, 0.7})) != kResultOk);
+        CHECK(SavedState(*old.processor) == saved);
+    }
+
+    // A state of version 2, as 0.2.x saved it, loads unchanged, with four
+    // voices: it has no place for their number. From sixteen voices it brings
+    // the instrument back to four.
+    {
+        PluginHost old({48000.0, 2048, false, kRealtime});
+        old.AddScore({Param(0, kParamPolyphony, PolyphonyNormalized(2))});
+        old.Run(480);
+        CHECK(old.processor->Engine().Polyphony() == 16);
+        const std::vector<double> v2 = {0.1, 0.2, 0.3, 0.4, 0.55, 0.6, 0.6, 0.7, 0.9, 1.0};
+        CHECK(LoadState(*old.processor, MakeState(2, v2)) == kResultOk);
+        std::vector<double> as_now = v2;
+        as_now.push_back(kDefaultPolyphony);
+        CHECK(SavedState(*old.processor) == MakeState(kStateVersion, as_now));
+        old.Run(480);
+        CHECK(old.processor->Engine().Polyphony() == 4);
+        CHECK(old.processor->Engine().ControlValue(Control::Damping)
+              == static_cast<float>(EngineDamping(0.4))); // not mirrored again
+        CHECK(old.processor->Adapter().Output().FilterValue() == 0.9f);
+        const auto saved = SavedState(*old.processor);
+        // Cut short at every length, or with a bad value: refused whole.
+        const auto whole = MakeState(2, v2);
+        for(std::size_t length = 0; length < whole.size(); ++length)
+            CHECK(LoadState(*old.processor,
+                            std::vector<char>(whole.begin(),
+                                              whole.begin() + static_cast<std::ptrdiff_t>(length)))
+                  != kResultOk);
+        for(std::size_t index = 0; index < v2.size(); ++index) {
+            std::vector<double> broken = v2;
+            broken[index] = 1.5;
+            CHECK(LoadState(*old.processor, MakeState(2, broken)) != kResultOk);
+        }
         CHECK(SavedState(*old.processor) == saved);
     }
 
@@ -1270,7 +1327,7 @@ void TestState() {
     host.Process(64);
     CHECK(processor.Adapter().PendingEvents() == 1);
     CHECK(SendNote(processor, 79) == kResultOk); // a screen key struck before the load
-    const std::vector<double> next = {0.5, 0.9, 0.1, 0.6, 0.2, 1.0, 1.0, 0.5, 1.0, 0.0};
+    const std::vector<double> next = {0.5, 0.9, 0.1, 0.6, 0.2, 1.0, 1.0, 0.5, 1.0, 0.0, 1.0};
     CHECK(LoadState(processor, MakeState(kStateVersion, next)) == kResultOk);
     CHECK(SavedState(processor) == MakeState(kStateVersion, next)); // at once
     CHECK(SendNote(processor, 72) == kResultOk); // and one struck after it
@@ -1321,8 +1378,9 @@ void TestState() {
                 std::vector<double> state = flip ? high : low;
                 flip = !flip;
                 CHECK(LoadState(*live.processor, MakeState(kStateVersion, state)) == kResultOk);
-                state[6] = ModelNormalized(ModelIndex(state[6])); // the two stepped ones
+                state[6] = ModelNormalized(ModelIndex(state[6])); // the three stepped ones
                 state[9] = IsOn(state[9]) ? 1.0 : 0.0;
+                state[10] = PolyphonyNormalized(PolyphonyIndex(state[10]));
                 CHECK(SavedState(*live.processor) == MakeState(kStateVersion, state));
                 loads.fetch_add(1);
             }
@@ -1353,8 +1411,8 @@ void TestState() {
             const bool is_low = holds(low_set), is_high = holds(high_set);
             // Before the first state arrives: the defaults, also complete.
             CHECK(is_low || is_high || holds(default_set));
-            CHECK(!is_low || engine.Model() == 0);
-            CHECK(!is_high || engine.Model() == 5);
+            CHECK(!is_low || (engine.Model() == 0 && engine.Polyphony() == 4));
+            CHECK(!is_high || (engine.Model() == 5 && engine.Polyphony() == 16));
             low_blocks += is_low;
             high_blocks += is_high;
             const int now = is_low ? 0 : (is_high ? 1 : -1);
@@ -1400,16 +1458,93 @@ void TestState() {
         stop.store(true);
         loader.join();
         CHECK(loads.load() > 0 && live.allocations == 0);
-        const std::vector<double> final_state = {0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.2, 0.9, 1.0, 1.0};
+        const std::vector<double> final_state = {0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.2, 0.9, 1.0, 1.0,
+                                                 0.5};
         CHECK(LoadState(*live.processor, MakeState(kStateVersion, final_state)) == kResultOk);
         live.Process(64);
         CHECK(live.processor->Engine().ControlValue(Control::Structure) == 0.4f);
         CHECK(live.processor->Engine().Model() == 1);
+        CHECK(live.processor->Engine().Polyphony() == 8);
         std::printf("  %d states loaded from a second thread during %lld samples of audio\n",
                     loads.load(), static_cast<long long>(live.position));
     }
-    std::printf("state: version and ten values, version 1 converted; damaged states refused whole; loading "
+    std::printf("state: version 3 and eleven values, versions 1 and 2 converted; damaged states refused whole; loading "
                 "restarts the sound with the new values and a centred pitch wheel\n");
+}
+
+// --- More than four voices -----------------------------------------------------
+
+void TestPolyphony() {
+    const auto chord = [](std::int64_t at, int count) {
+        HostScore score;
+        for(int i = 0; i < count; ++i)
+            score.push_back(NoteOn(at, 36 + 3 * i, 100));
+        return score;
+    };
+    // Four voices, as always: a sixteen-note chord on one sample starts four
+    // notes per quantum and ends with the last four.
+    {
+        PluginHost host({48000.0, 2048, false, kRealtime}, chord(100, 16));
+        host.Run(108 + kQ); // the chord's quantum and no more
+        CHECK(host.processor->Engine().Polyphony() == 4);
+        CHECK(host.processor->Engine().TriggerCount() == 4);
+        host.Run(4 * kQ);
+        CHECK(host.processor->Engine().TriggerCount() == 16);
+        for(unsigned voice = 0; voice < 4; ++voice)
+            CHECK(host.processor->Engine().VoiceNote(voice) == 36.0f + 3.0f * (12 + voice));
+        CHECK(host.processor->Engine().RenderedBanks() == 1);
+    }
+    // Sixteen voices: the whole chord starts in its quantum, every note has
+    // its voice, and nothing is taken over.
+    for(const int choice : {1, 2}) {
+        const int voices = kPolyphonyVoices[choice];
+        HostScore score = {Param(0, kParamPolyphony, PolyphonyNormalized(choice)),
+                           Param(0, kParamDamping, 0.1)};
+        const auto notes = chord(100, 16);
+        score.insert(score.end(), notes.begin(), notes.end());
+        PluginHost host({48000.0, 2048, false, kRealtime}, score);
+        host.Run(108 + kQ);
+        const DryEngine& engine = host.processor->Engine();
+        CHECK(engine.Polyphony() == static_cast<unsigned>(voices));
+        CHECK(engine.TriggerCount() == static_cast<unsigned>(voices));
+        CHECK(engine.RenderedBanks() == static_cast<unsigned>(voices / 4));
+        host.Run(4 * kQ);
+        CHECK(engine.TriggerCount() == 16);
+        if(voices == 16)
+            for(unsigned voice = 0; voice < 16; ++voice)
+                CHECK(engine.VoiceNote(voice) == 36.0f + 3.0f * voice);
+        host.Run(24000);
+        CHECK(Peak(host.Stereo()) <= OutputStage::kCeiling && Energy(host.Stereo()) > 1.0);
+        // Back to four voices while all of it rings: the other banks are gone
+        // within 4 ms, the first rings on.
+        host.AddScore({Param(host.position, kParamPolyphony, 0.0)});
+        host.Run(20 * kQ);
+        CHECK(engine.Polyphony() == 4 && engine.RenderedBanks() == 1);
+        host.Clear();
+        host.Run(4800);
+        CHECK(Energy(host.Stereo()) > 1e-3);
+        CHECK(host.allocations == 0);
+    }
+    // The number of voices set while no audio runs counts for the project at
+    // once and for the sound from the next block.
+    {
+        PluginHost host({48000.0, 2048, false, kRealtime});
+        host.AddScore({Param(0, kParamPolyphony, 1.0)});
+        host.Process(0);
+        CHECK(host.processor->Engine().Polyphony() == 4);
+        const auto saved = SavedState(*host.processor);
+        double stored = -1.0;
+        std::memcpy(&stored, saved.data() + 4 + 8 * kSavedPolyphony, sizeof(stored));
+        CHECK(stored == 1.0);
+        host.Process(64);
+        CHECK(host.processor->Engine().Polyphony() == 16);
+        // Activation keeps it, as it keeps every parameter.
+        CHECK(host.processor->setActive(false) == kResultOk);
+        CHECK(host.processor->setActive(true) == kResultOk);
+        CHECK(host.processor->Engine().Polyphony() == 16);
+    }
+    std::printf("polyphony: 4, 8 or 16 voices by parameter 111; a sixteen-note chord starts at "
+                "once with sixteen voices; going back to four keeps the first bank ringing\n");
 }
 
 // --- The controller -----------------------------------------------------------
@@ -1442,16 +1577,18 @@ void TestController() {
                     {104, "Position", 0, 0.5},   {105, "Excitation", 0, 0.8},
                     {106, "Model", 5, 0.0},      {107, "Volume", 0, 1.0},
                     {108, "Pitch Bend", 0, 0.5}, {109, "Filter", 0, 1.0},
-                    {110, "Tune Free", 1, 0.0}};
+                    {110, "Tune Free", 1, 0.0},  {111, "Polyphony", 2, 0.0}};
     for(int i = 0; i < kParamCount; ++i) {
         ParameterInfo info{};
         CHECK(controller->getParameterInfo(i, info) == kResultOk);
         CHECK(info.id == expected[i].id && info.stepCount == expected[i].steps);
         CHECK(StringConvert::convert(info.title) == expected[i].title);
         CHECK(info.defaultNormalizedValue == expected[i].default_value);
-        CHECK(info.flags & ParameterInfo::kCanAutomate);
+        // Everything can be automated but the number of voices.
+        CHECK(((info.flags & ParameterInfo::kCanAutomate) != 0) == (info.id != kParamPolyphony));
         CHECK(((info.flags & ParameterInfo::kIsList) != 0)
-              == (info.id == kParamModel || info.id == kParamTuneFree));
+              == (info.id == kParamModel || info.id == kParamTuneFree
+                  || info.id == kParamPolyphony));
         CHECK(controller->getParamNormalized(info.id) == expected[i].default_value);
     }
 
@@ -1546,6 +1683,37 @@ void TestController() {
         }
     }
 
+    // The number of voices: 4, 8 or 16, by the same step rule, shown, typed
+    // and in the engine.
+    CHECK(Text(*controller, kParamPolyphony, 0.0) == "4" && Text(*controller, kParamPolyphony, 0.5) == "8");
+    CHECK(Text(*controller, kParamPolyphony, 1.0) == "16");
+    {
+        ParamValue voices = 0.123;
+        CHECK(Typed(*controller, kParamPolyphony, "16", voices) && voices == 1.0);
+        CHECK(Typed(*controller, kParamPolyphony, " 8 voices ", voices) && voices == 0.5);
+        CHECK(Typed(*controller, kParamPolyphony, "4", voices) && voices == 0.0);
+        for(const char* text : {"0", "5", "12", "32", "-4", "8.5", "sixteen"}) {
+            voices = 0.123;
+            CHECK(!Typed(*controller, kParamPolyphony, text, voices) && voices == 0.123);
+        }
+        for(int choice = 0; choice < kPolyphonyChoices; ++choice) {
+            CHECK(controller->normalizedParamToPlain(kParamPolyphony, PolyphonyNormalized(choice))
+                  == choice);
+            CHECK(controller->plainParamToNormalized(kParamPolyphony, choice)
+                  == PolyphonyNormalized(choice));
+        }
+        PluginHost host({48000.0, 2048, false, kRealtime});
+        for(int i = 0; i <= 300; ++i) {
+            const double value = i / 300.0;
+            const int expected_voices = value < 1.0 / 3.0 ? 4 : (value < 2.0 / 3.0 ? 8 : 16);
+            CHECK(PolyphonyVoices(value) == expected_voices);
+            CHECK(Text(*controller, kParamPolyphony, value) == std::to_string(expected_voices));
+            host.AddScore({Param(host.position, kParamPolyphony, value)});
+            host.Process(16);
+            CHECK(host.processor->Engine().Polyphony() == static_cast<unsigned>(expected_voices));
+        }
+    }
+
     // Typed values: strict. One finite number, optionally the unit, nothing
     // else; on refusal the output value stays as it was.
     double value = 7.0;
@@ -1613,6 +1781,13 @@ void TestController() {
                       == kResultTrue;
         }
         CHECK(mapped == 10); // none of the firmware's reverb or polyphony controllers
+        for(int number = 0; number < kCountCtrlNumber; ++number) { // and none for the voices
+            ParamID assigned = 0;
+            if(mapping->getMidiControllerAssignment(0, channel, static_cast<CtrlNumber>(number),
+                                                    assigned)
+               == kResultTrue)
+                CHECK(assigned != kParamPolyphony);
+        }
         ParamID id = 0;
         for(const int unused : {26, 27, 29, 30, 31, 32, 1, 7, 64})
             CHECK(mapping->getMidiControllerAssignment(0, channel,
@@ -1629,7 +1804,8 @@ void TestController() {
     // returns to its centre on both sides.
     {
         PluginHost host({48000.0, 2048, false, kRealtime});
-        const std::vector<double> values = {0.1, 0.2, 0.3, 0.4, 0.55, 0.6, 0.8, 0.7, 0.35, 1.0};
+        const std::vector<double> values = {0.1, 0.2, 0.3, 0.4, 0.55, 0.6, 0.8, 0.7, 0.35, 1.0,
+                                            0.5};
         CHECK(LoadState(*host.processor, MakeState(kStateVersion, values)) == kResultOk);
         CHECK(controller->setParamNormalized(kParamPitchBend, 0.9) == kResultOk);
         const auto load = [&](const std::vector<char>& bytes) {
@@ -1712,7 +1888,7 @@ void TestController() {
     CHECK(!controller->PlayNote(60));
     CHECK(!controller->PlayNote(-1) && !controller->PlayNote(128));
     controller->terminate();
-    std::printf("controller: eleven parameters, value texts, strict typed values (\"+-5\" "
+    std::printf("controller: twelve parameters, value texts, strict typed values (\"+-5\" "
                 "refused), model step rule shared with the engine, MIDI map, states\n");
 }
 
@@ -1748,11 +1924,11 @@ void TestTuneRounding() {
         CHECK(shown == TuneStep(v));
         // Loaded with FREE on, then off: the engine starts from the value.
         state[0] = v;
-        state[kSavedParamCount - 1] = 1.0;
+        state[kSavedTuneFree] = 1.0;
         CHECK(LoadState(processor, MakeState(kStateVersion, state)) == kResultOk);
         host.Run(12);
         CHECK(processor.Engine().ControlValue(Control::Tune) == static_cast<float>(v));
-        state[kSavedParamCount - 1] = 0.0;
+        state[kSavedTuneFree] = 0.0;
         CHECK(LoadState(processor, MakeState(kStateVersion, state)) == kResultOk);
         host.Run(12);
         mismatches += processor.Engine().ControlValue(Control::Tune) != expected;
@@ -2059,6 +2235,32 @@ void TestEditorInWindow() {
     CHECK(handler.edits.size() == 3);
     handler.edits.clear();
 
+    // The number of voices and the tuning lock follow their parameters, and a
+    // click on either is an edit like the one above. The lock shows the
+    // opposite of Tune Free: closed while Tune moves in semitones.
+    CHECK(controller->setParamNormalized(kParamPolyphony, 0.0) == kResultOk);
+    CHECK(controller->setParamNormalized(kParamTuneFree, 0.0) == kResultOk);
+    CHECK(editor->ShownPolyphony() == 0 && editor->ShownTuneLock() == 1);
+    CHECK(controller->setParamNormalized(kParamPolyphony, 1.0) == kResultOk);
+    CHECK(controller->setParamNormalized(kParamTuneFree, 1.0) == kResultOk);
+    CHECK(editor->ShownPolyphony() == 2 && editor->ShownTuneLock() == 0);
+    CHECK(handler.edits.empty());
+    editor->ChoosePolyphony(1);
+    CHECK(handler.edits.size() == 3 && handler.edits[0].kind == 'b'
+          && handler.edits[1].kind == 'p' && handler.edits[2].kind == 'e');
+    CHECK(handler.edits[1].id == kParamPolyphony && handler.edits[1].value == 0.5);
+    CHECK(controller->getParamNormalized(kParamPolyphony) == 0.5 && editor->ShownPolyphony() == 1);
+    editor->ChoosePolyphony(3);
+    editor->ChoosePolyphony(-1);
+    CHECK(handler.edits.size() == 3);
+    handler.edits.clear();
+    editor->SetTuneFree(false);
+    CHECK(handler.edits.size() == 3 && handler.edits[1].id == kParamTuneFree
+          && handler.edits[1].value == 0.0);
+    CHECK(editor->ShownTuneLock() == 1);
+    handler.edits.clear();
+    CHECK(controller->setParamNormalized(kParamPolyphony, 0.0) == kResultOk);
+
     // A knob, moved the way VSTGUI moves it: the host hears begin, perform
     // and end exactly once each (review finding TC-R02), also for nested
     // edits such as a wheel turn during a drag.
@@ -2272,6 +2474,7 @@ int main() {
     TestPauseAndFlush();
     TestActivationAndRateChange();
     TestState();
+    TestPolyphony();
     TestController();
     TestTuneRounding();
     TestViewLayout();

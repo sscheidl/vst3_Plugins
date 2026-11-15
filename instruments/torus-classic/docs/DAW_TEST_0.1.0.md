@@ -28,12 +28,38 @@ Hosts: **Studio One 7**, **Tracktion Waveform 14**, **Ableton Live 12 Lite**.
 Note per item and host: ok, or what happened. A crash or a hang ends the test
 for that host; note the last step.
 
+## New in 0.3.0, to try
+
+Voices, rest, the lock and the colours. Steps 9.6 to 9.11 are about Studio
+One's Plug-in Nap: Performance Monitor open, "Enable Plug-in Nap" ticked,
+and the box to the right of Kekulé ticked as well. A napping plug-in shows a
+moon instead of its CPU figure. What Studio One does with an instrument is
+not documented; "it never naps" is a result too, and so is anything cut off.
+
+| # | Step | Expected | S1 | Waveform | Live |
+| --- | --- | --- | --- | --- | --- |
+| 9.1 | VOICES at 4: play five and more notes | The fifth takes over the first, as before | | | |
+| 9.2 | VOICES at 16: hold a long Damping, play up to sixteen notes, also as one chord | All ring together; none is taken over before the seventeenth; no clipping, the meter stays at −6 dBFS or below | | | |
+| 9.3 | Each of the six models with 16 voices, dense chords | Sounds like the model with four voices, only fuller; note the CPU figure with all sixteen ringing | | | |
+| 9.4 | While sixteen notes ring, switch VOICES to 4, then back to 16 | To 4: most notes end at once without a click, up to four ring on. To 16: nothing changes, the next notes add to the sound | | | |
+| 9.5 | Save the project with VOICES at 8, reopen; open a project saved with 0.2.x | 8 is back; the old project has 4 and sounds as it did. The host's automation list does not offer Polyphony | | | |
+| 9.6 | Nap: load Kekulé, play nothing | Note whether the moon appears, and after how long | | | |
+| 9.7 | Nap: Modal Resonator, play a short note (Damping at 1), wait | The note rings out completely; note whether and when the moon appears (the plug-in is at rest about 1 to 2 s after the note has gone) | | | |
+| 9.8 | Nap: Modal Resonator, Damping at 0.25, one loud note, listen on headphones at high volume until it has gone | The tail fades to nothing without a step or a cut; this takes about a minute | | | |
+| 9.9 | Nap: with the moon showing, play a note from the MIDI keyboard, and one from a recorded clip | It sounds at once, complete from its first sample, like a note without a nap | | | |
+| 9.10 | Nap: with the moon showing, open the window and click a screen key | It sounds. If not, note it: the key reaches the plug-in as a message, and the host has to wake for it | | | |
+| 9.11 | Nap: Stereo Strings, Damping at 0, one note | It sustains without end and the moon never appears | | | |
+| 9.12 | The lock beside TUNE: click it, turn TUNE, rest the mouse on it | Closed and grey: whole semitones. Open and amber: decimals. A tooltip says so. Sharp at 50 %, 100 % and 200 % window size and at each display scale | | | |
+| 9.13 | Automate "Tune Free" in the host, or switch it in the parameter list | The lock opens for On and closes for Off | | | |
+| 9.14 | Look at the knob rings | TUNE, FILTER, VOLUME white; STRUCTURE, BRIGHTNESS, DAMPING magenta; POSITION, EXCITATION turquoise. Readable on the dark background; say if the assignment or a colour should change | | | |
+| 9.15 | FM Voice, Damping at 0.5: one note, wait until it has gone, then turn Damping to 0 | A drone starts without a note, as on the Daisy kit. Note whether it also does with the moon showing | | | |
+
 ## New in 0.2.0, to try
 
 | # | Step | Expected | S1 | Waveform | Live |
 | --- | --- | --- | --- | --- | --- |
 | 8.1 | Turn Damping up | The sound gets shorter; fully down it sustains | | | |
-| 8.2 | Turn Tune with FREE off, then with FREE on | Whole semitones with a whole-number display; continuous with decimals | | | |
+| 8.2 | Turn Tune with FREE off, then with FREE on (since 0.3.0: the lock closed, then open) | Whole semitones with a whole-number display; continuous with decimals | | | |
 | 8.3 | Close the FILTER knob while notes ring, then open it fully | The sound gets darker; fully open reads "off" and sounds as without filter | | | |
 | 8.4 | Play the loudest settings you found (hard chords, FM, high Brightness) | The host's meter never passes −6 dBFS; no clipping. Note whether the limiter is audible | | | |
 | 8.5 | Route the plug-in's "MIDI Out" to another track or record it; click screen keys | Notes arrive with the length the key was held | | | |
@@ -47,10 +73,12 @@ for that host; note the last step.
 
 1. The folder `Kekule.vst3` (up to 0.2.1 `Torus Classic.vst3`) from
    `out/torus-classic-<version>/` belongs in a VST3 folder, and only one of
-   the two: they carry the same class IDs. On the development machine it was copied to
-   `%LOCALAPPDATA%\Programs\Common\VST3\` on 2026-11-14, next to Toy Piano
-   Classic. Elsewhere that folder or `C:\Program Files\Common Files\VST3\`
-   will do.
+   the two: they carry the same class IDs. On the development machine the
+   test builds belong in `C:\Program Files\Common Files\VST3\` since
+   2026-11-15, beside the other plug-ins, so that Studio One finds them
+   (copying there needs administrator rights). The per-user folder
+   `%LOCALAPPDATA%\Programs\Common\VST3\`, used on 2026-11-14, is empty
+   again: never keep the bundle in both. Elsewhere either folder will do.
 2. Compare its files with `SHA256SUMS.txt` in that folder if in doubt about
    the copy.
 3. Let the host rescan. Expected entry: **Kekulé** (up to 0.2.1 **Torus
@@ -64,7 +92,7 @@ for that host; note the last step.
 | 1.2 | Play single notes from a MIDI keyboard, model 1 | A struck, ringing tone; louder with higher velocity | | | |
 | 1.3 | Release keys | The tone rings on and decays; releasing changes nothing | | | |
 | 1.4 | Each of the six models: single notes, a four-note chord, a fast run | Six clearly different sounds; no dropouts, clicks or stuck noise | | | |
-| 1.5 | Five and more notes in succession | The fifth replaces the oldest; never more than four tones | | | |
+| 1.5 | Five and more notes in succession (VOICES at 4) | The fifth replaces the oldest; never more than four tones | | | |
 | 1.6 | Model 6 (Stereo Strings), turn Position | The stereo image changes; on headphones the right channel is out of phase at 0.5 | | | |
 | 1.7 | Lowest and highest keys of the keyboard | Sound, no noise bursts | | | |
 | 1.8 | Damping fully up, strike, wait | Long sustain; with strings and FM it does not end by itself | | | |
@@ -76,7 +104,7 @@ for that host; note the last step.
 | # | Step | Expected | S1 | Waveform | Live |
 | --- | --- | --- | --- | --- | --- |
 | 2.1 | Turn each of the seven knobs while notes ring | Audible, smooth change; value text follows | | | |
-| 2.2 | Host's generic parameter list | Nine parameters: seven knobs, Model (list of six names), Pitch Bend | | | |
+| 2.2 | Host's generic parameter list | Twelve parameters since 0.3.0: eight knobs, Model (list of six names), Pitch Bend, Tune Free (Off, On), Polyphony (4, 8, 16) | | | |
 | 2.3 | Type values into the host's parameter fields | `-7.5` for Tune, a model name, `50 %` for Volume are accepted; nonsense is refused | | | |
 | 2.4 | Record automation by moving a knob, play back | The knob moves; the sound follows | | | |
 | 2.5 | Draw a Model automation step and a Tune ramp | Model switches at the step; Tune glides | | | |
