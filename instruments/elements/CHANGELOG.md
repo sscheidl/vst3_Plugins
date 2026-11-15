@@ -1,5 +1,20 @@
 # Changes
 
+## 0.1.2 (2026-11-15)
+
+Fix from Codex's follow-up check of 0.1.1
+(`docs/CODEX_REVIEW_0.1.1_NACHPRUEFUNG.md`; what was done:
+`docs/CODEX_REVIEW_0.1.1_UMSETZUNG.md`).
+
+* EL-R06: the way 0.1.1 kept releases that found the keyboard queue full
+  could let a later strike overtake such a release, which then ended the
+  new note. Replaced: every release goes through the one queue again, and
+  the queue always keeps room for the release of each key that is down. A
+  strike is taken only if that room remains; otherwise it is refused. The
+  queue holds 256 notes instead of 64.
+
+No change to the sound or the DSP.
+
 ## 0.1.1 (2026-11-14)
 
 Fixes from the Codex review of 0.1.0 (`docs/CODEX_REVIEW_0.1.0.md`; what was

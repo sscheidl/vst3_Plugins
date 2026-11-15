@@ -25,6 +25,8 @@
 #include "pluginterfaces/vst/ivstmidicontrollers.h"
 
 #include <algorithm>
+#include <atomic>
+#include <bitset>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -759,35 +761,98 @@ void TestKeyboardAndStatus() {
                 reported_latency);
 }
 
-// The screen keyboard under load (review findings EL-R01, EL-R02): no
-// release is lost, neither on the way in nor on the way out to the host.
+// The screen keyboard under load (review findings EL-R01, EL-R02, EL-R06):
+// no release is lost or overtaken, neither on the way in nor on the way out
+// to the host.
 void TestKeyboardLimits() {
-    // A release that finds the keyboard queue full is kept and played after
-    // everything queued before it.
+    // The queue filled to its limit before a block: strikes are refused while
+    // the release of the key that is down still has room, and that release
+    // is taken. The strike after it, once the queue has room again, stays.
     {
-        PluginHost host({48000.0});
+        HostConfig config;
+        config.out_events = 2 * static_cast<int>(Processor::kKeyboardQueueSize) + 8;
+        PluginHost host(config);
         CHECK(SendNote(*host.processor, 60) == kResultOk);
         host.Process(64);
         std::string expected = "N60 ";
-        int held = 60;
-        // A glide over 32 keys before the next block: 64 notes, the queue's size.
-        for(int i = 0; i < 32; ++i, ++held) {
-            CHECK(SendNote(*host.processor, held, 0) == kResultOk);
-            CHECK(SendNote(*host.processor, held + 1) == kResultOk);
-            expected += "F" + std::to_string(held) + " N" + std::to_string(held + 1) + " ";
+        // Struck again and again without a release: one place stays free for it.
+        std::size_t struck = 0;
+        while(SendNote(*host.processor, 60) == kResultOk) {
+            expected += "F60 N60 ";
+            ++struck;
         }
-        CHECK(SendNote(*host.processor, 100) != kResultOk); // a strike that does not fit is refused
-        CHECK(SendNote(*host.processor, held, 0) == kResultOk);
-        expected += "F" + std::to_string(held) + " ";
-        host.Run(48000);
-        CHECK(host.midi_out == expected);
-        CHECK(!host.processor->SynthEngine().Gate() && host.processor->SynthEngine().HeldCount() == 0);
-        // Everything goes on as before.
-        CHECK(SendNote(*host.processor, held) == kResultOk);
+        CHECK(struck == Processor::kKeyboardQueueSize - 1);
+        CHECK(SendNote(*host.processor, 61) != kResultOk); // no room for another key either
+        CHECK(SendNote(*host.processor, 60, 0) == kResultOk);
+        expected += "F60 ";
+        CHECK(SendNote(*host.processor, 60) != kResultOk); // the queue is full now
         host.Process(64);
-        CHECK(host.processor->SynthEngine().Gate() && host.midi_out == expected + "N" + std::to_string(held) + " ");
+        CHECK(host.midi_out == expected);
+        CHECK(host.processor->SynthEngine().HeldCount() == 0);
+        // The order of the review's EL-R06: the key struck again after its
+        // release has gone in sounds, and nothing later ends it.
+        CHECK(SendNote(*host.processor, 60) == kResultOk);
+        host.Run(48000);
+        CHECK(host.midi_out == expected + "N60 ");
+        CHECK(host.processor->SynthEngine().Gate() && host.processor->SynthEngine().HeldCount() == 1);
+        // A release of a key that is not down ends nothing and takes no room.
+        CHECK(SendNote(*host.processor, 72, 0) == kResultOk);
+        host.Process(64);
+        CHECK(host.midi_out == expected + "N60 " && host.processor->SynthEngine().Gate());
+        CHECK(SendNote(*host.processor, 60, 0) == kResultOk);
+        host.Run(4800);
+        CHECK(host.midi_out == expected + "N60 F60 " && host.processor->SynthEngine().HeldCount() == 0);
         CHECK(host.allocations == 0);
     }
+    // The UI thread plays while the audio thread renders, as in a host. At the
+    // end the engine and the host's MIDI output hold exactly the keys the
+    // keyboard left down, whatever the interleaving was. With large blocks
+    // the UI outruns the audio thread and the queue runs full while both are
+    // at work: strikes are refused there.
+    std::uint64_t refused = 0;
+    for(int round = 0; round < 4; ++round) {
+        HostConfig config;
+        config.out_events = 2 * static_cast<int>(Processor::kKeyboardQueueSize) + 8;
+        PluginHost host(config);
+        const int block = round < 2 ? 32 : 2048;
+        std::atomic<bool> done{false};
+        std::bitset<128> down;
+        std::uint64_t refused_here = 0;
+        bool refused_release = false;
+        std::thread ui([&] {
+            Lcg random(1000u + static_cast<std::uint32_t>(round));
+            for(int i = 0; i < 20000; ++i) {
+                const int note = 60 + static_cast<int>(random.Below(4));
+                const bool strike = random.Below(2) == 0;
+                if(SendNote(*host.processor, note, strike ? 100 : 0) == kResultOk)
+                    down.set(static_cast<std::size_t>(note), strike);
+                else if(strike)
+                    ++refused_here;
+                else
+                    refused_release = true;
+            }
+            done.store(true);
+        });
+        while(!done.load())
+            host.Process(block);
+        ui.join();
+        CHECK(!refused_release); // a release always finds its room
+        refused += refused_here;
+        host.Run(4800, 32);
+        std::bitset<128> sent;
+        for(std::size_t at = 0; at < host.midi_out.size();) {
+            const std::size_t space = host.midi_out.find(' ', at);
+            const int note = std::stoi(host.midi_out.substr(at + 1, space - at - 1));
+            sent.set(static_cast<std::size_t>(note), host.midi_out[at] == 'N');
+            at = space + 1;
+        }
+        CHECK(sent == down);
+        CHECK(host.processor->SynthEngine().HeldCount() == static_cast<int>(down.count()));
+        CHECK(host.processor->SynthEngine().Gate() == down.any());
+    }
+    std::printf("screen keyboard with two threads: 80000 notes, %llu strikes refused at a full "
+                "queue, every key's final state right\n",
+                static_cast<unsigned long long>(refused));
     // The host's list for the MIDI output holds a single event.
     {
         HostConfig config;
@@ -818,8 +883,9 @@ void TestKeyboardLimits() {
         CHECK(host.midi_out == "N60 F60 N61 F61 N62 F62 ");
         CHECK(host.allocations == 0);
     }
-    std::printf("screen keyboard limits: a release that finds the queue full and a note-off the "
-                "host's list cannot take are delivered later, in order\n");
+    std::printf("screen keyboard limits: the queue keeps room for every release, nothing overtakes "
+                "one, also with UI and audio threads running at once; a note-off the host's list "
+                "cannot take goes out later, in order\n");
 }
 
 // The plug-in's output stays within +-1 at every host rate, also where the

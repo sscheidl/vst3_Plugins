@@ -8,6 +8,12 @@
 * **Umgesetzt von:** Claude (Fable 5.2 für 0.1.0, Opus 5.5 für diese
   Umsetzung)
 
+> **Nachtrag 0.1.2:** Die hier beschriebene Lösung für EL-R01 (Ablage
+> außerhalb der Queue) hatte selbst einen Fehler, den Codex' Nachprüfung als
+> EL-R06 fand. In 0.1.2 ist sie ersetzt, siehe
+> [CODEX_REVIEW_0.1.1_UMSETZUNG.md](CODEX_REVIEW_0.1.1_UMSETZUNG.md). Dieser
+> Bericht bleibt das Dokument des Stands 0.1.1.
+
 Jeder Befund wurde zuerst am Code nachvollzogen; alle fünf sind bestätigt
 und behoben. Zu jedem gibt es einen Test, der den Fall des Reviews
 nachstellt. Gegen den unkorrigierten Code von 0.1.0 wurden diese Tests nicht

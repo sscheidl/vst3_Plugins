@@ -62,7 +62,10 @@ class Processor : public Steinberg::Vst::AudioEffect {
     // Notes from the screen keyboard arrive here, on the host's UI thread.
     Steinberg::tresult PLUGIN_API notify(Steinberg::Vst::IMessage* message) SMTG_OVERRIDE;
 
-    static constexpr std::size_t kKeyboardQueueSize = 64;
+    // Room for the screen keyboard's notes between two blocks. Releases always
+    // find room (see keyboard_keys_down_); strikes are refused when the queue
+    // would no longer have it.
+    static constexpr std::size_t kKeyboardQueueSize = 256;
     // A screen keyboard note that no process() call with audio has picked up
     // after this time is discarded: keys clicked while the host is not
     // rendering do not sound later.
@@ -79,8 +82,6 @@ class Processor : public Steinberg::Vst::AudioEffect {
         std::uint8_t note = 0;
         std::uint8_t velocity = 0;
         Clock::time_point struck{};
-        // Counts the notes put into the queue, from 1.
-        std::uint64_t sequence = 0;
     };
 
     // Engine and adapter from scratch, the parameters at the given values.
@@ -90,9 +91,6 @@ class Processor : public Steinberg::Vst::AudioEffect {
     void ReadParameterChanges(Steinberg::Vst::IParameterChanges& changes,
                               Steinberg::int32 num_samples);
     void ReadKeyboard(Steinberg::Vst::IEventList* output);
-    // Releases that did not fit into the queue, once the notes queued before
-    // them have been taken.
-    void TakeLateReleases(Steinberg::Vst::IEventList* output);
     void ReleaseKey(Steinberg::Vst::IEventList* output, int note);
     void PlayKeyboardNote(Steinberg::Vst::IEventList* output, const KeyboardNote& key,
                           Clock::time_point& now, bool& have_time);
@@ -116,23 +114,16 @@ class Processor : public Steinberg::Vst::AudioEffect {
     // states, see parameter_state.h.
     ParameterState state_;
 
+    // Strikes and releases of the screen keyboard, in the order they came.
+    // Every release goes through this one queue, so nothing can overtake it.
     SpscQueue<KeyboardNote, kKeyboardQueueSize> keyboard_notes_;
-    // The sequence number of the last note put into the queue. Owned by the
-    // UI thread, the queue's one producer.
-    std::uint64_t keyboard_pushed_ = 0;
-    // A release that finds the queue full is not dropped: its key's slot
-    // holds 1 + the sequence number of the last note queued before it, and it
-    // is played once that note has been taken. Strikes that do not fit are
-    // dropped; they leave nothing sounding. Written by the UI thread, taken
-    // by the audio thread.
-    std::array<std::atomic<std::uint64_t>, 128> overflowed_releases_{};
-    std::atomic<bool> releases_overflowed_{false};
-    static_assert(std::atomic<std::uint64_t>::is_always_lock_free, "needs lock-free atomics");
-    // The same, taken over by the audio thread, which owns these.
-    std::array<std::uint64_t, 128> late_releases_{};
-    int late_release_count_ = 0;
-    // The sequence number of the last note taken from the queue.
-    std::uint64_t keyboard_taken_ = 0;
+    // The keys whose strike went into the queue and whose release has not:
+    // the queue always keeps room for one release of each. A strike is only
+    // taken if, with it, that room is still there; a release of a key that is
+    // not down has nothing to end and is not queued. Owned by the UI thread,
+    // the queue's one producer.
+    std::bitset<128> keyboard_keys_down_;
+    std::size_t keyboard_keys_down_count_ = 0;
     // Keyboard notes struck up to this moment belong to the time before the
     // last loaded state and are not played. Owned by the audio thread.
     Clock::time_point keyboard_valid_after_{};

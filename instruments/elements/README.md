@@ -2,17 +2,20 @@
 
 A VST3 instrument around the modal synthesis DSP of the Mutable Instruments
 Elements module: bow, blow and strike exciters, a modal resonator, a stereo
-reverb. Monophonic, played from MIDI. Version 0.1.1, phase 1 of the project,
+reverb. Monophonic, played from MIDI. Version 0.1.2, phase 1 of the project,
 with the fixes from the Codex review of 0.1.0
-([review](docs/CODEX_REVIEW_0.1.0.md), [what was done](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)).
+([review](docs/CODEX_REVIEW_0.1.0.md), [what was done](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md))
+and from its follow-up check
+([follow-up](docs/CODEX_REVIEW_0.1.1_NACHPRUEFUNG.md), [what was done](docs/CODEX_REVIEW_0.1.1_UMSETZUNG.md)).
 
 What it is meant to prove: that the original DSP, written for a fixed 32 kHz,
 can run at a **true internal 48 kHz** and still be the same instrument, in a
 form that later serves firmware (Daisy Seed3, ESP32-S3) as well as a plug-in.
 
 **Status: built, validated and tested automatically; 0.1.0 reviewed by Codex,
-its five findings fixed in 0.1.1, which awaits the follow-up check. Not yet
-played in a DAW, not listened to.** Details and every measured number are in the
+its five findings fixed in 0.1.1; the follow-up check found one fault in
+the fix of the first, fixed in 0.1.2, which awaits its check. Not yet played
+in a DAW, not listened to.** Details and every measured number are in the
 [build report](docs/BUILD_REPORT_0.1.0.md); the measurements of 0.1.1 are in
 [DSP_MEASUREMENTS_0.1.1.md](docs/DSP_MEASUREMENTS_0.1.1.md).
 
@@ -34,7 +37,7 @@ played in a DAW, not listened to.** Details and every measured number are in the
 | MIDI out | The screen keyboard's notes, for the host to record. A note-off that the host's list cannot take is sent again in the next blocks, before any new note-on of that key |
 | MIDI | Notes with velocity, note-off, pitch wheel (±2 semitones), six controllers. One voice, last-note priority |
 | Sample rate | The engine always runs at 48 kHz. A 48 kHz host gets its output as it is; at any other host rate a sinc converter follows (about 1 ms latency, reported to the host) |
-| Window | Two rows of knobs, a status line with the rates in use, a screen keyboard |
+| Window | Two rows of knobs, a status line with the rates in use, a screen keyboard. Its notes reach the audio thread through a queue of 256 that always keeps room for the release of every key held down; a strike that would take that room is dropped |
 
 ## Parameters
 
@@ -184,7 +187,7 @@ automatically.
 | --- | --- |
 | `elements.dsp` | The core at 32 kHz is the original, bit for bit. At 48 and 96 kHz: a single mode's ringing at every resonance and the resonator's start filters, pitch, decay of single partials, level by band, each against the original. Writes its measurements to `dsp-measurements-Release.md` in the build directory; a Debug build compares fewer scenarios and leaves the measurements out |
 | `elements.engine` | Voice and note priority, pitch, the three exciters, the resonator's parameters, reverb and freeze, smoothing, 90 s of random input at 48 and 96 kHz without a non-finite sample or a hanging note, the adapter's timing and block-size independence |
-| `elements.plugin` | The plug-in as a host sees it: buses, notes, velocity, pitch wheel, automation, state, block sizes, five host sample rates, 64-bit buffers, the screen keyboard's messages, a full keyboard queue and a full or missing MIDI output list, the output bound at every host rate |
+| `elements.plugin` | The plug-in as a host sees it: buses, notes, velocity, pitch wheel, automation, state, block sizes, five host sample rates, 64-bit buffers, the screen keyboard's messages, a full keyboard queue (also with UI and audio threads at once) and a full or missing MIDI output list, the output bound at every host rate |
 | `elements.provenance` | The files from upstream are what `SHA256SUMS.upstream` says |
 
 ## License

@@ -1,14 +1,14 @@
-# DAW-Prüfliste: Mendelejew 0.1.1 (Projekt Elements)
+# DAW-Prüfliste: Mendelejew 0.1.2 (Projekt Elements)
 
-Gilt für 0.1.1, die Fassung mit den Korrekturen aus dem Codex-Review; der
-Dateiname bleibt der der ersten Fassung.
+Gilt für 0.1.2, die Fassung mit den Korrekturen aus dem Codex-Review und
+seiner Nachprüfung; der Dateiname bleibt der der ersten Fassung.
 
 Was automatisch nicht prüfbar ist und in der DAW (Studio One) noch aussteht.
 Ergebnisse bitte hier eintragen: PASS, FAIL mit kurzer Beschreibung, oder
 offen.
 
 Installation: den Ordner `Mendelejew.vst3` aus
-`build\windows-vs2026-x64\VST3\Release\` (oder aus `out\elements-0.1.1\`) nach
+`build\windows-vs2026-x64\VST3\Release\` (oder aus `out\elements-0.1.2\`) nach
 `%LOCALAPPDATA%\Programs\Common\VST3\` kopieren, DAW neu scannen lassen. Eine
 dort liegende Kopie unter dem Arbeitstitel (`Elements.vst3`) vorher entfernen:
 Beide haben dieselben Klassen-IDs.
@@ -27,7 +27,7 @@ Beide haben dieselben Klassen-IDs.
 | 8 | Pitch-Rad verstimmt um ±2 Halbtöne und kehrt zurück | offen |
 | 9 | Bildschirm-Klaviatur spielt; Taste KEYS blendet sie aus und ein | offen |
 | 10 | Legato (zweite Taste bei gehaltener erster): neuer Anschlag; Loslassen der zweiten: Rückfall auf die erste ohne Anschlag | offen |
-| 10a | Neu in 0.1.1: mit gedrückter Maus schnell über viele Tasten der Bildschirm-Klaviatur fahren, dann loslassen: kein Ton bleibt hängen, auch nicht in einer mitlaufenden MIDI-Aufnahme | offen |
+| 10a | Neu in 0.1.1, geändert in 0.1.2: mit gedrückter Maus schnell über viele Tasten der Bildschirm-Klaviatur fahren, dann loslassen: kein Ton bleibt hängen und keiner bricht vorzeitig ab, auch nicht in einer mitlaufenden MIDI-Aufnahme | offen |
 
 ## Klang
 
