@@ -1,7 +1,8 @@
-# DAW-Prüfliste: Mendelejew 0.1.3 (Projekt Elements)
+# DAW-Prüfliste: Mendelejew 0.1.4 (Projekt Elements)
 
-Gilt für 0.1.3: die Fassung mit den Korrekturen aus dem Codex-Review und
-seinen Nachprüfungen (0.1.2), dazu die Reglerfarben (0.1.3); der Dateiname
+Gilt für 0.1.4: Korrekturen aus dem Codex-Review und seinen Nachprüfungen
+(0.1.2), Reglerfarben (0.1.3), Oktavtasten, Damping-Richtung und Navigation
+(0.1.4); der Dateiname
 bleibt der der ersten Fassung.
 
 Was automatisch nicht prüfbar ist und in der DAW (Studio One) noch aussteht.
@@ -9,7 +10,7 @@ Ergebnisse bitte hier eintragen: PASS, FAIL mit kurzer Beschreibung, oder
 offen.
 
 Installation: den Ordner `Mendelejew.vst3` aus
-`build\windows-vs2026-x64\VST3\Release\` (oder aus `out\elements-0.1.3\`) nach
+`build\windows-vs2026-x64\VST3\Release\` nach
 `C:\Program Files\Common Files\VST3\` kopieren (braucht Adminrechte), DAW neu
 scannen lassen. Eine Kopie unter dem Arbeitstitel (`Elements.vst3`) oder eine
 zweite im Benutzer-Ordner `%LOCALAPPDATA%\Programs\Common\VST3\` vorher
@@ -29,6 +30,9 @@ entfernen: Alle haben dieselben Klassen-IDs.
 | 7 | Anschlagdynamik hörbar; Regler Velocity auf 0 %: alle Töne gleich laut | offen |
 | 8 | Pitch-Rad verstimmt um ±2 Halbtöne und kehrt zurück | offen |
 | 9 | Bildschirm-Klaviatur spielt; Taste KEYS blendet sie aus und ein | offen |
+| 9a | Start C3–C5; << und >> in Oktaven bis C2–C4 bzw. C6–C8; Notenbeschriftung und aufgenommene MIDI-Noten stimmen überein | offen |
+| 9b | ENG/MOD/GEN ersetzen das Panel; KEYS funktioniert unabhängig, POLY ist derzeit deaktiviert | offen |
+| 9c | Projekt mit anderer Oktave und MOD/GEN speichern und neu laden; Ansicht und Bereich kommen zurück | offen |
 | 10 | Legato (zweite Taste bei gehaltener erster): neuer Anschlag; Loslassen der zweiten: Rückfall auf die erste ohne Anschlag | offen |
 | 10a | Neu in 0.1.1, geändert in 0.1.2: mit gedrückter Maus schnell über viele Tasten der Bildschirm-Klaviatur fahren, dann loslassen: kein Ton bleibt hängen und keiner bricht vorzeitig ab, auch nicht in einer mitlaufenden MIDI-Aufnahme | offen |
 
@@ -40,8 +44,9 @@ entfernen: Alle haben dieselben Klassen-IDs.
 | 12 | Blow allein: Luftrauschen durch den Resonator; über etwa 2/3 kommt die Röhre hinzu | offen |
 | 13 | Strike mit Mallet von links nach rechts: Samples, Schlägel, Plektrum, Partikel | offen |
 | 14 | Geometry, Brightness, Damping, Position verändern den Klang wie erwartet | offen |
-| 15 | Damping: höherer Wert klingt länger (Hardware-Sinn; bei Torus Classic seit 0.2.0 umgekehrt, siehe Bericht) | offen |
-| 16 | Space: unten trocken, Mitte breit, oben Hall; FREEZE hält den Hall | offen |
+| 15 | Damping: höherer Wert dämpft stärker, im Fenster wie in der Automationsspur und am MIDI-CC 23; ein mit 0.1.3 oder früher gespeichertes Projekt klingt wie vorher (sein Damping steht jetzt gespiegelt, z. B. 0,25 → 0,75) | offen |
+| 16 | Space: unten trocken, Mitte breit, oben Hall; Schneeflocke neben SPACE hält den Hall, berührt den Reglerring nicht und bleibt beim Skalieren lesbar | offen |
+| 16a | Hohen verzerrten Klang erneut einstellen und Patch/MIDI-Note/Hostrate festhalten; mit schwächerem Anreger vergleichen. Volume liegt hinter der Sättigung und kann sie nicht rückgängig machen | offen |
 | 17 | Kein Knacksen beim Drehen der Regler während eines Tons | offen |
 | 18 | Klangvergleich mit einer bekannten Elements-Referenz (Hardware, VCV Rack), falls vorhanden | offen |
 

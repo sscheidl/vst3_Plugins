@@ -3,6 +3,7 @@
 #include "pluginterfaces/gui/iplugviewcontentscalesupport.h"
 #include "public.sdk/source/vst/vstguieditor.h"
 #include "vstgui/lib/controls/icontrollistener.h"
+#include "view_layout.h"
 
 #include <algorithm>
 #include <array>
@@ -11,8 +12,10 @@
 #include <cstdlib>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace VSTGUI {
+class CView;
 class CKnob;
 class CTextLabel;
 } // namespace VSTGUI
@@ -99,10 +102,14 @@ class DragConstraint {
     Clock::time_point last_{};
 };
 
+enum class EditorPanel : int { Engine, Mod, Gen };
+
 // What the window remembers between sessions; saved with the project.
 struct EditorSettings {
     double zoom = 1.0;
     bool keyboard = true;
+    int transpose = kKeyboardDefaultTranspose;
+    EditorPanel panel = EditorPanel::Engine;
 };
 
 // What the processor reported about the rates it runs at.
@@ -152,8 +159,10 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // refuses the new window size, nothing changes.
     void SetKeyboardVisible(bool show);
     bool KeyboardVisible() const { return settings_.keyboard; }
+    void SetKeyboardTranspose(int semitones);
+    void SetPanel(EditorPanel panel);
     const EditorSettings& Settings() const { return settings_; }
-    // Freezes the reverb, as a click on FREEZE does: an edit the host records.
+    // Freezes the reverb, as the snowflake does: an edit the host records.
     void SetFreeze(bool freeze);
     // Called by the controller when the processor reports its rates.
     void ShowStatus(const EngineStatus& status);
@@ -206,11 +215,16 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     bool Resize();
     // Records a change by the user; `settled` follows once it has stopped.
     void UserChanged();
+    void ShowPanel();
 
     std::array<Knob, kKnobCount> knobs_{};
-    KeyboardView* keyboard_view_ = nullptr; // owned by the frame, like the next two
+    KeyboardView* keyboard_view_ = nullptr; // views below are owned by the frame
     ToggleButton* keyboard_button_ = nullptr;
     ToggleButton* freeze_button_ = nullptr;
+    ToggleButton* octave_down_ = nullptr;
+    ToggleButton* octave_up_ = nullptr;
+    std::array<ToggleButton*, 3> panel_buttons_{};
+    std::array<std::vector<VSTGUI::CView*>, 3> panel_views_;
     VSTGUI::CTextLabel* status_label_ = nullptr;
     EngineStatus status_;
     double scale_ = 1.0; // the host's display scale factor

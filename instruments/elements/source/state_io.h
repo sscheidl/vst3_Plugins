@@ -27,17 +27,23 @@ inline bool WriteSavedValues(Steinberg::IBStream* state, const SavedValues& valu
 
 // Reads and checks a whole state. False, with `values` untouched, for an
 // unknown version, a state cut short, or a value that is not a finite number
-// from 0 to 1. Coarse and the Freeze switch come back as the value of the
-// step they fall on.
+// from 0 to 1. A state of version 1 comes back in today's terms, Damping
+// mirrored, so that it sounds as before. Coarse and the Freeze switch come
+// back as the value of the step they fall on.
 inline bool ReadSavedValues(Steinberg::IBStream* state, SavedValues& values) {
     Steinberg::IBStreamer stream(state, kLittleEndian);
     Steinberg::int32 version = 0;
-    if(!stream.readInt32(version) || version != kStateVersion)
+    if(!stream.readInt32(version) || version < kOldestStateVersion || version > kStateVersion)
         return false;
     SavedValues read{};
     for(double& value : read)
         if(!stream.readDouble(value) || !std::isfinite(value) || value < 0.0 || value > 1.0)
             return false;
+    static_assert(kSavedIndex[static_cast<std::size_t>(kDampingIndex)] == kDampingIndex);
+    if(version == 1) {
+        double& damping = read[static_cast<std::size_t>(kDampingIndex)];
+        damping = 1.0 - damping;
+    }
     double& coarse = read[static_cast<std::size_t>(Index(kParamCoarse))];
     coarse = CoarseNormalized(CoarseSemitones(coarse));
     double& freeze = read[static_cast<std::size_t>(Index(kParamFreeze))];

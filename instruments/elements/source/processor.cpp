@@ -84,7 +84,8 @@ void Processor::Restart(const ParameterState::Values& values) {
     adapter_.Reset();
     engine_.Reset(Engine::kDefaultSeed);
     for(unsigned i = 0; i < kControlCount; ++i)
-        engine_.JumpControl(static_cast<Control>(i), static_cast<float>(values[i]));
+        engine_.JumpControl(static_cast<Control>(i),
+                            static_cast<float>(EngineValue(static_cast<int>(i), values[i])));
     engine_.JumpPitchBend(
         static_cast<float>(PitchBendSemitones(values[static_cast<std::size_t>(Index(kParamPitchBend))])));
 }
@@ -144,7 +145,8 @@ void Processor::QueueParameter(int32 offset, ParamID id, double value) {
     value = Clamp01(value);
     state_.Write(index, value);
     if(index < static_cast<int>(kControlCount))
-        adapter_.AddEvent(offset, ControlEvent(static_cast<Control>(index), static_cast<float>(value)));
+        adapter_.AddEvent(offset, ControlEvent(static_cast<Control>(index),
+                                               static_cast<float>(EngineValue(index, value))));
     else if(id == kParamPitchBend)
         adapter_.AddEvent(offset, BendEvent(static_cast<float>(PitchBendSemitones(value))));
 }

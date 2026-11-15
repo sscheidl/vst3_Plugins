@@ -64,23 +64,35 @@ constexpr int kMidiCcSpace = 91; // "effects 1 depth", the usual reverb amount
 
 constexpr double kDefaultPitchBend = 0.5; // wheel centred
 
-inline double DefaultOf(int index) {
-    return index < static_cast<int>(kControlCount) ? kControlDefaults[index] : kDefaultPitchBend;
-}
-
-constexpr double kDefaults[kParamCount] = {
-    kControlDefaults[0],  kControlDefaults[1],  kControlDefaults[2],  kControlDefaults[3],
-    kControlDefaults[4],  kControlDefaults[5],  kControlDefaults[6],  kControlDefaults[7],
-    kControlDefaults[8],  kControlDefaults[9],  kControlDefaults[10], kControlDefaults[11],
-    kControlDefaults[12], kControlDefaults[13], kControlDefaults[14], kControlDefaults[15],
-    kControlDefaults[16], kControlDefaults[17], kControlDefaults[18], kDefaultPitchBend};
-
 inline double Clamp01(double value) {
     return ControlClamp01(value);
 }
 
 inline bool IsOn(double normalized) {
     return ControlIsOn(normalized);
+}
+
+// Since 0.1.4 a higher Damping means more damping, a shorter sound, as in
+// Kekulé since its 0.2.0. The engine keeps the hardware's sense, where 1
+// rings longest: the two are mirror images. Every other parameter is the
+// engine's control value as it is.
+constexpr int kDampingIndex = Index(kParamDamping);
+static_assert(kDampingIndex == static_cast<int>(Control::Damping));
+
+inline double EngineValue(int index, double normalized) {
+    return index == kDampingIndex ? 1.0 - Clamp01(normalized) : Clamp01(normalized);
+}
+
+// The parameters' defaults: the engine's, Damping mirrored.
+constexpr double kDefaults[kParamCount] = {
+    kControlDefaults[0],  kControlDefaults[1],  kControlDefaults[2],  kControlDefaults[3],
+    kControlDefaults[4],  kControlDefaults[5],  kControlDefaults[6],  kControlDefaults[7],
+    kControlDefaults[8],  kControlDefaults[9],  kControlDefaults[10], kControlDefaults[11],
+    kControlDefaults[12], 1.0 - kControlDefaults[13], kControlDefaults[14], kControlDefaults[15],
+    kControlDefaults[16], kControlDefaults[17], kControlDefaults[18], kDefaultPitchBend};
+
+inline double DefaultOf(int index) {
+    return index >= 0 && index < kParamCount ? kDefaults[index] : kDefaultPitchBend;
 }
 
 // The pitch wheel as MIDI has it: 14 bits, 8192 in the middle. The two halves
@@ -110,12 +122,15 @@ inline double PitchBendNormalized(double semitones) {
     return Clamp01(std::round(raw) / kPitchBendMaxRaw);
 }
 
-// Layout of the saved state, version 1: the normalized values of the
-// parameters 100..118 as doubles, in that order.
-constexpr std::int32_t kStateVersion = 1;
-// Layout of the controller's own state: version, the editor zoom as a double,
-// the keyboard as one byte (1 for shown).
-constexpr std::int32_t kControllerStateVersion = 1;
+// Layout of the saved state: the version, then the normalized values of the
+// parameters 100..118 as doubles, in that order. Version 2 (0.1.4) has
+// Damping in today's sense; version 1 (0.1.0 to 0.1.3) in the hardware's,
+// and is mirrored when it is read.
+constexpr std::int32_t kStateVersion = 2;
+constexpr std::int32_t kOldestStateVersion = 1;
+// Controller state v2: version, zoom (double), keyboard shown (byte), keyboard
+// transposition and panel (int32 each). Version 1 remains readable.
+constexpr std::int32_t kControllerStateVersion = 2;
 
 // The message that carries a key of the screen keyboard from the controller
 // to the processor. Velocity 1..127 is a key going down, 0 its release.

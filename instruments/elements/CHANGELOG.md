@@ -1,5 +1,29 @@
 # Changes
 
+## 0.1.4 (2026-11-15)
+
+* Screen keyboard starts at C3..C5; octave buttons cover -24..+24 semitones
+  relative to the former C4..C6 range, releasing the old note before shifting.
+* Damping turns the other way: higher damps more, as in Kekulé since 0.2.0.
+  The parameter itself has the new sense (default 0.75), so knob, value,
+  automation lanes, generic host sliders and MIDI CC 23 agree; the engine
+  gets `1 − Damping`. Saved sounds of 0.1.0 to 0.1.3 (state version 1) are
+  mirrored on loading and sound as before; the sound state is now version 2.
+  Automation recorded with those versions is not converted. (Codex first
+  reversed only the window; changed after Claude's review, finding CL-R01.)
+* POLY, still disabled, no longer carries the GEN panel's callback (CL-R02).
+* ENG/MOD/GEN switch the body of the panel. MOD and GEN are explicit planning
+  placeholders. KEYS independently shows/hides the keyboard in each panel.
+* POLY is reserved and disabled pending the Kekulé results: planned cycle
+  1 -> 2 -> 4 -> 8 -> 1, without replacing the current panel.
+* Freeze is a circular vector snowflake beside the SPACE label, clear of the
+  knob ring. The existing 0.1.3 exciter colours are retained.
+* Window state v2 stores range and panel, and still reads v1; a project of
+  0.1.3 or before opens the keyboard at the new start, C3..C5.
+* Added high-note measurements and an isolated output-stage aliasing probe;
+  no DSP, limiter or anti-aliasing changes. Reviewed by Claude
+  (`docs/CLAUDE_REVIEW_0.1.4.md`); Codex's check of the Damping change open.
+
 ## 0.1.3 (2026-11-15)
 
 * The window colours the exciter knobs, in memory of Mutable Instruments:

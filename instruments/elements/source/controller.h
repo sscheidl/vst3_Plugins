@@ -21,8 +21,8 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
     // The sound's state, as the processor saved it. A damaged state changes
     // nothing. The pitch wheel returns to its centre, as in the processor.
     Steinberg::tresult PLUGIN_API setComponentState(Steinberg::IBStream* state) SMTG_OVERRIDE;
-    // The controller's own state: the window's zoom and whether the keyboard
-    // shows. Neither is a musical parameter; the host does not see them as one.
+    // The controller's own state: zoom, keyboard visibility/range and panel.
+    // These are editor settings, not automatable musical parameters.
     Steinberg::tresult PLUGIN_API setState(Steinberg::IBStream* state) SMTG_OVERRIDE;
     Steinberg::tresult PLUGIN_API getState(Steinberg::IBStream* state) SMTG_OVERRIDE;
     Steinberg::tresult PLUGIN_API setParamNormalized(Steinberg::Vst::ParamID tag,
