@@ -16,10 +16,9 @@ constexpr int kNumSteps = 16;
 // A step that holds no note.
 constexpr std::int8_t kRest = -128;
 
-// The tonic is one of the seven natural notes.
-constexpr int kNumTonics = 7;
-constexpr std::array<std::int8_t, kNumTonics> kTonicSemitones = {0, 2, 4, 5, 7, 9, 11};
-constexpr int kDefaultTonic = 5; // A
+// The tonic is a pitch class: 0 for C up to 11 for B.
+constexpr int kNumTonics = 12;
+constexpr int kDefaultTonic = 9; // A
 
 constexpr int kNumScaleModes = 7;
 constexpr int kDefaultScaleMode = 1; // minor
@@ -59,7 +58,7 @@ struct State {
     // Each step: tonic + 12 * (0 or 1) + scale entry, or kRest. The octave
     // setting is added when a step is played, not stored.
     std::array<std::int8_t, kNumSteps> steps{};
-    std::uint8_t tonic = kDefaultTonic;                 // index into kTonicSemitones
+    std::uint8_t tonic = kDefaultTonic;                 // semitones above C, 0 to 11
     std::uint8_t scale_mode = kDefaultScaleMode;        // 0 to 6
     std::uint8_t algorithm = 1;                         // 1 to 5
     std::uint8_t mutation = 0;                          // percent
@@ -95,7 +94,7 @@ class Sequencer {
     // Redraws all sixteen steps from the new mode, also if it is the old one.
     void ChooseScaleMode(int mode);
     // Transposes the stored notes by the difference; rests stay rests.
-    void SetTonic(int index);
+    void SetTonic(int semitone);
     // None of these touch the stored steps.
     void SetAlgorithm(int algorithm);
     void SetMutation(int percent);

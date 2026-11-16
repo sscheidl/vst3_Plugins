@@ -6,10 +6,25 @@
 
 namespace taureon::toy_piano_generative {
 
-// Two octaves and the top C, the same range as the firmware's 16 keys.
+// Two octaves and the top C. The geometry below is that of C4 to C6, the
+// range of the firmware's 16 keys; the window shifts it by whole octaves.
 constexpr int kKeyboardLowNote = 60;  // C4
 constexpr int kKeyboardHighNote = 84; // C6
 constexpr int kKeyboardWhiteKeys = 15;
+// The shift of the visible keys in semitones. The keyboard starts at C3 to
+// C5, where the sequence's default tonic sounds, and reaches from C1 to C7:
+// the keys at which a tonic can sound.
+constexpr int kKeyboardDefaultShift = -12;
+constexpr int kKeyboardShiftMin = -36;
+constexpr int kKeyboardShiftMax = 12;
+
+constexpr int ClampKeyboardShift(int semitones) {
+    const int octaves = semitones / 12;
+    return (octaves < kKeyboardShiftMin / 12
+                ? kKeyboardShiftMin / 12
+                : (octaves > kKeyboardShiftMax / 12 ? kKeyboardShiftMax / 12 : octaves))
+           * 12;
+}
 // The firmware sends its hardware keys with this velocity; the screen keys too.
 constexpr int kKeyboardVelocity = toy_piano::kMidiOutVelocity;
 

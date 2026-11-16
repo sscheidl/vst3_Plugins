@@ -29,14 +29,18 @@ namespace {
 // Layout in unscaled pixels.
 constexpr CCoord kWidth = kEditorWidth;
 constexpr CCoord kMargin = 20;
-constexpr CCoord kColumnWidth = (kWidth - 2 * kMargin) / 4;
-constexpr CCoord kKnobSize = 64;
-constexpr CCoord kNameTop = 58;
-constexpr CCoord kKnobTop = 82;
-constexpr CCoord kValueTop = 152;
+// Two rows of knobs: the sound above, the sequencer below.
+struct Row {
+    int columns;
+    CCoord knob_size, name_top, knob_top, value_top;
+};
+constexpr Row kRows[] = {{5, 64, 58, 82, 152}, {8, 48, 216, 234, 286}};
+constexpr CCoord kSectionTop = 189; // the line that names the sequencer row
 constexpr CCoord kKeyboardTop = kEditorTopHeight - 4;
 constexpr CCoord kKeyboardBottom = kEditorTopHeight + kKeyboardSectionHeight - 18;
 constexpr CCoord kButtonWidth = 52;
+constexpr CCoord kTransposeWidth = 88;
+constexpr CCoord kOctaveButtonWidth = 30;
 
 // After the last step of a drag, wait this long before telling the host the
 // project changed. Hosts may do real work for that message.
@@ -53,13 +57,23 @@ struct KnobSpec {
     const char* name;
     double default_value;
     bool bipolar;
+    int row, column;
 };
 
 constexpr KnobSpec kKnobs[] = {
-    {kParamMasterPitch, "MASTER PITCH", kDefaultMasterPitch, true},
-    {kParamAttack, "ATTACK", kDefaultAttack, false},
-    {kParamDecay, "DECAY", kDefaultDecay, false},
-    {kParamVolume, "VOLUME", kDefaultVolume, false},
+    {kParamMasterPitch, "MASTER PITCH", kDefaultMasterPitch, true, 0, 0},
+    {kParamTuning, "TUNING", kDefaultTuning, false, 0, 1},
+    {kParamAttack, "ATTACK", kDefaultAttack, false, 0, 2},
+    {kParamDecay, "DECAY", kDefaultDecay, false, 0, 3},
+    {kParamVolume, "VOLUME", kDefaultVolume, false, 0, 4},
+    {kParamAlgorithm, "ALGORITHM", kDefaultAlgorithm, false, 1, 0},
+    {kParamMutation, "MUTATION", kDefaultMutation, false, 1, 1},
+    {kParamNoteProbability, "NOTES", kDefaultNoteProbability, false, 1, 2},
+    {kParamScale, "SCALE", kDefaultScale, false, 1, 3},
+    {kParamTonic, "TONIC", kDefaultTonic, false, 1, 4},
+    {kParamOctave, "OCTAVE", kDefaultOctave, false, 1, 5},
+    {kParamLength, "LENGTH", kDefaultLength, false, 1, 6},
+    {kParamClockDivide, "DIVIDE", kDefaultClockDivide, false, 1, 7},
 };
 
 CTextLabel* MakeLabel(const CRect& size, const char* text, CFontRef font, CColor color,
@@ -82,6 +96,7 @@ Editor::Editor(EditController* controller, const EditorSettings& settings,
 : VSTGUIEditor(controller), callbacks_(std::move(callbacks)) {
     settings_.zoom = ClampEditorZoom(settings.zoom);
     settings_.keyboard = settings.keyboard;
+    settings_.keyboard_shift = ClampKeyboardShift(settings.keyboard_shift);
     setRect(ScaledSize());
 }
 
@@ -107,28 +122,74 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
     const auto name_font = makeOwned<CFontDesc>("Segoe UI", 11, kBoldFace);
     const auto value_font = makeOwned<CFontDesc>("Segoe UI", 14);
 
-    frame->addView(MakeLabel(CRect(kMargin, 14, kWidth / 2 + 20, 42), stringPluginName,
-                             title_font, kText, kLeftText));
+    const auto value_of = [this](ParamID id) {
+        return controller ? controller->getParamNormalized(id) : 0.0;
+    };
+
+    frame->addView(MakeLabel(CRect(kMargin, 14, kWidth / 2, 42), stringPluginName, title_font,
+                             kText, kLeftText));
     const CCoord button_left = kWidth - kMargin - kButtonWidth;
-    frame->addView(MakeLabel(CRect(kWidth / 2 + 20, 18, button_left - 12, 40),
+    const CCoord transpose_left = button_left - 8 - kTransposeWidth;
+    frame->addView(MakeLabel(CRect(kWidth / 2, 18, transpose_left - 12, 40),
                              stringCompanyName "  " FULL_VERSION_STR, name_font, kDimText,
                              kRightText));
+    // Keys and MIDI notes transpose the sequence while this is on; they play
+    // notes while it is off.
+    transpose_button_ =
+        new ToggleButton(CRect(transpose_left, 18, button_left - 8, 40), "TRANSPOSE",
+                         IsOn(value_of(kParamKeysTranspose)),
+                         [this](bool on) { EditSwitch(kParamKeysTranspose, on); });
+    frame->addView(transpose_button_);
     keyboard_button_ = new ToggleButton(CRect(button_left, 18, kWidth - kMargin, 40), "KEYS",
                                         settings_.keyboard,
                                         [this](bool on) { SetKeyboardVisible(on); });
     frame->addView(keyboard_button_);
-    keyboard_view_ = new KeyboardView(CRect(kMargin, kKeyboardTop, kWidth - kMargin,
-                                            kKeyboardBottom),
+
+    frame->addView(MakeLabel(CRect(kMargin, kSectionTop, kMargin + 90, kSectionTop + 18),
+                             "SEQUENCER", name_font, kDimText, kLeftText));
+    run_button_ = new ToggleButton(CRect(kMargin + 92, kSectionTop - 1, kMargin + 92 + kButtonWidth,
+                                         kSectionTop + 19),
+                                   "RUN", IsOn(value_of(kParamRun)),
+                                   [this](bool on) { EditSwitch(kParamRun, on); });
+    frame->addView(run_button_);
+
+    // The octave buttons at both ends of the keyboard. They are push buttons:
+    // each press moves, and the button goes out again.
+    const CCoord keys_left = kMargin + kOctaveButtonWidth + 6;
+    const CCoord keys_right = kWidth - kMargin - kOctaveButtonWidth - 6;
+    octave_down_ = new ToggleButton(CRect(kMargin, kKeyboardTop + 20, kMargin + kOctaveButtonWidth,
+                                          kKeyboardTop + 44),
+                                    "<<", false, [this](bool) {
+                                        octave_down_->SetOn(false);
+                                        ShiftKeyboard(-1);
+                                    });
+    octave_up_ = new ToggleButton(CRect(kWidth - kMargin - kOctaveButtonWidth, kKeyboardTop + 20,
+                                        kWidth - kMargin, kKeyboardTop + 44),
+                                  ">>", false, [this](bool) {
+                                      octave_up_->SetOn(false);
+                                      ShiftKeyboard(1);
+                                  });
+    octave_down_->setVisible(settings_.keyboard);
+    octave_up_->setVisible(settings_.keyboard);
+    frame->addView(octave_down_);
+    frame->addView(octave_up_);
+    keyboard_view_ = new KeyboardView(CRect(keys_left, kKeyboardTop, keys_right, kKeyboardBottom),
                                       [this](int note) {
                                           if(callbacks_.strike)
                                               callbacks_.strike(note);
                                       });
+    keyboard_view_->SetShift(settings_.keyboard_shift);
     keyboard_view_->setVisible(settings_.keyboard);
     frame->addView(keyboard_view_);
+    UpdateMarkedKey();
 
     for(std::size_t i = 0; i < knobs_.size(); ++i) {
         const KnobSpec& spec = kKnobs[i];
-        const CCoord left = kMargin + static_cast<CCoord>(i) * kColumnWidth;
+        const Row& row = kRows[spec.row];
+        const CCoord kColumnWidth = (kWidth - 2 * kMargin) / row.columns;
+        const CCoord kKnobSize = row.knob_size;
+        const CCoord kNameTop = row.name_top, kKnobTop = row.knob_top, kValueTop = row.value_top;
+        const CCoord left = kMargin + static_cast<CCoord>(spec.column) * kColumnWidth;
         const CCoord knob_left = left + (kColumnWidth - kKnobSize) / 2;
 
         frame->addView(MakeLabel(CRect(left, kNameTop, left + kColumnWidth, kNameTop + 16),
@@ -144,11 +205,13 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         knob->setCoronaColor(kAccent);
         knob->setColorShadowHandle(kTrack);
         knob->setColorHandle(kText);
-        knob->setHandleLineWidth(4);
-        knob->setCoronaInset(5);
-        knob->setInsetValue(16);
+        knob->setHandleLineWidth(spec.row == 0 ? 4 : 3);
+        knob->setCoronaInset(spec.row == 0 ? 5 : 4);
+        knob->setInsetValue(spec.row == 0 ? 16 : 12);
         knob->setDefaultValue(static_cast<float>(spec.default_value));
-        knob->setWheelInc(spec.id == kParamMasterPitch ? 1.0f / kMasterPitchSteps : 0.01f);
+        // The wheel moves a stepped knob by one step.
+        const int steps = ParamSteps(spec.id);
+        knob->setWheelInc(steps > 0 ? 1.0f / static_cast<float>(steps) : 0.01f);
         frame->addView(knob);
 
         auto* value = MakeLabel(CRect(left, kValueTop, left + kColumnWidth, kValueTop + 20), "",
@@ -166,7 +229,8 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         frame = nullptr;
         knobs_ = {};
         keyboard_view_ = nullptr;
-        keyboard_button_ = nullptr;
+        keyboard_button_ = transpose_button_ = run_button_ = nullptr;
+        octave_down_ = octave_up_ = nullptr;
         return false;
     }
     // `rect` is the size the host gave the window. Fill it, then ask for the
@@ -197,8 +261,13 @@ double Editor::DisplayZoom(int32 width, int32 height) const {
 void Editor::LayOut(int32 width, int32 height) {
     if(!frame)
         return;
-    if(keyboard_view_)
+    if(keyboard_view_) {
         keyboard_view_->setVisible(settings_.keyboard);
+        keyboard_view_->SetShift(settings_.keyboard_shift);
+    }
+    for(ToggleButton* button : {octave_down_, octave_up_})
+        if(button)
+            button->setVisible(settings_.keyboard);
     if(keyboard_button_)
         keyboard_button_->SetOn(settings_.keyboard);
     // Zooming invalidates and repaints the whole window, so only when needed.
@@ -237,6 +306,38 @@ void Editor::SetKeyboardVisible(bool show) {
         return;
     }
     UserChanged();
+}
+
+void Editor::ShiftKeyboard(int octaves) {
+    const int shift = ClampKeyboardShift(settings_.keyboard_shift + 12 * octaves);
+    if(shift != settings_.keyboard_shift) {
+        settings_.keyboard_shift = shift;
+        if(keyboard_view_)
+            keyboard_view_->SetShift(shift);
+        UserChanged();
+    }
+    // The sequence moves along, as far as its own octave range goes.
+    if(callbacks_.octave)
+        callbacks_.octave(octaves);
+}
+
+void Editor::EditSwitch(ParamID id, bool on) {
+    if(!controller)
+        return;
+    controller->beginEdit(id);
+    controller->setParamNormalized(id, on ? 1.0 : 0.0);
+    controller->performEdit(id, on ? 1.0 : 0.0);
+    controller->endEdit(id);
+}
+
+void Editor::UpdateMarkedKey() {
+    if(!keyboard_view_ || !controller)
+        return;
+    const int key = KeyForTransposition(
+        StepIndex(controller->getParamNormalized(kParamTonic), kTonicSteps),
+        StepIndex(controller->getParamNormalized(kParamOctave), kOctaveSteps));
+    keyboard_view_->SetMarked(IsOn(controller->getParamNormalized(kParamKeysTranspose)) ? key
+                                                                                         : -1);
 }
 
 void Editor::UserChanged() {
@@ -296,10 +397,13 @@ tresult PLUGIN_API Editor::onSize(ViewRect* newSize) {
 
 void Editor::ApplySettings(const EditorSettings& settings) {
     const double zoom = ClampEditorZoom(settings.zoom);
-    if(zoom == settings_.zoom && settings.keyboard == settings_.keyboard)
+    const int shift = ClampKeyboardShift(settings.keyboard_shift);
+    if(zoom == settings_.zoom && settings.keyboard == settings_.keyboard
+       && shift == settings_.keyboard_shift)
         return;
     settings_.zoom = zoom;
     settings_.keyboard = settings.keyboard;
+    settings_.keyboard_shift = shift;
     // A loaded project decides. If the host keeps the window size, the
     // content fits into it as it is.
     if(frame && !Resize())
@@ -321,7 +425,8 @@ void PLUGIN_API Editor::close() {
     }
     knobs_ = {};
     keyboard_view_ = nullptr;
-    keyboard_button_ = nullptr;
+    keyboard_button_ = transpose_button_ = run_button_ = nullptr;
+    octave_down_ = octave_up_ = nullptr;
     if(frame) {
         frame->removeAll(true);
         if(frame->getNbReference() == 1)
@@ -336,16 +441,32 @@ void Editor::valueChanged(CControl* control) {
     if(!controller || !control)
         return;
     const auto id = static_cast<ParamID>(control->getTag());
-    ParamValue normalized = control->getValueNormalized();
-    if(id == kParamMasterPitch) // whole semitones only
-        normalized = MasterPitchNormalized(MasterPitchSemitones(normalized));
+    // Stepped parameters take whole steps only.
+    const ParamValue normalized = SnapToStep(id, control->getValueNormalized());
     // The controller reports back through ParameterChanged(), which also puts
-    // the knob on the semitone it snapped to.
+    // the knob on the step it snapped to.
     controller->setParamNormalized(id, normalized);
     controller->performEdit(id, normalized);
 }
 
+// A drag of a knob is one edit for the host: it starts and ends here.
+void Editor::controlBeginEdit(CControl* control) {
+    if(controller && control)
+        controller->beginEdit(static_cast<ParamID>(control->getTag()));
+}
+
+void Editor::controlEndEdit(CControl* control) {
+    if(controller && control)
+        controller->endEdit(static_cast<ParamID>(control->getTag()));
+}
+
 void Editor::ParameterChanged(ParamID id, ParamValue normalized) {
+    if(id == kParamRun && run_button_)
+        run_button_->SetOn(IsOn(normalized));
+    if(id == kParamKeysTranspose && transpose_button_)
+        transpose_button_->SetOn(IsOn(normalized));
+    if(id == kParamKeysTranspose || id == kParamTonic || id == kParamOctave)
+        UpdateMarkedKey();
     for(Knob& knob : knobs_) {
         if(knob.id != id || !knob.knob)
             continue;

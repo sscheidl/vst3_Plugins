@@ -20,6 +20,8 @@ constexpr CColor kWhiteKey(232, 232, 236);
 constexpr CColor kBlackKey(44, 46, 54);
 constexpr CColor kGap(28, 30, 36);
 constexpr CColor kPressed(236, 172, 64);
+constexpr CColor kMarkedWhite(240, 208, 150);
+constexpr CColor kMarkedBlack(150, 112, 48);
 constexpr CColor kLabel(120, 124, 136);
 constexpr CColor kOffFrame(64, 68, 80);
 constexpr CColor kOffText(150, 156, 168);
@@ -42,6 +44,20 @@ void FillRoundRect(CDrawContext* context, const CRect& rect, CCoord radius, CCol
 KeyboardView::KeyboardView(const CRect& size, std::function<void(int)> strike)
 : CView(size), strike_(std::move(strike)), label_font_(makeOwned<CFontDesc>("Segoe UI", 9)) {}
 
+void KeyboardView::SetShift(int semitones) {
+    if(semitones == shift_)
+        return;
+    shift_ = semitones;
+    invalid();
+}
+
+void KeyboardView::SetMarked(int note) {
+    if(note == marked_)
+        return;
+    marked_ = note;
+    invalid();
+}
+
 void KeyboardView::draw(CDrawContext* context) {
     const CRect area = getViewSize();
     const double width = area.getWidth();
@@ -53,11 +69,13 @@ void KeyboardView::draw(CDrawContext* context) {
             continue;
         CRect key = ToCRect(KeyRectFor(note, width, height), area);
         key.inset(0.75, 0.0); // the gap between white keys
-        FillRoundRect(context, key, 3.0, note == pressed_ ? kPressed : kWhiteKey);
+        FillRoundRect(context, key, 3.0,
+                      note == pressed_ ? kPressed
+                                       : (note + shift_ == marked_ ? kMarkedWhite : kWhiteKey));
         if(note % 12 == 0) { // name the Cs
             context->setFont(label_font_);
             context->setFontColor(kLabel);
-            const std::string name = "C" + std::to_string(note / 12 - 1);
+            const std::string name = "C" + std::to_string((note + shift_) / 12 - 1);
             CRect label(key.left, key.bottom - 14.0, key.right, key.bottom - 2.0);
             context->drawString(name.c_str(), label, kCenterText);
         }
@@ -70,7 +88,9 @@ void KeyboardView::draw(CDrawContext* context) {
         FillRoundRect(context, key, 2.5, kGap);
         key.inset(1.0, 0.0);
         key.bottom -= 1.0;
-        FillRoundRect(context, key, 2.0, note == pressed_ ? kPressed : kBlackKey);
+        FillRoundRect(context, key, 2.0,
+                      note == pressed_ ? kPressed
+                                       : (note + shift_ == marked_ ? kMarkedBlack : kBlackKey));
     }
     setDirty(false);
 }
@@ -86,7 +106,7 @@ void KeyboardView::Press(int note) {
     pressed_ = note;
     invalid();
     if(note >= 0 && strike_)
-        strike_(note);
+        strike_(note + shift_);
 }
 
 void KeyboardView::Release() {

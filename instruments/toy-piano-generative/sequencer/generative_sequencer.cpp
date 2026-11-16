@@ -72,7 +72,7 @@ bool IsValid(const State& state) {
 Sequencer::Sequencer(std::uint64_t seed) {
     state_.random = seed;
     Next(); // one step away from the seed itself
-    const std::int8_t tonic = kTonicSemitones[state_.tonic];
+    const auto tonic = static_cast<std::int8_t>(state_.tonic);
     for(std::int8_t& step : state_.steps)
         step = Chance(state_.note_probability) ? tonic : kRest;
 }
@@ -115,7 +115,7 @@ std::int8_t Sequencer::DrawNote() {
     const int entry = Chance(kTonicChance)
                           ? 0
                           : scale.entries[Below(static_cast<std::uint32_t>(scale.size))];
-    return static_cast<std::int8_t>(kTonicSemitones[state_.tonic] + 12 * octave + entry);
+    return static_cast<std::int8_t>(state_.tonic + 12 * octave + entry);
 }
 
 std::int8_t Sequencer::Draw() {
@@ -157,7 +157,7 @@ void Sequencer::WriteRun() {
     const std::uint32_t slot = Below(kNumSteps);
     const int start = static_cast<int>(Below(static_cast<std::uint32_t>(scale.size)));
     const int stride = 1 + static_cast<int>(Below(2));
-    const int base = kTonicSemitones[state_.tonic] + 12 * Spread();
+    const int base = state_.tonic + 12 * Spread();
     for(int i = 0; i < 3; ++i) {
         const int index = start + i * stride;
         const int note = base + scale.entries[static_cast<std::size_t>(index % scale.size)]
@@ -201,7 +201,7 @@ StepResult Sequencer::Fetch() const {
         // Reads the scale list itself; the stored steps are kept but not heard.
         const Scale& scale = kScales[state_.scale_mode];
         const int span = std::min<int>(scale.size, state_.length);
-        return {true, kTonicSemitones[state_.tonic]
+        return {true, state_.tonic
                           + scale.entries[static_cast<std::size_t>(state_.position % span)]
                           + raise};
     }
@@ -229,12 +229,12 @@ void Sequencer::ChooseScaleMode(int mode) {
     // A pattern without a single note gets one, unless notes are switched off.
     if(!any && state_.note_probability > 0)
         state_.steps[0] =
-            static_cast<std::int8_t>(kTonicSemitones[state_.tonic] + 12 * (Spread() + 1));
+            static_cast<std::int8_t>(state_.tonic + 12 * (Spread() + 1));
 }
 
-void Sequencer::SetTonic(int index) {
-    const auto tonic = static_cast<std::uint8_t>(Clamp(index, 0, kNumTonics - 1));
-    const int shift = kTonicSemitones[tonic] - kTonicSemitones[state_.tonic];
+void Sequencer::SetTonic(int semitone) {
+    const auto tonic = static_cast<std::uint8_t>(Clamp(semitone, 0, kNumTonics - 1));
+    const int shift = tonic - state_.tonic;
     state_.tonic = tonic;
     for(std::int8_t& step : state_.steps)
         if(step != kRest)

@@ -45,8 +45,21 @@ float HarmonicWeight(float increment) {
            / (toy_piano::kMaxHarmonicIncrement - kHarmonicFadeStart);
 }
 
+double TuningRatio(int note, double amount) {
+    if(!(amount > 0.0))
+        return 1.0;
+    const double exact = 440.0 * std::pow(2.0, (note - 69) / 12.0);
+    // The largest whole number below the exact frequency. A frequency that
+    // is whole already, as every A from 55 Hz up, loses a full hertz.
+    const double whole = std::ceil(exact) - 1.0;
+    if(!(whole > 0.0))
+        return 1.0;
+    return 1.0 - (amount < 1.0 ? amount : 1.0) * (exact - whole) / exact;
+}
+
 void Engine::Init(float sample_rate) {
     piano_.Init(sample_rate);
+    tuning_.fill(1.0f);
     glide_coefficient_ =
         1.0f - std::exp(-static_cast<float>(kGlideInterval) / (kGlideTimeConstant * sample_rate));
     volume_coefficient_ = 1.0f - std::exp(-1.0f / (kVolumeTimeConstant * sample_rate));
@@ -64,8 +77,18 @@ void Engine::SetVolume(float gain) {
     volume_target_ = gain;
 }
 
+void Engine::SetTuning(double amount) {
+    tuning_amount_ = amount;
+}
+
 void Engine::NoteOn(std::uint8_t note, std::uint8_t velocity, float attack, float decay) {
+    if(note > 127 || velocity == 0 || velocity > 127)
+        return; // the engine ignores these as well
     piano_.NoteOn(note, velocity, attack, decay);
+    // The voice that took the note: a sounding note has exactly one.
+    for(std::size_t i = 0; i < toy_piano::kNumMidiVoices; ++i)
+        if(piano_.MidiVoiceNote(i) == note)
+            tuning_[i] = static_cast<float>(TuningRatio(note, tuning_amount_));
     // NoteOn sets the struck voice to the note's own pitch; transpose it again.
     ApplyPitch();
 }
@@ -93,7 +116,7 @@ void Engine::ApplyPitch() {
     for(std::size_t i = 0; i < toy_piano::kNumMidiVoices; ++i) {
         const std::size_t voice = toy_piano::kNumKeys + i;
         const float base = piano_.BaseIncrement(voice);
-        float ratio = ratio_;
+        float ratio = ratio_ * tuning_[i]; // the factor is exactly 1 untuned
         float level = 1.0f;
         if(base * ratio >= kNyquistIncrement) {
             ratio = kHeldIncrement / base;

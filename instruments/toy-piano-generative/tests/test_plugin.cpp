@@ -1,12 +1,15 @@
-// Checks the plug-in against the unchanged firmware engine. The plug-in's
-// processor is driven in-process through the VST3 SDK's hosting classes, the
-// way a host drives it.
+// Checks the plug-in: what it took over from Toy Piano Classic against the
+// unchanged firmware engine, and the sequencer inside it against the notes
+// its pattern must give. The plug-in's processor is driven in-process through
+// the VST3 SDK's hosting classes, the way a host drives it.
 #include "controller.h"
 #include "editor.h"
 #include "engine.h"
 #include "keyboard_layout.h"
 #include "parameters.h"
 #include "processor.h"
+#include "state_io.h"
+#include "step_clock.h"
 #include "toy_piano.h"
 #include "value_text.h"
 
@@ -22,12 +25,14 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -35,6 +40,7 @@
 using namespace Steinberg;
 using namespace Steinberg::Vst;
 using namespace taureon::toy_piano_generative;
+namespace generative = taureon::generative;
 
 // In a plug-in the SDK's DLL entry point defines this handle and calls
 // InitModule(). The test links the plug-in's classes into an executable, so it
@@ -103,6 +109,7 @@ struct PluginRun {
     double decay = kDefaultDecay;
     double volume = kDefaultVolume;
     double pitch_bend = kDefaultPitchBend;
+    double tuning = kDefaultTuning;
     bool double_precision = false;
 };
 
@@ -121,7 +128,7 @@ std::vector<float> RenderPlugin(const PluginRun& run, const std::vector<Note>& s
     CHECK(data.prepare(*processor.get(), run.block_size, sample_size));
     CHECK(data.numOutputs == 1 && data.outputs[0].numChannels == 2);
     EventList events(64);
-    ParameterChanges changes(5);
+    ParameterChanges changes(8);
     data.processMode = kRealtime;
     data.inputEvents = &events;
     data.inputParameterChanges = &changes;
@@ -138,7 +145,10 @@ std::vector<float> RenderPlugin(const PluginRun& run, const std::vector<Note>& s
                 {kParamAttack, run.attack},
                 {kParamDecay, run.decay},
                 {kParamVolume, run.volume},
-                {kParamPitchBend, run.pitch_bend}};
+                {kParamPitchBend, run.pitch_bend},
+                {kParamTuning, run.tuning},
+                // MIDI notes play here; by default they would transpose.
+                {kParamKeysTranspose, 0.0}};
             for(const auto& [id, value] : values) {
                 int32 index = 0;
                 IParamValueQueue* queue = changes.addParameterData(id, index);
@@ -362,7 +372,7 @@ void TestState() {
     }
     MemoryStream stream;
     CHECK(saved->getState(&stream) == kResultOk);
-    CHECK(stream.getSize() == 4 + 4 * 8); // the pitch wheel is not part of the state
+    CHECK(stream.getSize() == kStateSize); // the pitch wheel is not part of the state
 
     IPtr<Processor> loaded = owned(new Processor());
     CHECK(loaded->initialize(nullptr) == kResultOk);
@@ -462,7 +472,7 @@ void TestPitchBend() {
 void TestController() {
     IPtr<Controller> controller = owned(new Controller());
     CHECK(controller->initialize(nullptr) == kResultOk);
-    CHECK(controller->getParameterCount() == 5);
+    CHECK(controller->getParameterCount() == 16);
 
     const auto text = [&](ParamID id, double normalized) {
         String128 string{};
@@ -539,16 +549,18 @@ void TestController() {
     CHECK(controller->getParamNormalized(kParamPitchBend) == kDefaultPitchBend);
     processor->terminate();
 
-    // The controller's own state: the window's zoom and whether the keyboard shows.
-    const auto window_state = [](int32 version, double zoom, int keyboard) {
+    // The controller's own state: the window's zoom, whether the keyboard
+    // shows, and which octaves it shows. `bytes` cuts the state short.
+    const auto window_state = [](int32 version, double zoom, int keyboard, int shift,
+                                 int bytes = 14) {
         auto stream = owned(new MemoryStream());
+        char data[14];
+        std::memcpy(data, &version, 4);
+        std::memcpy(data + 4, &zoom, 8);
+        data[12] = static_cast<char>(keyboard);
+        data[13] = static_cast<char>(shift);
         int32 written = 0;
-        stream->write(&version, sizeof(version), &written);
-        stream->write(&zoom, sizeof(zoom), &written);
-        if(keyboard >= 0) {
-            const int8 flag = static_cast<int8>(keyboard);
-            stream->write(const_cast<int8*>(&flag), sizeof(flag), &written);
-        }
+        stream->write(data, bytes, &written);
         int64 start = 0;
         stream->seek(0, IBStream::kIBSeekSet, &start);
         return stream;
@@ -556,39 +568,38 @@ void TestController() {
     const auto saved = [](Controller& source) {
         MemoryStream state;
         CHECK(source.getState(&state) == kResultOk);
-        CHECK(state.getSize() == 4 + 8 + 1);
+        CHECK(state.getSize() == 4 + 8 + 1 + 1);
         int32 version = 0;
         std::memcpy(&version, state.getData(), sizeof(version));
         CHECK(version == kControllerStateVersion);
         EditorSettings settings;
         std::memcpy(&settings.zoom, state.getData() + 4, sizeof(settings.zoom));
         settings.keyboard = state.getData()[12] != 0;
+        settings.keyboard_shift = static_cast<signed char>(state.getData()[13]);
         return settings;
     };
-    const auto is = [&](double zoom, bool keyboard) {
+    const auto is = [&](double zoom, bool keyboard, int shift = kKeyboardDefaultShift) {
         const EditorSettings settings = saved(*controller);
-        return settings.zoom == zoom && settings.keyboard == keyboard;
+        return settings.zoom == zoom && settings.keyboard == keyboard
+               && settings.keyboard_shift == shift;
     };
-    CHECK(is(1.0, true)); // keyboard shown by default
-    CHECK(controller->setState(window_state(2, 1.5, 0)) == kResultOk);
-    CHECK(is(1.5, false));
-    // Version 1, as saved by plug-in 0.2.0: no keyboard flag, the keyboard shows.
-    CHECK(controller->setState(window_state(1, 1.25, -1)) == kResultOk);
-    CHECK(is(1.25, true));
-    CHECK(controller->setState(window_state(2, 10.0, 0)) == kResultOk);
-    CHECK(is(kMaxEditorZoom, false)); // out of range: clamped
-    CHECK(controller->setState(window_state(2, 0.01, 1)) == kResultOk);
-    CHECK(is(kMinEditorZoom, true));
-    CHECK(controller->setState(window_state(99, 1.5, 0)) != kResultOk);
-    CHECK(controller->setState(window_state(0, 1.5, 0)) != kResultOk);
-    CHECK(controller->setState(window_state(2, 1.5, -1)) != kResultOk); // flag missing
+    CHECK(is(1.0, true)); // keyboard shown by default, from C3
+    CHECK(controller->setState(window_state(1, 1.5, 0, 12)) == kResultOk);
+    CHECK(is(1.5, false, 12));
+    CHECK(controller->setState(window_state(1, 10.0, 0, 100)) == kResultOk);
+    CHECK(is(kMaxEditorZoom, false, kKeyboardShiftMax)); // out of range: clamped
+    CHECK(controller->setState(window_state(1, 0.01, 1, -100)) == kResultOk);
+    CHECK(is(kMinEditorZoom, true, kKeyboardShiftMin));
+    CHECK(controller->setState(window_state(99, 1.5, 0, 0)) != kResultOk);
+    CHECK(controller->setState(window_state(0, 1.5, 0, 0)) != kResultOk);
+    CHECK(controller->setState(window_state(1, 1.5, 0, 0, 13)) != kResultOk); // cut short
     MemoryStream empty;
     CHECK(controller->setState(&empty) != kResultOk);
-    CHECK(is(kMinEditorZoom, true)); // a rejected state changes nothing
+    CHECK(is(kMinEditorZoom, true, kKeyboardShiftMin)); // a rejected state changes nothing
     // Loading the sound's state leaves the window settings alone.
     stream.seek(0, IBStream::kIBSeekSet, &position);
     CHECK(controller->setComponentState(&stream) == kResultOk);
-    CHECK(is(kMinEditorZoom, true));
+    CHECK(is(kMinEditorZoom, true, kKeyboardShiftMin));
 
     controller->terminate();
     std::printf("controller: value texts, MIDI map (pitch wheel, CC 16, 73, 75), state, "
@@ -613,28 +624,29 @@ void TestEditorResize() {
     };
     const EditorSize base = EditorSizeFor(1.0, false);
     const EditorSize with_keys = EditorSizeFor(1.0, true);
-    CHECK(same(base, {460, 190}));
-    CHECK(same(with_keys, {460, 272}));
+    CHECK(same(base, {640, 316}));
+    CHECK(same(with_keys, {640, 398}));
     {
         DragConstraint drag;
         // Right edge dragged: the edge stays under the mouse, the height follows.
-        CHECK(same(request(drag, {600, 190}, base, 1.0, false), {600, 248}));
-        CHECK(same(request(drag, {600, 272}, with_keys, 1.0, true), {600, 355}));
+        CHECK(same(request(drag, {800, 316}, base, 1.0, false), {800, 395}));
+        CHECK(same(request(drag, {800, 398}, with_keys, 1.0, true), {800, 498}));
         // Bottom edge: the width follows.
-        CHECK(same(request(drag, {460, 300}, base, 1.0, false), {726, 300}));
+        CHECK(same(request(drag, {640, 400}, base, 1.0, false), {810, 400}));
     }
     {
         DragConstraint drag;
         // Corner: the allowed size nearest to the mouse.
-        CHECK(same(request(drag, {700, 200}, base, 1.0, false), {669, 276}));
+        CHECK(same(request(drag, {900, 330}, base, 1.0, false), {855, 422}));
     }
     // Limits: 50 % and 200 %, also on a scaled display.
     const EditorSize scaled = EditorSizeFor(1.2, false);
+    CHECK(same(scaled, {768, 379}));
     for(const auto& [asked, current, scale, expected] :
-        {std::tuple{EditorSize{10, 10}, base, 1.0, EditorSize{230, 95}},
-         std::tuple{EditorSize{5000, 190}, base, 1.0, EditorSize{920, 380}},
-         std::tuple{EditorSize{10, 10}, scaled, 1.2, EditorSize{276, 114}},
-         std::tuple{EditorSize{5000, 228}, scaled, 1.2, EditorSize{1104, 456}}}) {
+        {std::tuple{EditorSize{10, 10}, base, 1.0, EditorSize{320, 158}},
+         std::tuple{EditorSize{5000, 316}, base, 1.0, EditorSize{1280, 632}},
+         std::tuple{EditorSize{10, 10}, scaled, 1.2, EditorSize{384, 190}},
+         std::tuple{EditorSize{5000, 379}, scaled, 1.2, EditorSize{1536, 758}}}) {
         DragConstraint drag;
         CHECK(same(request(drag, asked, current, scale, false), expected));
     }
@@ -646,7 +658,7 @@ void TestEditorResize() {
             CHECK(same(request(drag, size, size, total > 2.0 ? 1.2 : 1.0, keyboard), size));
         }
     // Every granted size has the layout's aspect ratio within a pixel. (Both
-    // sides are rounded, so the height can be off by up to 0.5 + 0.5 * 272 / 460.)
+    // sides are rounded, so the height can be off by up to 0.5 + 0.5 * 398 / 640.)
     for(const bool keyboard : {false, true})
         for(const bool corner : {false, true})
             for(int width = 200; width <= 1000; width += 7)
@@ -833,7 +845,9 @@ void TestTypedValues() {
         return !typed(id, text, normalized) && normalized == 0.123;
     };
     for(const ParamID id :
-        {kParamMasterPitch, kParamAttack, kParamDecay, kParamVolume, kParamPitchBend})
+        {kParamMasterPitch, kParamAttack, kParamDecay, kParamVolume, kParamPitchBend,
+         kParamAlgorithm, kParamMutation, kParamNoteProbability, kParamOctave, kParamLength,
+         kParamTuning})
         for(const char* text : {"", "foo", "12junk", "nan", "+inf", "+-5", "+-5 dB", "++5"})
             CHECK(refused(id, text)); // "+-5": Codex re-check, R03-N1
     ParamValue normalized = 0.0;
@@ -1070,50 +1084,71 @@ void TestEditorInWindow() {
     Editor* editor = host.editor;
     CHECK(controller->OpenEditorCount() == 1);
     CHECK(editor->KeyboardVisible());
-    CHECK(same(view_size(view), {460, 272}) && same(frame_size(editor), {460, 272}));
+    CHECK(same(view_size(view), {640, 398}) && same(frame_size(editor), {640, 398}));
 
     // KEYS off, host agrees: the window changes only once the host has agreed.
     // (The SDK's attached() has already sent one request of its own.)
     int requests = host.requests;
     editor->SetKeyboardVisible(false);
     CHECK(host.requests == requests + 1);
-    CHECK(host.size_at_request.getHeight() == 272 && host.frame_at_request.height == 272);
+    CHECK(host.size_at_request.getHeight() == 398 && host.frame_at_request.height == 398);
     CHECK(!editor->KeyboardVisible());
-    CHECK(same(view_size(view), {460, 190}) && same(frame_size(editor), {460, 190}));
+    CHECK(same(view_size(view), {640, 316}) && same(frame_size(editor), {640, 316}));
 
     // KEYS on, host refuses: nothing changes, nothing is cut off.
     host.accept = false;
     requests = host.requests;
     editor->SetKeyboardVisible(true);
-    CHECK(host.requests == requests + 1 && host.frame_at_request.height == 190);
+    CHECK(host.requests == requests + 1 && host.frame_at_request.height == 316);
     CHECK(!editor->KeyboardVisible());
-    CHECK(same(view_size(view), {460, 190}) && same(frame_size(editor), {460, 190}));
+    CHECK(same(view_size(view), {640, 316}) && same(frame_size(editor), {640, 316}));
 
-    // The same at the smallest zoom (the case in R04).
+    // The same at the smallest zoom.
     host.accept = true;
     editor->ApplySettings({kMinEditorZoom, false});
-    CHECK(same(view_size(view), {230, 95}) && same(frame_size(editor), {230, 95}));
+    CHECK(same(view_size(view), {320, 158}) && same(frame_size(editor), {320, 158}));
     host.accept = false;
     editor->SetKeyboardVisible(true);
-    CHECK(!editor->KeyboardVisible() && same(frame_size(editor), {230, 95}));
+    CHECK(!editor->KeyboardVisible() && same(frame_size(editor), {320, 158}));
 
     // A loaded project brings the keyboard, the host keeps the window: the
     // content shrinks below 50 % to fit; the saved zoom stays as it was.
     editor->ApplySettings({kMinEditorZoom, true});
-    CHECK(editor->KeyboardVisible() && same(frame_size(editor), {230, 95}));
+    CHECK(editor->KeyboardVisible() && same(frame_size(editor), {320, 158}));
     const double display = editor->getFrame()->getTransform().m11;
-    CHECK(EditorBaseHeight(true) * display <= 95.0 + 1e-9 && kEditorWidth * display <= 230.0 + 1e-9);
+    CHECK(EditorBaseHeight(true) * display <= 158.0 + 1e-9
+          && kEditorWidth * display <= 320.0 + 1e-9);
     CHECK(editor->Settings().zoom == kMinEditorZoom);
 
     // Display scale and a user drag, host agreeing.
     host.accept = true;
     editor->ApplySettings({1.0, true});
-    CHECK(same(view_size(view), {460, 272}));
+    CHECK(same(view_size(view), {640, 398}));
     CHECK(editor->setContentScaleFactor(1.5f) == kResultOk);
-    CHECK(same(view_size(view), {690, 408}) && same(frame_size(editor), {690, 408}));
-    ViewRect dragged(0, 0, 920, 544);
+    CHECK(same(view_size(view), {960, 597}) && same(frame_size(editor), {960, 597}));
+    ViewRect dragged(0, 0, 1280, 796);
     CHECK(view->onSize(&dragged) == kResultOk);
-    CHECK(std::fabs(editor->Settings().zoom - 920.0 / 690.0) < 1e-9);
+    CHECK(std::fabs(editor->Settings().zoom - 1280.0 / 960.0) < 1e-9);
+
+    // The octave buttons: the visible keys move by an octave, as far as they
+    // go, and the sequence moves along, as far as its own range goes.
+    const auto octave = [&] {
+        return StepIndex(controller->getParamNormalized(kParamOctave), kOctaveSteps);
+    };
+    CHECK(editor->Settings().keyboard_shift == kKeyboardDefaultShift && octave() == 2);
+    editor->ShiftKeyboard(1);
+    CHECK(editor->Settings().keyboard_shift == 0 && octave() == 3);
+    editor->ShiftKeyboard(1);
+    editor->ShiftKeyboard(1);
+    CHECK(editor->Settings().keyboard_shift == kKeyboardShiftMax && octave() == 5);
+    editor->ShiftKeyboard(1);
+    CHECK(editor->Settings().keyboard_shift == kKeyboardShiftMax && octave() == 5);
+    for(int i = 0; i < 7; ++i)
+        editor->ShiftKeyboard(-1);
+    CHECK(editor->Settings().keyboard_shift == kKeyboardShiftMin && octave() == 0);
+    editor->ShiftKeyboard(1);
+    editor->ShiftKeyboard(1);
+    CHECK(editor->Settings().keyboard_shift == kKeyboardDefaultShift && octave() == 2);
 
     // Closed properly, then opened again with the settings it had.
     CHECK(view->removed() == kResultOk);
@@ -1121,7 +1156,7 @@ void TestEditorInWindow() {
     view = nullptr;
     view = open_view();
     CHECK(controller->OpenEditorCount() == 1);
-    CHECK(same(view_size(view), EditorSizeFor(920.0 / 690.0, true)));
+    CHECK(same(view_size(view), EditorSizeFor(1280.0 / 960.0, true)));
 
     // A host that drops the window without removed() (R01): the controller
     // forgets it, and the next parameter change does not reach it.
@@ -1134,6 +1169,881 @@ void TestEditorInWindow() {
     DeinitModule();
     std::printf("editor in a window: asks before resizing, refusals change nothing, "
                 "dropped windows forgotten\n");
+}
+
+// ---------------------------------------------------------------------------
+// The sequencer inside the plug-in
+// ---------------------------------------------------------------------------
+
+// A saved state as a stream, ready to load.
+IPtr<MemoryStream> StateStream(const SavedState& state) {
+    auto stream = owned(new MemoryStream());
+    IBStreamer writer(stream, kLittleEndian);
+    CHECK(WriteState(writer, state));
+    CHECK(stream->getSize() == kStateSize);
+    int64 start = 0;
+    stream->seek(0, IBStream::kIBSeekSet, &start);
+    return stream;
+}
+
+SavedState StateOf(Processor& processor) {
+    MemoryStream stream;
+    CHECK(processor.getState(&stream) == kResultOk);
+    CHECK(stream.getSize() == kStateSize);
+    int64 start = 0;
+    stream.seek(0, IBStream::kIBSeekSet, &start);
+    IBStreamer reader(&stream, kLittleEndian);
+    SavedState state;
+    CHECK(ReadState(reader, state));
+    return state;
+}
+
+// What of a sequencer is saved: its pattern, its settings, its generator.
+bool SameSequencer(const generative::State& a, const generative::State& b) {
+    return a.steps == b.steps && a.random == b.random && a.tonic == b.tonic
+           && a.scale_mode == b.scale_mode && a.algorithm == b.algorithm
+           && a.mutation == b.mutation && a.note_probability == b.note_probability
+           && a.octave == b.octave && a.length == b.length && a.clock_divide == b.clock_divide;
+}
+
+// A fixed pattern in A minor with notes of several pitches and rests between
+// them, so that a shift by one step or one semitone shows. MIDI notes play.
+SavedState TestPattern() {
+    SavedState state;
+    state.keys_transpose = false;
+    generative::State& sequencer = state.sequencer;
+    sequencer.steps.fill(generative::kRest);
+    const int notes[][2] = {{0, 9},   {1, 12},  {3, 21},  {4, 9},  {6, 16},
+                            {7, 19},  {10, 14}, {11, 31}, {13, 9}, {15, 17}};
+    for(const auto& note : notes)
+        sequencer.steps[static_cast<std::size_t>(note[0])] = static_cast<std::int8_t>(note[1]);
+    sequencer.random = 0x1234567890ABCDEFULL;
+    return state;
+}
+
+// The notes a pattern gives for the sixteenths `first_tick` to `last_tick - 1`
+// after a start, one every `spacing` samples from `first_sample` on. For the
+// plain case: algorithm 1 without mutation, every sixteenth a step.
+std::vector<Note> PatternScore(const generative::State& sequencer, int first_tick, int last_tick,
+                               int first_sample, int spacing) {
+    std::vector<Note> score;
+    for(int tick = first_tick; tick < last_tick; ++tick) {
+        const std::int8_t step =
+            sequencer.steps[static_cast<std::size_t>(tick % sequencer.length)];
+        if(step != generative::kRest)
+            score.push_back({first_sample + (tick - first_tick) * spacing,
+                             SoundingNote(step + 12 * sequencer.octave), kSequencerVelocity});
+    }
+    return score;
+}
+
+void Append(std::vector<Note>& score, const std::vector<Note>& more) {
+    score.insert(score.end(), more.begin(), more.end());
+}
+
+// A host in small: one processor, a transport and a count of samples.
+class Session {
+  public:
+    struct Report {
+        ParamID id;
+        int sample; // counted from the start of the Render() that saw it
+        double value;
+    };
+
+    explicit Session(double sample_rate = 48000.0, int block = 64, bool double_precision = false)
+    : rate_(sample_rate), block_(block), double_(double_precision) {
+        processor_ = owned(new Processor());
+        CHECK(processor_->initialize(nullptr) == kResultOk);
+        const int32 sample_size = double_ ? kSample64 : kSample32;
+        ProcessSetup setup{kRealtime, sample_size, block_, rate_};
+        CHECK(processor_->setupProcessing(setup) == kResultOk);
+        CHECK(processor_->setActive(true) == kResultOk);
+        processor_->setProcessing(true);
+        CHECK(data_.prepare(*processor_.get(), block_, sample_size));
+        data_.processMode = kRealtime;
+        data_.inputEvents = &events_;
+        data_.inputParameterChanges = &in_;
+        data_.outputParameterChanges = &out_;
+    }
+
+    ~Session() {
+        processor_->setProcessing(false);
+        processor_->setActive(false);
+        processor_->terminate();
+    }
+
+    Processor& processor() { return *processor_; }
+    void Load(const SavedState& state) {
+        CHECK(processor_->setState(StateStream(state)) == kResultOk);
+    }
+    // Sent with the next block.
+    void Set(ParamID id, double value) { pending_.push_back({id, value}); }
+    // The transport, from the next block on.
+    void Play(double tempo, double from_quarters = 0.0) {
+        playing_ = true;
+        tempo_ = tempo;
+        anchor_quarters_ = from_quarters;
+        song_samples_ = 0;
+    }
+    void Stop() { playing_ = false; }
+    // What the host tells: without these the plug-in has to do without.
+    bool tells_tempo = true;
+    bool tells_position = true;
+
+    // Renders `samples`. The score's sample positions count from here.
+    std::vector<float> Render(int samples, const std::vector<Note>& score = {}) {
+        std::vector<float> out(static_cast<std::size_t>(samples));
+        reports.clear();
+        std::size_t next = 0;
+        for(int start = 0; start < samples; start += block_) {
+            const int count = std::min(block_, samples - start);
+            events_.clear();
+            in_.clearQueue();
+            out_.clearQueue();
+            for(const auto& [id, value] : pending_) {
+                int32 index = 0;
+                IParamValueQueue* queue = in_.addParameterData(id, index);
+                CHECK(queue && queue->addPoint(0, value, index) == kResultOk);
+            }
+            pending_.clear();
+            for(; next < score.size() && score[next].sample < start + count; ++next) {
+                Event event{};
+                event.type = Event::kNoteOnEvent;
+                event.sampleOffset = score[next].sample - start;
+                event.noteOn.pitch = score[next].note;
+                event.noteOn.velocity = score[next].velocity / 127.0f;
+                CHECK(events_.addEvent(event) == kResultOk);
+            }
+            context_ = {};
+            context_.sampleRate = rate_;
+            if(playing_)
+                context_.state |= ProcessContext::kPlaying;
+            if(tells_tempo) {
+                context_.state |= ProcessContext::kTempoValid;
+                context_.tempo = tempo_;
+            }
+            if(tells_position) {
+                context_.state |= ProcessContext::kProjectTimeMusicValid;
+                context_.projectTimeMusic =
+                    anchor_quarters_ + static_cast<double>(song_samples_) * tempo_ / 60.0 / rate_;
+            }
+            data_.processContext = &context_;
+            data_.numSamples = count;
+            data_.outputs[0].silenceFlags = 0;
+            CHECK(processor_->process(data_) == kResultOk);
+            if(playing_)
+                song_samples_ += count;
+            for(int i = 0; i < count; ++i) {
+                const double left = double_ ? data_.outputs[0].channelBuffers64[0][i]
+                                            : data_.outputs[0].channelBuffers32[0][i];
+                const double right = double_ ? data_.outputs[0].channelBuffers64[1][i]
+                                             : data_.outputs[0].channelBuffers32[1][i];
+                CHECK(left == right && std::isfinite(left)
+                      && std::fabs(left) <= toy_piano::kOutputCeiling);
+                out[static_cast<std::size_t>(start + i)] = static_cast<float>(left);
+            }
+            for(int32 i = 0; i < out_.getParameterCount(); ++i) {
+                IParamValueQueue* queue = out_.getParameterData(i);
+                for(int32 point = 0; queue && point < queue->getPointCount(); ++point) {
+                    int32 offset = 0;
+                    ParamValue value = 0.0;
+                    CHECK(queue->getPoint(point, offset, value) == kResultOk);
+                    CHECK(offset >= 0 && offset < count);
+                    reports.push_back({queue->getParameterId(), start + offset, value});
+                }
+            }
+        }
+        return out;
+    }
+
+    // The parameter changes the plug-in reported during the last Render().
+    std::vector<Report> reports;
+
+  private:
+    double rate_;
+    int block_;
+    bool double_;
+    IPtr<Processor> processor_;
+    HostProcessData data_;
+    EventList events_{64};
+    ParameterChanges in_{16};
+    ParameterChanges out_{16};
+    ProcessContext context_{};
+    std::vector<std::pair<ParamID, double>> pending_;
+    bool playing_ = false;
+    double tempo_ = 120.0;
+    double anchor_quarters_ = 0.0;
+    long long song_samples_ = 0;
+};
+
+// The samples at which the clock finds sixteenths while a song plays from
+// `from_quarters` for `total` samples, handed over in blocks of `block`.
+std::vector<long long> Sixteenths(double tempo, double rate, int block, long long total,
+                                  double from_quarters = 0.0, bool with_position = true,
+                                  bool with_tempo = true) {
+    StepClock clock;
+    std::vector<long long> found;
+    for(long long start = 0; start < total; start += block) {
+        const int count = static_cast<int>(std::min<long long>(block, total - start));
+        Transport transport;
+        transport.playing = true;
+        transport.has_tempo = with_tempo;
+        transport.tempo = tempo;
+        transport.has_position = with_position;
+        transport.quarters = from_quarters + static_cast<double>(start) * tempo / 60.0 / rate;
+        CHECK(clock.Begin(transport, rate, count) == (start == 0));
+        int offset = 0, previous = -1;
+        while(clock.Next(offset)) {
+            CHECK(offset > previous && offset < count);
+            previous = offset;
+            found.push_back(start + offset);
+        }
+    }
+    return found;
+}
+
+// The clock: every sixteenth once, on its sample, whatever the block size.
+void TestStepClock() {
+    const int blocks[] = {1, 16, 64, 333, 1024, 2048};
+    // 120 BPM at 48 kHz: a sixteenth every 6000 samples.
+    std::vector<long long> even;
+    for(long long sample = 0; sample < 96000; sample += 6000)
+        even.push_back(sample);
+    for(const int block : blocks) {
+        CHECK(Sixteenths(120.0, 48000.0, block, 96000) == even);
+        // A host that tells no song position: counted from the start.
+        CHECK(Sixteenths(120.0, 48000.0, block, 96000, 0.0, false) == even);
+    }
+    // From the middle of a sixteenth: the first one comes when it is due.
+    const auto late = Sixteenths(120.0, 48000.0, 64, 30000, 0.3);
+    CHECK(late.size() == 5 && late[0] == 4800 && late[4] == 28800);
+    // No tempo from the host: 130 BPM.
+    const auto fallback = Sixteenths(0.0, 48000.0, 64, 96000, 0.0, false, false);
+    const double fallback_spacing = 48000.0 * 60.0 / StepClock::kFallbackTempo / 4.0;
+    CHECK(fallback.size() == 18);
+    for(std::size_t i = 0; i < fallback.size(); ++i)
+        CHECK(fallback[i]
+              == static_cast<long long>(std::ceil(static_cast<double>(i) * fallback_spacing - 1e-4)));
+    // An uneven tempo at 44.1 kHz: each sixteenth on the first sample at or
+    // after its time, and the same samples at every block size.
+    const double rate = 44100.0, tempo = 97.3;
+    const double spacing = rate * 60.0 / tempo / 4.0;
+    const auto reference = Sixteenths(tempo, rate, 1, 5 * 44100);
+    CHECK(reference.size() == static_cast<std::size_t>(std::ceil(5 * 44100 / spacing)));
+    for(std::size_t i = 0; i < reference.size(); ++i) {
+        const double exact = static_cast<double>(i) * spacing;
+        CHECK(static_cast<double>(reference[i]) >= exact - 1e-3
+              && static_cast<double>(reference[i]) < exact + 1.0);
+    }
+    for(const int block : blocks)
+        CHECK(Sixteenths(tempo, rate, block, 5 * 44100) == reference);
+
+    // Stop and start: no sixteenths while the host stands, then a new start.
+    StepClock clock;
+    Transport transport;
+    transport.playing = true;
+    transport.has_tempo = transport.has_position = true;
+    transport.tempo = 120.0;
+    int offset = -1;
+    CHECK(clock.Begin(transport, 48000.0, 512) && clock.Next(offset) && offset == 0);
+    CHECK(!clock.Next(offset));
+    transport.playing = false;
+    CHECK(!clock.Begin(transport, 48000.0, 512) && !clock.Playing() && !clock.Next(offset));
+    transport.playing = true;
+    transport.quarters = 1.0;
+    CHECK(clock.Begin(transport, 48000.0, 512) && clock.Next(offset) && offset == 0);
+    // The host jumps back, as at the end of a loop: the sixteenth there comes,
+    // but that is no new start.
+    transport.quarters = 1.0 + 512.0 / 24000.0;
+    CHECK(!clock.Begin(transport, 48000.0, 512) && !clock.Next(offset));
+    transport.quarters = 0.5;
+    CHECK(!clock.Begin(transport, 48000.0, 512) && clock.Next(offset) && offset == 0);
+
+    // A tempo change between two blocks: the next sixteenth comes when the
+    // song reaches it at the new tempo, once.
+    StepClock changing;
+    std::vector<long long> found;
+    double quarters = 0.0;
+    for(long long start = 0; start < 96000; start += 512) {
+        Transport now;
+        now.playing = now.has_tempo = now.has_position = true;
+        now.tempo = start < 47616 ? 120.0 : 60.0;
+        now.quarters = quarters;
+        changing.Begin(now, 48000.0, 512);
+        while(changing.Next(offset))
+            found.push_back(start + offset);
+        quarters += 512.0 * now.tempo / 60.0 / 48000.0;
+    }
+    std::vector<long long> expected;
+    for(long long sample = 0; sample < 47616; sample += 6000)
+        expected.push_back(sample);
+    for(long long sample = 48384; sample < 96000; sample += 12000) // 0.064 sixteenths later
+        expected.push_back(sample);
+    CHECK(found == expected);
+    std::printf("step clock: sixteenths on their sample at 6 block sizes, start, stop, jump, "
+                "tempo change, no tempo, no position\n");
+}
+
+// How sequencer notes and keys map to MIDI notes.
+void TestPitchMapping() {
+    CHECK(kSequencerTranspose == 24 && kSequencerVelocity == 100);
+    CHECK(SoundingNote(33) == 57);  // the default tonic at the default octave: A3
+    CHECK(SoundingNote(103) == 127);
+    CHECK(SoundingNote(104) == 116); // folded down an octave
+    CHECK(SoundingNote(130) == 118);
+    CHECK(SoundingNote(-24) == 0 && SoundingNote(-26) == 10);
+    for(int tonic = 0; tonic < generative::kNumTonics; ++tonic)
+        for(int octave = 0; octave <= generative::kMaxOctave; ++octave) {
+            const int key = KeyForTransposition(tonic, octave);
+            CHECK(key == SoundingNote(tonic + 12 * octave)); // where the tonic sounds
+            const KeyTransposition back = TranspositionForKey(key);
+            CHECK(back.tonic == tonic && back.octave == octave);
+        }
+    CHECK(KeyForTransposition(0, 0) == 24 && KeyForTransposition(11, 5) == 95); // C1 to B6
+    // Keys beyond that range take the nearest octave.
+    CHECK(TranspositionForKey(0).tonic == 0 && TranspositionForKey(0).octave == 0);
+    CHECK(TranspositionForKey(23).tonic == 11 && TranspositionForKey(23).octave == 0);
+    CHECK(TranspositionForKey(96).tonic == 0 && TranspositionForKey(96).octave == 5);
+    CHECK(TranspositionForKey(127).tonic == 7 && TranspositionForKey(127).octave == 5);
+    // The keyboard's range: whole octaves, C1..C3 up to C5..C7.
+    CHECK(ClampKeyboardShift(kKeyboardDefaultShift) == -12 && ClampKeyboardShift(0) == 0);
+    CHECK(ClampKeyboardShift(-48) == -36 && ClampKeyboardShift(24) == 12
+          && ClampKeyboardShift(7) == 0 && ClampKeyboardShift(-13) == -12);
+    CHECK(kKeyboardLowNote + kKeyboardShiftMin == 24 && kKeyboardHighNote + kKeyboardShiftMax == 96);
+    std::printf("pitch mapping: sequencer notes two octaves up, keys C1..B6 set tonic and octave\n");
+}
+
+// The sequencer plays the engine: every step of the pattern on the sample of
+// its sixteenth, bit for bit like the same notes sent to the bare engine.
+void TestSequencerSteps() {
+    const SavedState pattern = TestPattern();
+    const int spacing = 6000; // 120 BPM at 48 kHz
+    const int total = 3 * 48000;
+    const float attack = AttackSeconds(kDefaultAttack), decay = DecaySeconds(kDefaultDecay);
+    const auto reference =
+        RenderCore(48000.0f, PatternScore(pattern.sequencer, 0, 24, 0, spacing), total, attack, decay);
+    CHECK(Peak(reference) > 0.02f);
+    for(const bool double_precision : {false, true})
+        for(const int block : {1, 16, 64, 333, 1024, 2048}) {
+            Session session(48000.0, block, double_precision);
+            session.Load(pattern);
+            session.Play(120.0);
+            CHECK(Identical(session.Render(total), reference));
+        }
+    {
+        // Started in the middle of a sixteenth: the first step waits for the next one.
+        Session session;
+        session.Load(pattern);
+        session.Play(120.0, 0.3);
+        CHECK(Identical(session.Render(total),
+                        RenderCore(48000.0f, PatternScore(pattern.sequencer, 0, 24, 4800, spacing),
+                                   total, attack, decay)));
+    }
+    {
+        // Length, clock divide and octave: five steps, one every third sixteenth.
+        SavedState shaped = pattern;
+        shaped.sequencer.length = 5;
+        shaped.sequencer.clock_divide = 2; // every third sixteenth
+        shaped.sequencer.octave = 4;
+        Session session;
+        session.Load(shaped);
+        session.Play(120.0);
+        CHECK(Identical(session.Render(total),
+                        RenderCore(48000.0f,
+                                   PatternScore(shaped.sequencer, 0, 8, 0, 3 * spacing), total,
+                                   attack, decay)));
+    }
+    {
+        // A pattern that mutates, at an uneven tempo and rate: the same audio
+        // and the same pattern afterwards at every block size.
+        SavedState mutating = pattern;
+        mutating.sequencer.algorithm = 2;
+        mutating.sequencer.mutation = 60;
+        std::vector<float> first;
+        SavedState first_state;
+        for(const int block : {1, 64, 333, 2048}) {
+            Session session(44100.0, block);
+            session.Load(mutating);
+            session.Play(97.3);
+            const auto out = session.Render(4 * 44100);
+            const SavedState after = StateOf(session.processor());
+            if(first.empty()) {
+                first = out;
+                first_state = after;
+                CHECK(Peak(out) > 0.02f);
+                CHECK(after.sequencer.steps != mutating.sequencer.steps
+                      && after.sequencer.random != mutating.sequencer.random);
+            }
+            CHECK(Identical(out, first) && SameSequencer(after.sequencer, first_state.sequencer));
+        }
+    }
+    std::printf("sequencer: steps on their exact sample, bit-exact against the engine, "
+                "6 block sizes, 32 and 64 bit\n");
+}
+
+// The sequencer follows the transport and the Run switch.
+void TestSequencerTransport() {
+    const SavedState pattern = TestPattern();
+    const int spacing = 6000;
+    const float attack = AttackSeconds(kDefaultAttack), decay = DecaySeconds(kDefaultDecay);
+    {
+        // The host stands, or says nothing about its transport: no steps.
+        Session session;
+        session.Load(pattern);
+        CHECK(Peak(session.Render(48000)) == 0.0f);
+        session.tells_tempo = session.tells_position = false;
+        CHECK(Peak(session.Render(48000)) == 0.0f);
+        // Playing without tempo and position: steps at 130 BPM from the start.
+        session.Play(0.0);
+        const auto out = session.Render(48000);
+        const double fallback = 48000.0 * 60.0 / StepClock::kFallbackTempo / 4.0;
+        std::vector<Note> expected;
+        for(int tick = 0; tick * fallback < 48000.0; ++tick) {
+            const std::int8_t step = pattern.sequencer.steps[static_cast<std::size_t>(tick)];
+            if(step != generative::kRest)
+                expected.push_back({static_cast<int>(std::ceil(tick * fallback - 1e-4)),
+                                    SoundingNote(step + 12 * pattern.sequencer.octave),
+                                    kSequencerVelocity});
+        }
+        CHECK(expected.size() >= 5);
+        CHECK(Identical(out, RenderCore(48000.0f, expected, 48000, attack, decay)));
+    }
+    Session session;
+    session.Load(pattern);
+    std::vector<Note> score;
+    std::vector<float> out;
+    const auto render = [&](int samples) {
+        const auto part = session.Render(samples);
+        out.insert(out.end(), part.begin(), part.end());
+    };
+    // Ten sixteenths, then the host stops: the notes ring out, none follow.
+    session.Play(120.0);
+    render(10 * spacing);
+    Append(score, PatternScore(pattern.sequencer, 0, 10, 0, spacing));
+    session.Stop();
+    render(5 * spacing);
+    // A new start, somewhere in the song: the pattern begins at its first step.
+    int now = 15 * spacing;
+    session.Play(120.0, 7.0);
+    render(14 * spacing);
+    Append(score, PatternScore(pattern.sequencer, 0, 14, now, spacing));
+    now += 14 * spacing;
+    // Run off while the host plays on: silence from the sequencer.
+    session.Set(kParamRun, 0.0);
+    render(4 * spacing);
+    now += 4 * spacing;
+    // Run on again: the pattern begins at its first step, on the next sixteenth.
+    session.Set(kParamRun, 1.0);
+    render(5 * spacing);
+    Append(score, PatternScore(pattern.sequencer, 0, 5, now, spacing));
+    now += 5 * spacing;
+    CHECK(static_cast<int>(out.size()) == now);
+    CHECK(Identical(out, RenderCore(48000.0f, score, now, attack, decay)));
+    std::printf("transport: steps only while the host plays and Run is on; every start begins "
+                "at step 1\n");
+}
+
+// The pattern and the generator are part of the state.
+void TestSequencerState() {
+    const SavedState pattern = TestPattern();
+    const auto bytes_of = [](Processor& processor) {
+        MemoryStream stream;
+        CHECK(processor.getState(&stream) == kResultOk);
+        return std::vector<char>(stream.getData(), stream.getData() + stream.getSize());
+    };
+    const auto wanted = [](const SavedState& state) {
+        const auto stream = StateStream(state);
+        return std::vector<char>(stream->getData(), stream->getData() + stream->getSize());
+    };
+    {
+        // A fresh instance: the start-up pattern, the tonic or rests, and the
+        // defaults. Two instances differ.
+        Session one, two;
+        const SavedState fresh = StateOf(one.processor());
+        for(const std::int8_t step : fresh.sequencer.steps)
+            CHECK(step == generative::kRest || step == generative::kDefaultTonic);
+        CHECK(fresh.run && fresh.keys_transpose && fresh.tuning == 0.0
+              && fresh.sequencer.algorithm == 1 && fresh.sequencer.mutation == 0
+              && fresh.sequencer.note_probability == 65 && fresh.sequencer.scale_mode == 1
+              && fresh.sequencer.octave == 2 && fresh.sequencer.length == 16);
+        CHECK(fresh.sequencer.random != StateOf(two.processor()).sequencer.random);
+    }
+    {
+        // Loaded and saved again at once, before any audio: the same bytes.
+        // Loading does not draw a new pattern, and neither does standing still.
+        Session session;
+        session.Load(pattern);
+        CHECK(bytes_of(session.processor()) == wanted(pattern));
+        session.Render(4800);
+        CHECK(bytes_of(session.processor()) == wanted(pattern));
+        // Playing without mutation keeps the pattern too.
+        session.Play(120.0);
+        session.Render(48000);
+        CHECK(StateOf(session.processor()).sequencer.steps == pattern.sequencer.steps);
+        // Setting the scale it already has changes nothing; another one draws anew.
+        session.Set(kParamScale, StepNormalized(1, kScaleSteps));
+        session.Render(64);
+        CHECK(StateOf(session.processor()).sequencer.steps == pattern.sequencer.steps);
+        session.Set(kParamScale, StepNormalized(0, kScaleSteps));
+        session.Render(64);
+        const SavedState drawn = StateOf(session.processor());
+        CHECK(drawn.sequencer.scale_mode == 0 && drawn.sequencer.steps != pattern.sequencer.steps);
+        // A new tonic transposes the stored notes; rests stay.
+        session.Set(kParamTonic, StepNormalized(0, kTonicSteps));
+        session.Render(64);
+        const SavedState moved = StateOf(session.processor());
+        CHECK(moved.sequencer.tonic == 0);
+        for(std::size_t i = 0; i < moved.sequencer.steps.size(); ++i)
+            CHECK(drawn.sequencer.steps[i] == generative::kRest
+                      ? moved.sequencer.steps[i] == generative::kRest
+                      : moved.sequencer.steps[i] == drawn.sequencer.steps[i] - 9);
+        // The other settings arrive and are saved.
+        session.Set(kParamAlgorithm, StepNormalized(3, kAlgorithmSteps));
+        session.Set(kParamMutation, generative::MutationPosition(35));
+        session.Set(kParamNoteProbability, StepNormalized(80, kNoteProbabilitySteps));
+        session.Set(kParamOctave, StepNormalized(4, kOctaveSteps));
+        session.Set(kParamLength, StepNormalized(6, kLengthSteps));
+        session.Set(kParamClockDivide, StepNormalized(5, kClockDivideSteps));
+        session.Set(kParamTuning, 0.25);
+        session.Set(kParamRun, 0.0);
+        session.Set(kParamKeysTranspose, 1.0);
+        session.Render(64);
+        const SavedState set = StateOf(session.processor());
+        CHECK(set.sequencer.algorithm == 4 && set.sequencer.mutation == 35
+              && set.sequencer.note_probability == 80 && set.sequencer.octave == 4
+              && set.sequencer.length == 7 && set.sequencer.clock_divide == 5
+              && set.tuning == 0.25 && !set.run && set.keys_transpose);
+    }
+    {
+        // A project saved while its pattern mutates and loaded again goes on
+        // exactly as the original did.
+        SavedState mutating = pattern;
+        mutating.sequencer.algorithm = 2;
+        mutating.sequencer.mutation = 60;
+        Session original;
+        original.Load(mutating);
+        original.Play(120.0);
+        original.Render(10 * 6000);
+        const SavedState saved = StateOf(original.processor());
+        CHECK(saved.sequencer.random != mutating.sequencer.random);
+        original.Render(20 * 6000);
+        Session reloaded;
+        reloaded.Load(saved);
+        reloaded.Play(120.0);
+        reloaded.Render(20 * 6000);
+        const SavedState a = StateOf(original.processor()), b = StateOf(reloaded.processor());
+        CHECK(SameSequencer(a.sequencer, b.sequencer));
+        CHECK(a.sequencer.steps != saved.sequencer.steps);
+    }
+    {
+        // Damaged states are refused whole.
+        Session session;
+        session.Load(pattern);
+        const auto good = wanted(pattern);
+        const auto refused = [&](std::vector<char> bytes) {
+            MemoryStream stream;
+            int32 written = 0;
+            stream.write(bytes.data(), static_cast<int32>(bytes.size()), &written);
+            int64 start = 0;
+            stream.seek(0, IBStream::kIBSeekSet, &start);
+            return session.processor().setState(&stream) != kResultOk
+                   && bytes_of(session.processor()) == good;
+        };
+        const auto with = [&](std::size_t at, char value) {
+            std::vector<char> bytes = good;
+            bytes[at] = value;
+            return bytes;
+        };
+        CHECK(refused({}));
+        CHECK(refused(std::vector<char>(good.begin(), good.end() - 1))); // cut short
+        CHECK(refused(with(0, 2)));                // another version
+        CHECK(refused(with(4 + 7, 0x7F)));         // master pitch far out of range
+        CHECK(refused(with(4 + 40, 2)));           // run neither 0 nor 1
+        CHECK(refused(with(4 + 42, 12)));          // tonic
+        CHECK(refused(with(4 + 42 + 2, 0)));       // algorithm 0
+        CHECK(refused(with(4 + 42 + 6, 17)));      // length
+        CHECK(refused(with(4 + 50 + 3, 97)));      // a step out of range
+        // The controller reads the same state and refuses the same ones.
+        IPtr<Controller> controller = owned(new Controller());
+        CHECK(controller->initialize(nullptr) == kResultOk);
+        MemoryStream cut;
+        int32 written = 0;
+        cut.write(const_cast<char*>(good.data()), static_cast<int32>(good.size()) - 1, &written);
+        int64 start = 0;
+        cut.seek(0, IBStream::kIBSeekSet, &start);
+        CHECK(controller->setComponentState(&cut) != kResultOk);
+        CHECK(controller->getParamNormalized(kParamKeysTranspose) == kDefaultKeysTranspose);
+        controller->terminate();
+    }
+    {
+        // getState() and setState() while the audio thread steps and mutates:
+        // every state read is a whole one.
+        SavedState busy = pattern;
+        busy.sequencer.algorithm = 2;
+        busy.sequencer.mutation = 100;
+        busy.sequencer.note_probability = 100;
+        Session session(48000.0, 32);
+        session.Load(busy);
+        session.Play(900.0);
+        std::atomic<bool> stop{false};
+        std::atomic<int> rendered{0};
+        std::thread audio([&] {
+            while(!stop.load()) {
+                session.Render(32 * 64);
+                ++rendered;
+            }
+        });
+        int loads = 0;
+        // At least 4000 reads, and until the audio thread has done its share.
+        for(int i = 0; i < 4000 || rendered.load() < 200; ++i) {
+            const SavedState read = StateOf(session.processor()); // checks it as a whole
+            CHECK(read.sequencer.algorithm == 2 && read.sequencer.mutation == 100);
+            if(i % 200 == 199) {
+                CHECK(session.processor().setState(StateStream(busy)) == kResultOk);
+                // Whether the audio thread has taken it yet or not, the state
+                // is the loaded one or what followed from it, never the old one.
+                ++loads;
+            }
+        }
+        stop.store(true);
+        audio.join();
+        CHECK(loads >= 20 && rendered.load() >= 200);
+        // A state loaded while the audio stands is the state at once.
+        session.Load(pattern);
+        CHECK(bytes_of(session.processor()) == wanted(pattern));
+    }
+    std::printf("state: pattern and generator saved, a reloaded project continues identically, "
+                "loading draws nothing, damaged states refused, safe beside running audio\n");
+}
+
+// With Keys Transpose on, a MIDI note moves the sequence instead of sounding.
+void TestTransposeByMidi() {
+    SavedState pattern = TestPattern();
+    pattern.keys_transpose = true;
+    const float attack = AttackSeconds(kDefaultAttack), decay = DecaySeconds(kDefaultDecay);
+    {
+        Session session;
+        session.Load(pattern);
+        // C4 while the host stands: no sound, tonic C and octave 3 from now on.
+        CHECK(Peak(session.Render(4800, {{100, 60, 100}})) == 0.0f);
+        CHECK(session.reports.size() == 2);
+        for(const Session::Report& report : session.reports) {
+            CHECK(report.sample == 100);
+            CHECK(report.id == kParamTonic ? report.value == StepNormalized(0, kTonicSteps)
+                                           : (report.id == kParamOctave
+                                              && report.value == StepNormalized(3, kOctaveSteps)));
+        }
+        const SavedState moved = StateOf(session.processor());
+        CHECK(moved.sequencer.tonic == 0 && moved.sequencer.octave == 3);
+        for(std::size_t i = 0; i < moved.sequencer.steps.size(); ++i)
+            CHECK(pattern.sequencer.steps[i] == generative::kRest
+                      ? moved.sequencer.steps[i] == generative::kRest
+                      : moved.sequencer.steps[i] == pattern.sequencer.steps[i] - 9);
+        // Velocity 0 and notes outside the MIDI range move nothing.
+        session.Render(4800, {{10, 62, 0}});
+        CHECK(session.reports.empty() && StateOf(session.processor()).sequencer.tonic == 0);
+    }
+    {
+        // While it plays: D4 between the second and the third sixteenth. The
+        // first two steps sound as before, all later ones from D at octave 3.
+        const int spacing = 6000, total = 2 * 48000;
+        SavedState moved = pattern;
+        moved.sequencer.tonic = 2;
+        moved.sequencer.octave = 3;
+        for(std::int8_t& step : moved.sequencer.steps)
+            if(step != generative::kRest)
+                step = static_cast<std::int8_t>(step - 7);
+        std::vector<Note> score = PatternScore(pattern.sequencer, 0, 2, 0, spacing);
+        Append(score, PatternScore(moved.sequencer, 2, 16, 2 * spacing, spacing));
+        const auto reference = RenderCore(48000.0f, score, total, attack, decay);
+        for(const int block : {1, 64, 333, 2048}) {
+            Session session(48000.0, block);
+            session.Load(pattern);
+            session.Play(120.0);
+            CHECK(Identical(session.Render(total, {{9000, 62, 100}}), reference));
+            CHECK(session.reports.size() == 2 && session.reports[0].sample == 9000);
+        }
+    }
+    {
+        // Switched off, the same note plays, and the sequence stays.
+        Session session;
+        SavedState playing = pattern;
+        playing.keys_transpose = false;
+        session.Load(playing);
+        const auto out = session.Render(48000, {{100, 60, 100}});
+        CHECK(Identical(out, RenderCore(48000.0f, {{100, 60, 100}}, 48000, attack, decay)));
+        CHECK(session.reports.empty());
+        CHECK(SameSequencer(StateOf(session.processor()).sequencer, playing.sequencer));
+    }
+    std::printf("transposing: a MIDI note sets tonic and octave at its sample, is reported to the "
+                "host and does not sound; switched off it plays\n");
+}
+
+// The tuning: exact by default, down to whole hertz at 100 %.
+void TestTuning() {
+    for(int note = 0; note <= 127; ++note) {
+        CHECK(TuningRatio(note, 0.0) == 1.0);
+        const double exact = 440.0 * std::pow(2.0, (note - 69) / 12.0);
+        const double tuned = exact * TuningRatio(note, 1.0);
+        CHECK(std::fabs(tuned - std::round(tuned)) < 1e-9); // a whole number of hertz
+        CHECK(tuned < exact && exact - tuned <= 1.0 + 1e-9);
+        // Half way in between at 50 %.
+        CHECK(std::fabs(exact * TuningRatio(note, 0.5) - (exact + tuned) / 2.0) < 1e-9);
+    }
+    CHECK(std::fabs(440.0 * TuningRatio(69, 1.0) - 439.0) < 1e-9);
+    CHECK(std::fabs(55.0 * TuningRatio(33, 1.0) - 54.0) < 1e-9);
+    CHECK(TuningRatio(69, -1.0) == 1.0 && TuningRatio(69, 5.0) == TuningRatio(69, 1.0));
+
+    // Measured on the plug-in's output.
+    const int total = 3 * 48000;
+    const struct {
+        std::uint8_t note;
+        double tuning, hertz;
+    } cases[] = {{33, 0.0, 55.0}, {33, 1.0, 54.0}, {33, 0.5, 54.5},
+                 {69, 0.0, 440.0}, {69, 1.0, 439.0}, {60, 1.0, 261.0}};
+    for(const auto& c : cases) {
+        PluginRun run;
+        run.decay = 1.0;
+        run.tuning = c.tuning;
+        const auto out = RenderPlugin(run, {{0, c.note, 127}}, total);
+        const double measured = Frequency(out, 48000.0, 9600, 105600);
+        std::printf("  note %d at tuning %.0f %%: %.3f Hz\n", c.note, 100.0 * c.tuning, measured);
+        CHECK(std::fabs(measured - c.hertz) < 0.02);
+    }
+    // The tuning is taken at the strike: a note that sounds keeps its own.
+    Engine engine;
+    engine.Init(48000.0f);
+    engine.NoteOn(69, 127, toy_piano::kAttackMin, toy_piano::kDecayMax);
+    const float before = engine.Piano().VoiceIncrement(toy_piano::kNumKeys);
+    engine.SetTuning(1.0);
+    for(int i = 0; i < 480; ++i)
+        engine.Process();
+    CHECK(engine.Piano().VoiceIncrement(toy_piano::kNumKeys) == before);
+    engine.NoteOn(69, 127, toy_piano::kAttackMin, toy_piano::kDecayMax);
+    CHECK(std::fabs(engine.Piano().VoiceIncrement(toy_piano::kNumKeys) / before - 439.0f / 440.0f)
+          < 1e-6f);
+    std::printf("tuning: exact at 0 %%, whole hertz at 100 %% (A4 439 Hz, A1 54 Hz), taken at "
+                "the strike\n");
+}
+
+// The sequencer's parameters as a host sees them, and the keys that transpose.
+void TestSequencerController() {
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(nullptr) == kResultOk);
+    const auto text = [&](ParamID id, double normalized) {
+        String128 string{};
+        CHECK(controller->getParamStringByValue(id, normalized, string) == kResultOk);
+        return StringConvert::convert(string);
+    };
+    const auto shown = [&](ParamID id) { return text(id, controller->getParamNormalized(id)); };
+    // The defaults.
+    CHECK(shown(kParamRun) == "On" && shown(kParamAlgorithm) == "1" && shown(kParamMutation) == "0"
+          && shown(kParamNoteProbability) == "65" && shown(kParamScale) == "Minor"
+          && shown(kParamTonic) == "A" && shown(kParamOctave) == "2" && shown(kParamLength) == "16"
+          && shown(kParamClockDivide) == "1" && shown(kParamTuning) == "0"
+          && shown(kParamKeysTranspose) == "On");
+    // Every value of the stepped ones, as the processor reads it.
+    const char* scales[] = {"Major", "Minor", "Pentatonic", "Odd", "Octave", "Fifths", "Tonic"};
+    for(int i = 0; i <= kScaleSteps; ++i)
+        CHECK(text(kParamScale, StepNormalized(i, kScaleSteps)) == scales[i]);
+    const char* tonics[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+    for(int i = 0; i <= kTonicSteps; ++i)
+        CHECK(text(kParamTonic, StepNormalized(i, kTonicSteps)) == tonics[i]);
+    for(int i = 0; i <= kClockDivideSteps; ++i)
+        CHECK(text(kParamClockDivide, StepNormalized(i, kClockDivideSteps))
+              == std::to_string(generative::kClockDivides[static_cast<std::size_t>(i)]));
+    for(int i = 0; i <= kAlgorithmSteps; ++i)
+        CHECK(text(kParamAlgorithm, StepNormalized(i, kAlgorithmSteps)) == std::to_string(i + 1));
+    for(int i = 0; i <= kLengthSteps; ++i)
+        CHECK(text(kParamLength, StepNormalized(i, kLengthSteps)) == std::to_string(i + 1));
+    for(int i = 0; i <= kOctaveSteps; ++i)
+        CHECK(text(kParamOctave, StepNormalized(i, kOctaveSteps)) == std::to_string(i));
+    for(int i = 0; i <= kNoteProbabilitySteps; ++i)
+        CHECK(text(kParamNoteProbability, StepNormalized(i, kNoteProbabilitySteps))
+              == std::to_string(i));
+    for(int cc = 0; cc < 128; ++cc) { // and for any value in between
+        const double value = cc / 127.0;
+        CHECK(text(kParamOctave, value) == std::to_string(StepIndex(value, kOctaveSteps)));
+        CHECK(text(kParamTonic, value) == tonics[StepIndex(value, kTonicSteps)]);
+        CHECK(text(kParamMutation, value) == std::to_string(generative::MutationPercent(value)));
+    }
+    // The mutation knob's law, and what can be typed.
+    CHECK(text(kParamMutation, 0.25) == "10" && text(kParamMutation, 0.5) == "20"
+          && text(kParamMutation, 0.75) == "60" && text(kParamMutation, 1.0) == "100");
+    CHECK(text(kParamTuning, 0.5) == "50");
+    const auto typed = [&](ParamID id, const char* string) {
+        String128 wide{};
+        StringConvert::convert(std::string(string), wide);
+        ParamValue normalized = -1.0;
+        CHECK(controller->getParamValueByString(id, wide, normalized) == kResultOk);
+        return normalized;
+    };
+    CHECK(generative::MutationPercent(typed(kParamMutation, "35 %")) == 35);
+    CHECK(generative::MutationPercent(typed(kParamMutation, "250")) == 100);
+    CHECK(StepIndex(typed(kParamNoteProbability, "80"), kNoteProbabilitySteps) == 80);
+    CHECK(StepIndex(typed(kParamAlgorithm, "4"), kAlgorithmSteps) == 3);
+    CHECK(StepIndex(typed(kParamLength, "7"), kLengthSteps) == 6);
+    CHECK(StepIndex(typed(kParamLength, "99"), kLengthSteps) == kLengthSteps);
+    CHECK(StepIndex(typed(kParamOctave, "5"), kOctaveSteps) == 5);
+    CHECK(std::fabs(typed(kParamTuning, "25 %") - 0.25) < 1e-12);
+    CHECK(StepIndex(typed(kParamScale, "Fifths"), kScaleSteps) == 5);
+    CHECK(StepIndex(typed(kParamTonic, "F#"), kTonicSteps) == 6);
+    // No sequencer parameter is tied to a MIDI controller.
+    for(int cc = 0; cc < 128; ++cc) {
+        ParamID id = 0;
+        if(controller->getMidiControllerAssignment(0, 0, static_cast<CtrlNumber>(cc), id)
+           == kResultTrue)
+            CHECK(id < kParamRun);
+    }
+
+    // A key of the screen keyboard, keys transposing: tonic and octave follow.
+    controller->KeyStruck(62); // D4
+    CHECK(shown(kParamTonic) == "D" && shown(kParamOctave) == "3");
+    controller->KeyStruck(24); // C1, the lowest
+    CHECK(shown(kParamTonic) == "C" && shown(kParamOctave) == "0");
+    controller->KeyStruck(94); // A#6
+    CHECK(shown(kParamTonic) == "A#" && shown(kParamOctave) == "5");
+    // The octave buttons move the sequence within its range.
+    controller->ShiftOctave(1);
+    CHECK(shown(kParamOctave) == "5");
+    controller->ShiftOctave(-2);
+    CHECK(shown(kParamOctave) == "3" && shown(kParamTonic) == "A#");
+    controller->ShiftOctave(-9);
+    CHECK(shown(kParamOctave) == "0");
+    // Keys playing: a key leaves the sequence alone.
+    CHECK(controller->setParamNormalized(kParamKeysTranspose, 0.0) == kResultOk);
+    controller->KeyStruck(62);
+    CHECK(shown(kParamTonic) == "A#" && shown(kParamOctave) == "0");
+
+    // The controller takes over what a processor saved.
+    SavedState state = TestPattern();
+    state.master_pitch = MasterPitchNormalized(5);
+    state.attack = 0.3;
+    state.decay = 0.4;
+    state.volume = 0.8;
+    state.tuning = 0.6;
+    state.run = false;
+    state.keys_transpose = true;
+    state.sequencer.tonic = 4;
+    state.sequencer.scale_mode = 5;
+    state.sequencer.algorithm = 3;
+    state.sequencer.mutation = 45;
+    state.sequencer.note_probability = 12;
+    state.sequencer.octave = 1;
+    state.sequencer.length = 9;
+    state.sequencer.clock_divide = 6;
+    CHECK(controller->setComponentState(StateStream(state)) == kResultOk);
+    CHECK(shown(kParamMasterPitch) == "5" && controller->getParamNormalized(kParamAttack) == 0.3
+          && controller->getParamNormalized(kParamDecay) == 0.4
+          && controller->getParamNormalized(kParamVolume) == 0.8 && shown(kParamTuning) == "60");
+    CHECK(shown(kParamRun) == "Off" && shown(kParamKeysTranspose) == "On"
+          && shown(kParamTonic) == "E" && shown(kParamScale) == "Fifths"
+          && shown(kParamAlgorithm) == "3" && shown(kParamMutation) == "45"
+          && shown(kParamNoteProbability) == "12" && shown(kParamOctave) == "1"
+          && shown(kParamLength) == "9" && shown(kParamClockDivide) == "16");
+    controller->terminate();
+    std::printf("sequencer parameters: texts, typed values, state; keys and octave buttons "
+                "transpose\n");
 }
 
 } // namespace
@@ -1158,6 +2068,14 @@ int main() {
     TestGlidesReachTarget();
     TestKeyboardQueueLimit();
     TestEditorInWindow();
+    TestStepClock();
+    TestPitchMapping();
+    TestSequencerSteps();
+    TestSequencerTransport();
+    TestSequencerState();
+    TestTransposeByMidi();
+    TestTuning();
+    TestSequencerController();
     std::printf("PASS\n");
     return 0;
 }

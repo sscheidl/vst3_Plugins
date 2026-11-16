@@ -209,8 +209,10 @@ void TestTonic() {
     };
     sequencer.SetTonic(0); // A to C
     CHECK(shifted_by(-9));
-    sequencer.SetTonic(6); // C to B
+    sequencer.SetTonic(11); // C to B
     CHECK(shifted_by(2));
+    sequencer.SetTonic(1); // a black key: C sharp
+    CHECK(shifted_by(-8));
     sequencer.SetTonic(kDefaultTonic);
     CHECK(sequencer.state().steps == original);
     std::printf("tonic: stored notes transposed, rests kept\n");
@@ -542,7 +544,7 @@ void TestState() {
     original.SetMutation(60);
     original.SetClockDivide(1);
     original.SetLength(11);
-    original.SetTonic(2);
+    original.SetTonic(3);
     for(int tick = 0; tick < 137; ++tick)
         original.Tick();
     Sequencer copy(99);

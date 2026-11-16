@@ -19,7 +19,7 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
 
     Steinberg::tresult PLUGIN_API initialize(Steinberg::FUnknown* context) SMTG_OVERRIDE;
     Steinberg::tresult PLUGIN_API setComponentState(Steinberg::IBStream* state) SMTG_OVERRIDE;
-    // The controller's own state: the zoom of the editor window.
+    // The controller's own state: the editor window's zoom and keyboard.
     Steinberg::tresult PLUGIN_API setState(Steinberg::IBStream* state) SMTG_OVERRIDE;
     Steinberg::tresult PLUGIN_API getState(Steinberg::IBStream* state) SMTG_OVERRIDE;
     Steinberg::tresult PLUGIN_API setParamNormalized(Steinberg::Vst::ParamID tag,
@@ -33,8 +33,17 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
     // Number of windows the controller keeps up to date; for the tests.
     std::size_t OpenEditorCount() const { return editors_.size(); }
 
-    // Plays a note through the processor, as the screen keyboard does.
+    // A key of the screen keyboard: transposes the sequence if Keys Transpose
+    // is on, plays the note otherwise.
+    void KeyStruck(int note);
+    // Plays a note through the processor.
     void PlayNote(int note);
+    // Puts the sequence's tonic on this key: sets Tonic and Octave.
+    void TransposeToKey(int note);
+    // Moves the sequence by octaves, within the range Octave has.
+    void ShiftOctave(int octaves);
+    // Sets a parameter as a user's edit: the host records it and passes it on.
+    void EditParameter(Steinberg::Vst::ParamID id, Steinberg::Vst::ParamValue normalized);
 
     // IMidiMapping
     Steinberg::tresult PLUGIN_API getMidiControllerAssignment(

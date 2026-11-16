@@ -1,5 +1,7 @@
 #pragma once
 
+#include "keyboard_layout.h"
+
 #include "pluginterfaces/gui/iplugviewcontentscalesupport.h"
 #include "public.sdk/source/vst/vstguieditor.h"
 #include "vstgui/lib/controls/icontrollistener.h"
@@ -21,10 +23,10 @@ namespace taureon::toy_piano_generative {
 class KeyboardView;
 class ToggleButton;
 
-// Window size at zoom 1 on a display without scaling: the knobs, and below
-// them the keyboard when it is shown.
-constexpr double kEditorWidth = 460;
-constexpr double kEditorTopHeight = 190;
+// Window size at zoom 1 on a display without scaling: the two rows of knobs,
+// and below them the keyboard when it is shown.
+constexpr double kEditorWidth = 640;
+constexpr double kEditorTopHeight = 316;
 constexpr double kKeyboardSectionHeight = 82;
 // Limits of the window zoom the user can choose by resizing.
 constexpr double kMinEditorZoom = 0.5;
@@ -105,6 +107,8 @@ class DragConstraint {
 struct EditorSettings {
     double zoom = 1.0;
     bool keyboard = true;
+    // Which two octaves the keyboard shows: semitones above C4, whole octaves.
+    int keyboard_shift = kKeyboardDefaultShift;
 };
 
 // How the window talks back to the controller.
@@ -116,12 +120,15 @@ struct EditorCallbacks {
     std::function<void()> settled;
     // A key on the screen keyboard was struck.
     std::function<void(int note)> strike;
+    // An octave button was pressed: the sequence moves by this many octaves.
+    std::function<void(int octaves)> octave;
 };
 
-// The plug-in window: four knobs and an on-screen keyboard that a button shows
-// and hides. The layout is fixed and drawn as vectors, so the window scales as
-// a whole: by the zoom the user picks when resizing it, times the host's
-// display scale factor. The aspect ratio stays the same.
+// The plug-in window: a row of knobs for the sound, a row for the sequencer,
+// and an on-screen keyboard that a button shows and hides. The layout is fixed
+// and drawn as vectors, so the window scales as a whole: by the zoom the user
+// picks when resizing it, times the host's display scale factor. The aspect
+// ratio stays the same.
 class Editor : public Steinberg::Vst::VSTGUIEditor,
                public VSTGUI::IControlListener,
                public Steinberg::IPlugViewContentScaleSupport {
@@ -134,6 +141,9 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // refuses the new window size, nothing changes.
     void SetKeyboardVisible(bool show);
     bool KeyboardVisible() const { return settings_.keyboard; }
+    // What an octave button does: moves the visible keys by octaves, as far
+    // as they go, and tells the controller to move the sequence along.
+    void ShiftKeyboard(int octaves);
     const EditorSettings& Settings() const { return settings_; }
 
     // Called by the controller whenever a parameter changes, whatever the
@@ -145,6 +155,8 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     bool PLUGIN_API open(void* parent, const VSTGUI::PlatformType& platformType) SMTG_OVERRIDE;
     void PLUGIN_API close() SMTG_OVERRIDE;
     void valueChanged(VSTGUI::CControl* control) SMTG_OVERRIDE;
+    void controlBeginEdit(VSTGUI::CControl* control) SMTG_OVERRIDE;
+    void controlEndEdit(VSTGUI::CControl* control) SMTG_OVERRIDE;
     VSTGUI::CMessageResult notify(VSTGUI::CBaseObject* sender, const char* message) SMTG_OVERRIDE;
     Steinberg::tresult PLUGIN_API getSize(Steinberg::ViewRect* size) SMTG_OVERRIDE;
     Steinberg::tresult PLUGIN_API onSize(Steinberg::ViewRect* newSize) SMTG_OVERRIDE;
@@ -174,10 +186,18 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     bool Resize();
     // Records a change by the user; `settled` follows once it has stopped.
     void UserChanged();
+    // Sets a switch's parameter as one edit of the user.
+    void EditSwitch(Steinberg::Vst::ParamID id, bool on);
+    // Lights the key at which the sequence's tonic sounds, while keys transpose.
+    void UpdateMarkedKey();
 
-    std::array<Knob, 4> knobs_{};
-    KeyboardView* keyboard_view_ = nullptr; // owned by the frame
+    std::array<Knob, 13> knobs_{};
+    KeyboardView* keyboard_view_ = nullptr; // owned by the frame, as all below
     ToggleButton* keyboard_button_ = nullptr;
+    ToggleButton* transpose_button_ = nullptr;
+    ToggleButton* run_button_ = nullptr;
+    ToggleButton* octave_down_ = nullptr;
+    ToggleButton* octave_up_ = nullptr;
     double scale_ = 1.0; // the host's display scale factor
     EditorSettings settings_;
     EditorCallbacks callbacks_;
