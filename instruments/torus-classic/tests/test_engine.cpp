@@ -1,6 +1,6 @@
 // Tests of the dry engine (layer 2) on its own: comparison with the pinned
-// firmware engine, the six models, note handling, instance isolation and
-// freedom from allocation while rendering.
+// firmware engine, the six models, note handling, instance isolation, more
+// than four voices, rest, and freedom from allocation while rendering.
 
 #define TEST_SUPPORT_COUNT_ALLOCATIONS
 #include "test_support.h"
@@ -18,6 +18,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <xmmintrin.h>
 
 using namespace torus_classic;
 using namespace test_support;
@@ -828,6 +829,265 @@ void TestInstanceIsolation() {
                 "that create and destroy instances, and across threads\n");
 }
 
+// --- More than four voices: banks ---------------------------------------------
+
+// Denormal numbers count as zero, as they do while the adapter renders.
+class FlushDenormals {
+  public:
+    FlushDenormals() : saved_(_mm_getcsr()) { _mm_setcsr(saved_ | 0x8040u); }
+    ~FlushDenormals() { _mm_setcsr(saved_); }
+    FlushDenormals(const FlushDenormals&) = delete;
+    FlushDenormals& operator=(const FlushDenormals&) = delete;
+
+  private:
+    unsigned int saved_;
+};
+
+bool AllZero(const std::vector<float>& x, std::size_t from = 0) {
+    for(std::size_t i = from; i < x.size(); ++i)
+        if(x[i] != 0.0f)
+            return false;
+    return true;
+}
+
+void TestPolyphony() {
+    const FlushDenormals flush;
+    float left[kQ], right[kQ];
+
+    // The number of voices: whole banks of four, at least one, at most four.
+    {
+        DryEngine engine;
+        CHECK(engine.Polyphony() == 4 && engine.RenderedBanks() == 1);
+        const std::pair<unsigned, unsigned> asked[] = {{0, 4},  {3, 4},   {4, 4},   {5, 4},  {8, 8},
+                                                       {12, 12}, {15, 12}, {16, 16}, {17, 16},
+                                                       {32, 16}, {1000, 16}};
+        for(const auto& [voices, expected] : asked) {
+            engine.SetPolyphony(voices);
+            CHECK(engine.Polyphony() == expected);
+            engine.JumpPolyphony(voices);
+            CHECK(engine.Polyphony() == expected);
+        }
+        engine.Reset();
+        CHECK(engine.Polyphony() == 4);
+        for(unsigned bank = 0; bank < 4; ++bank) // each bank its own noise source
+            CHECK(engine.NoiseState(bank) == DryEngine::kDefaultSeed + bank * 0x9E3779B9u);
+    }
+
+    // Strikes fill the voices in turn, bank by bank; four per bank start in
+    // one quantum; on a full instrument a strike takes the voice that was
+    // struck longest ago.
+    for(const unsigned voices : {4u, 8u, 16u}) {
+        DryEngine engine;
+        engine.Reset(kSeed);
+        engine.JumpPolyphony(voices);
+        for(unsigned i = 0; i < 20; ++i)
+            CHECK(engine.NoteOn(40 + i, 100));
+        engine.Render(left, right);
+        CHECK(engine.TriggerCount() == voices && engine.PendingNotes() == 20 - voices);
+        CHECK(engine.RenderedBanks() == voices / 4);
+        for(unsigned voice = 0; voice < voices; ++voice)
+            CHECK(engine.VoiceNote(voice) == 40.0f + voice);
+        engine.Render(left, right);
+        const unsigned second = std::min(voices, 20 - voices);
+        CHECK(engine.TriggerCount() == voices + second);
+        for(unsigned voice = 0; voice < second; ++voice)
+            CHECK(engine.VoiceNote(voice) == 40.0f + voices + voice);
+        for(unsigned voice = second; voice < voices; ++voice)
+            CHECK(engine.VoiceNote(voice) == 40.0f + voice);
+        for(int q = 0; q < 8; ++q)
+            engine.Render(left, right);
+        CHECK(engine.TriggerCount() == 20 && engine.PendingNotes() == 0);
+    }
+
+    Score four_notes;
+    for(unsigned note : {48u, 55u, 60u, 64u})
+        Note(four_notes, 10, note, 110);
+    const auto sustained = [&](unsigned model, unsigned voices) {
+        auto engine = std::make_unique<DryEngine>();
+        engine->Reset(kSeed);
+        engine->JumpModel(model);
+        engine->JumpControl(Control::Damping, 0.9f); // rings for a long time
+        engine->JumpPolyphony(voices);
+        return engine;
+    };
+
+    for(const unsigned model : {0u, 2u, 3u, 4u}) {
+        // As long as no more than four strikes have come, more voices change
+        // nothing: the first bank is the four-voice instrument, alone.
+        auto four = sustained(model, 4);
+        auto sixteen = sustained(model, 16);
+        const auto four_out = Play(*four, four_notes, 1500);
+        CHECK(Same(four_out, Play(*sixteen, four_notes, 1500)));
+        CHECK(Energy(four_out) > 1.0 && sixteen->RenderedBanks() == 1);
+        // A fifth strike takes over the first note with four voices and
+        // leaves it alone with sixteen.
+        Score fifth;
+        Note(fifth, 0, 72, 110);
+        const auto stolen = Play(*four, fifth, 1500);
+        const auto added = Play(*sixteen, fifth, 1500);
+        CHECK(!Same(stolen, added));
+        CHECK(four->VoiceNote(0) == 72.0f);
+        CHECK(sixteen->VoiceNote(0) == 48.0f && sixteen->VoiceNote(4) == 72.0f);
+        CHECK(sixteen->RenderedBanks() == 2);
+        CheckBounded(added);
+    }
+
+    // More voices while notes ring: they ring on, sample for sample, and the
+    // next strikes go to the new voices first.
+    {
+        auto four = sustained(2, 4);
+        auto grown = sustained(2, 4);
+        Play(*four, four_notes, 300);
+        Play(*grown, four_notes, 300);
+        grown->SetPolyphony(16);
+        CHECK(Same(Play(*four, {}, 1000), Play(*grown, {}, 1000)));
+        CHECK(grown->NoteOn(72, 110));
+        grown->Render(left, right);
+        CHECK(grown->VoiceNote(0) == 48.0f && grown->VoiceNote(4) == 72.0f);
+    }
+
+    // Fewer voices while sixteen notes ring: the notes of the banks that go
+    // fade out within 192 samples; those of the first bank ring on as if the
+    // others had never been there.
+    for(const unsigned model : {0u, 2u, 3u}) {
+        Score sixteen_notes = four_notes; // the first four go to the first bank
+        for(unsigned i = 0; i < 12; ++i)
+            Note(sixteen_notes, 10, 36 + 3 * i, 100);
+        auto four = sustained(model, 4);
+        auto shrunk = sustained(model, 16);
+        Play(*four, four_notes, 500);
+        const auto full = Play(*shrunk, sixteen_notes, 500);
+        CheckBounded(full);
+        CHECK(shrunk->RenderedBanks() == 4 && shrunk->TriggerCount() == 16);
+        shrunk->SetPolyphony(4);
+        const auto fading = Play(*shrunk, {}, 18);
+        CheckBounded(fading);
+        Play(*four, {}, 18);
+        CHECK(shrunk->RenderedBanks() == 1);
+        const auto rest = Play(*four, {}, 1000);
+        CHECK(Same(rest, Play(*shrunk, {}, 1000)) && Energy(rest) > 0.1);
+        // The banks that went are as new: their noise sources too.
+        for(unsigned bank = 1; bank < 4; ++bank)
+            CHECK(shrunk->NoiseState(bank) == kSeed + bank * 0x9E3779B9u);
+    }
+
+    // Down and up again within the fade: strikes for a bank that is still
+    // fading out wait until it is back, a few quanta at most.
+    {
+        Score sixteen_notes;
+        for(unsigned i = 0; i < 16; ++i)
+            Note(sixteen_notes, 10, 36 + 3 * i, 100);
+        auto engine = sustained(2, 16);
+        Play(*engine, sixteen_notes, 500);
+        engine->SetPolyphony(4);
+        engine->Render(left, right);
+        engine->Render(left, right);
+        engine->SetPolyphony(16);
+        for(unsigned i = 0; i < 16; ++i)
+            CHECK(engine->NoteOn(40 + i, 100));
+        engine->Render(left, right);
+        CHECK(engine->PendingNotes() == 16 && engine->TriggerCount() == 16);
+        int quanta = 1;
+        for(; engine->PendingNotes() > 0 && quanta < 100; ++quanta)
+            engine->Render(left, right);
+        CHECK(quanta <= 18 && engine->TriggerCount() == 32 && engine->RenderedBanks() == 4);
+        // The new strikes went to the banks that came back, then to the first.
+        CHECK(engine->VoiceNote(4) == 40.0f && engine->VoiceNote(15) == 51.0f);
+        CHECK(engine->VoiceNote(0) == 52.0f && engine->VoiceNote(3) == 55.0f);
+    }
+
+    // A bank beyond the first is rendered only while it sounds: a second
+    // after its last sample other than zero it is put away, as new.
+    {
+        DryEngine engine;
+        engine.Reset(kSeed);
+        engine.JumpControl(Control::Damping, 0.0f); // short notes
+        engine.JumpPolyphony(16);
+        Score notes;
+        for(unsigned i = 0; i < 6; ++i)
+            Note(notes, 10, 50 + 4 * i, 110);
+        Play(engine, notes, 20);
+        CHECK(engine.RenderedBanks() == 2);
+        std::uint32_t quanta = 20, last_sound = 0;
+        while(engine.RenderedBanks() > 1 && quanta < 400000) {
+            engine.Render(left, right);
+            for(int i = 0; i < kQ; ++i)
+                if(left[i] != 0.0f || right[i] != 0.0f)
+                    last_sound = quanta;
+            ++quanta;
+        }
+        CHECK(engine.RenderedBanks() == 1);
+        CHECK(engine.NoiseState(1) == kSeed + 0x9E3779B9u);
+        std::printf("  a second bank with two short notes is put away after %.2f s; the last "
+                    "output sample other than zero came at %.2f s\n",
+                    quanta / 4000.0, last_sound / 4000.0);
+        // It wakes with its next strike, here the seventh and eighth of the
+        // round; put away, it starts with its first voice again.
+        CHECK(engine.NoteOn(60, 100) && engine.NoteOn(64, 100));
+        engine.Render(left, right);
+        CHECK(engine.RenderedBanks() == 2);
+        CHECK(engine.VoiceNote(4) == 60.0f && engine.VoiceNote(5) == 64.0f);
+    }
+
+    // Level: a note is as loud as with four voices; sixteen of them at once
+    // are held by the engine's output stage like anything else.
+    std::printf("  peak of the engine's output, sixteen loud notes in one quantum:\n");
+    for(unsigned model = 0; model < 6; ++model) {
+        float peak[2] = {};
+        int at = 0;
+        for(const unsigned voices : {4u, 16u}) {
+            DryEngine engine;
+            engine.Reset(kSeed);
+            engine.JumpModel(model);
+            engine.JumpControl(Control::Excitation, 1.0f);
+            engine.JumpPolyphony(voices);
+            Score chord;
+            for(unsigned i = 0; i < 16; ++i)
+                Note(chord, 10, 36 + 3 * i, 127);
+            const auto out = Play(engine, chord, 4000);
+            CheckBounded(out);
+            peak[at++] = Peak(out);
+        }
+        std::printf("    %-20s four voices %.3f, sixteen voices %.3f\n", kModelNames[model],
+                    peak[0], peak[1]);
+        CHECK(peak[1] < 0.8f);
+    }
+
+    // A model change reaches every bank, also those that are put away.
+    {
+        auto engine = sustained(2, 16);
+        Score notes;
+        for(unsigned i = 0; i < 8; ++i)
+            Note(notes, 10, 40 + 3 * i, 100);
+        Play(*engine, notes, 100);
+        engine->SetModel(3);
+        Play(*engine, {}, 40);
+        CHECK(engine->Model() == 3);
+        Score more;
+        for(unsigned i = 0; i < 16; ++i)
+            Note(more, 0, 40 + 2 * i, 100);
+        const auto fm = Play(*engine, more, 400);
+        CheckBounded(fm);
+        // The same strikes on a fresh engine in that model: the same sound
+        // from every bank, the first included.
+        DryEngine fresh;
+        fresh.Reset(kSeed);
+        fresh.JumpModel(3);
+        fresh.JumpControl(Control::Damping, 0.9f);
+        fresh.JumpPolyphony(16);
+        Score shifted = more;
+        // The fresh engine starts its strikes at the first voice, the used
+        // one at the ninth: compare the energy, not the samples.
+        const auto reference = Play(fresh, shifted, 400);
+        const double ratio = Energy(fm) / Energy(reference);
+        CHECK(ratio > 0.5 && ratio < 2.0);
+    }
+    std::printf("polyphony: 4, 8 and 16 voices as banks of four; strikes in turn, the oldest "
+                "voice taken while the number stays; up to four strikes unchanged by more voices; more voices leave "
+                "ringing notes alone, fewer fade the other banks out in 4 ms; idle banks are "
+                "put away\n");
+}
+
 // --- No allocation while rendering ------------------------------------------
 
 void TestNoAllocation() {
@@ -843,11 +1103,27 @@ void TestNoAllocation() {
                 Apply(engine, score[next]);
             if(q % 250 == 0)
                 engine.SetModel((q / 250) % 6); // every model's (re)configuration
+            if(q % 100 == 50) // every number of voices: banks come, go and are put back
+                engine.SetPolyphony(4u << ((q / 100) % 3));
             if(q == 2900)
                 engine.Reset(1);
             engine.Render(left, right);
         }
         CHECK(probe.Count() == 0);
+    }
+    {
+        // A bank put away for being silent is rebuilt in place, too.
+        const FlushDenormals flush;
+        const AllocationProbe probe;
+        engine.Reset(kSeed);
+        engine.JumpControl(Control::Damping, 0.0f);
+        engine.JumpPolyphony(16);
+        for(unsigned i = 0; i < 16; ++i)
+            engine.NoteOn(40 + 2 * i, 100);
+        std::uint32_t q = 0;
+        for(; q < 400000 && (q < 10 || engine.RenderedBanks() > 1); ++q)
+            engine.Render(left, right);
+        CHECK(engine.RenderedBanks() == 1 && probe.Count() == 0);
     }
     {
         const AllocationProbe probe; // the probe itself works
@@ -873,6 +1149,7 @@ int main() {
     TestOutputStage();
     TestReset();
     TestInstanceIsolation();
+    TestPolyphony();
     TestNoAllocation();
     std::printf("PASS\n");
     return 0;

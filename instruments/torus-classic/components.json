@@ -3,7 +3,7 @@
   "product": {
     "id": "torus-classic",
     "name": "Kekulé",
-    "version": "0.2.2",
+    "version": "0.3.1",
     "vendor": "TAUREON",
     "format": "VST3",
     "platform": "Windows x64",
@@ -22,8 +22,8 @@
       "id": "torus-classic.engine",
       "path": "engine/",
       "layer": 2,
-      "version": "0.1.0",
-      "description": "Dry four-voice instrument: note FIFO, triggers, parameter smoothing, model changes, output stage; no reverb",
+      "version": "0.2.1",
+      "description": "Dry instrument, 4 to 16 voices in banks of four: note FIFO, triggers, parameter smoothing, model changes, output stage; no reverb",
       "interface": "engine/dry_engine.h",
       "depends_on": [
         "torus-classic.core"
@@ -44,7 +44,7 @@
       "id": "torus-classic.shell",
       "path": "source/",
       "layer": 4,
-      "version": "0.2.2",
+      "version": "0.3.1",
       "description": "VST3 processor, controller, state and editor",
       "depends_on": [
         "torus-classic.engine",
@@ -346,7 +346,7 @@
       "relation": "adapted",
       "origin_sha256": "3c9e1eebdf2c48f1163b1c9789902db2f6b9ecee4aa66df2b80969e8c4fc8254",
       "origin_git_blob": "f1996afbeaef3c4d5f10f67c4fb7723a4f37e0aa",
-      "local_sha256": "dc9c326660fc0a5834564732ecacaab1504c264cdecb1c7f42eb4c03bcfa84b8"
+      "local_sha256": "0464cf508533ff9b4694b11718a7a07736def064709f4b459ad850e095fd6ced"
     },
     {
       "local": "engine/synth.cpp",
@@ -354,7 +354,7 @@
       "relation": "adapted",
       "origin_sha256": "ae92a5282455ed0ea4df0861fde1c492d769b9b34737c7eeb99d2d9363d318f1",
       "origin_git_blob": "93cc8947d10626391610ac6fedc0075759ce5fd2",
-      "local_sha256": "a3a812db7aea7b2cb11022e3b18f44966c0d6e69546948296861e562684d161e"
+      "local_sha256": "a6525d37841dfd6027617dfcfe8ef79bc375da83666acd1689c02ec7664fcc40"
     },
     {
       "local": "source/spsc_queue.h",

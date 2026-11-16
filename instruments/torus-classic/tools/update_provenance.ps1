@@ -102,7 +102,7 @@ $manifest = [ordered]@{
         },
         [ordered]@{
             id = 'torus-classic.engine'; path = 'engine/'; layer = 2; version = $engineVersion
-            description = 'Dry four-voice instrument: note FIFO, triggers, parameter smoothing, model changes, output stage; no reverb'
+            description = 'Dry instrument, 4 to 16 voices in banks of four: note FIFO, triggers, parameter smoothing, model changes, output stage; no reverb'
             interface = 'engine/dry_engine.h'; depends_on = @('torus-classic.core')
             license = 'MIT (TAUREON)'
         },

@@ -223,6 +223,42 @@ class ModelParameter : public Parameter {
     OBJ_METHODS(ModelParameter, Parameter)
 };
 
+// The number of voices: 4, 8 or 16. Chosen in the window; the host cannot
+// automate it (no kCanAutomate) and no MIDI controller is assigned to it.
+class PolyphonyParameter : public Parameter {
+  public:
+    PolyphonyParameter(const TChar* title, ParamID tag)
+    : Parameter(title, tag, nullptr, kDefaultPolyphony, kPolyphonySteps, ParameterInfo::kIsList) {}
+
+    void toString(ParamValue normalized, String128 string) const SMTG_OVERRIDE {
+        Print(string, "%.0f", PolyphonyVoices(normalized));
+    }
+
+    // One of the offered numbers, optionally followed by "voices".
+    bool fromString(const TChar* string, ParamValue& normalized) const SMTG_OVERRIDE {
+        double voices = 0.0;
+        if(!ReadTyped(string, "voices", voices))
+            return false;
+        for(int choice = 0; choice < kPolyphonyChoices; ++choice) {
+            if(voices == kPolyphonyVoices[choice]) {
+                normalized = PolyphonyNormalized(choice);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    ParamValue toPlain(ParamValue normalized) const SMTG_OVERRIDE {
+        return PolyphonyIndex(normalized);
+    }
+    ParamValue toNormalized(ParamValue plain) const SMTG_OVERRIDE {
+        return PolyphonyNormalized(
+            static_cast<int>(std::lround(std::clamp(plain, 0.0, double{kPolyphonySteps}))));
+    }
+
+    OBJ_METHODS(PolyphonyParameter, Parameter)
+};
+
 // The pitch wheel, shown in semitones on the firmware's 14-bit curve.
 class PitchBendParameter : public Parameter {
   public:
@@ -282,6 +318,10 @@ tresult PLUGIN_API Controller::initialize(FUnknown* context) {
     parameters.addParameter(new FilterParameter(STR16("Filter"), kParamFilter));
     parameters.addParameter(
         new SwitchParameter(STR16("Tune Free"), kParamTuneFree, kDefaultTuneFree));
+    // Since 0.3.0. A setting of the instrument more than of the sound: it is
+    // saved with the project and reaches the processor like any parameter,
+    // but it is not for automation.
+    parameters.addParameter(new PolyphonyParameter(STR16("Polyphony"), kParamPolyphony));
     return kResultOk;
 }
 
@@ -292,7 +332,7 @@ tresult PLUGIN_API Controller::setComponentState(IBStream* state) {
     if(!ReadSavedValues(state, values))
         return kResultFalse;
     // The switch first: Tune's text depends on it.
-    setParamNormalized(kParamTuneFree, values[9]);
+    setParamNormalized(kParamTuneFree, values[kSavedTuneFree]);
     for(int i = 0; i < kSavedParamCount; ++i)
         setParamNormalized(kFirstParam + static_cast<ParamID>(kSavedIndex[static_cast<std::size_t>(i)]),
                            values[static_cast<std::size_t>(i)]);
@@ -316,7 +356,7 @@ tresult PLUGIN_API Controller::getState(IBStream* state) {
         return kInvalidArgument;
     IBStreamer stream(state, kLittleEndian);
     if(!stream.writeInt32(kControllerStateVersion) || !stream.writeDouble(editor_.zoom)
-       || !stream.writeInt8(editor_.keyboard ? 1 : 0))
+       || !stream.writeInt8(editor_.keyboard ? 1 : 0) || !stream.writeInt32(editor_.transpose))
         return kResultFalse;
     return kResultOk;
 }
@@ -329,13 +369,19 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
     int32 version = 0;
     double zoom = 1.0;
     int8 keyboard = 1;
-    if(!stream.readInt32(version) || version != kControllerStateVersion
+    int32 transpose = kKeyboardDefaultTranspose; // version 1 had none: the new start
+    if(!stream.readInt32(version) || (version != 1 && version != kControllerStateVersion)
        || !stream.readDouble(zoom) || !stream.readInt8(keyboard))
+        return kResultFalse;
+    if(version >= 2 && (!stream.readInt32(transpose) || transpose % 12 != 0
+                        || transpose < -kKeyboardTransposeLimit
+                        || transpose > kKeyboardTransposeLimit))
         return kResultFalse;
     if(!std::isfinite(zoom) || (keyboard != 0 && keyboard != 1))
         return kResultFalse;
     editor_.zoom = ClampEditorZoom(zoom); // a finite zoom outside 50..200 % is pulled in
     editor_.keyboard = keyboard != 0;
+    editor_.transpose = transpose;
     for(const OpenEditor& open : editors_)
         open.editor->ApplySettings(editor_);
     return kResultOk;
