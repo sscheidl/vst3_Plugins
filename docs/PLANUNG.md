@@ -66,10 +66,12 @@ Bei der Umsetzung selbst festgelegt, weil die Vorgaben es offen ließen:
 
 Viertes Plugin, Auftrag vom 2026-11-15, gebaut am 2026-11-16: der Klangkern
 von Toy Piano Classic, gespielt von einem generativen Schritt-Sequencer.
-Version 0.1.0 ist gebaut, vom validator geprüft und automatisch getestet. In
-einer DAW geladen, angesehen oder angehört ist sie nicht; die Prüfung durch
-Codex steht aus
-([Prüfauftrag](../instruments/toy-piano-generative/docs/CODEX_PRUEFAUFTRAG_0.1.0.md),
+Version 0.1.0 spielt in Studio One; der Nutzer am 2026-11-16: „Das Plugin und
+der Algorithmus funktioniert. Es entstehen melodische, zufällige Melodien."
+Version 0.2.0 bringt die Ergänzungen, die er danach verlangt hat; sie ist
+gebaut und automatisch geprüft, in einer DAW aber noch nicht. Die Prüfung
+durch Codex steht für beide Versionen aus
+([Prüfauftrag 0.2.0](../instruments/toy-piano-generative/docs/CODEX_PRUEFAUFTRAG_0.2.0.md),
 [DAW-Prüfliste](../instruments/toy-piano-generative/docs/DAW_TEST_0.1.0.md)).
 
 Der Sequencer ist ein statistischer Nachbau nach einer Verhaltensspezifikation
@@ -120,7 +122,20 @@ Bei der Umsetzung selbst festgelegt, weil der Auftrag es offen ließ:
 | Regler-Edits | Ein Ziehen meldet dem Host Anfang und Ende (`beginEdit`, `endEdit`) | Für die Schalter nötig; für die Regler mit eingebaut. Toy Piano Classic tut das nicht, siehe „Offen" |
 | Tests | Statistik mit festen Startwerten und Schranke von fünf Standardabweichungen; Schritte bitgenau gegen den Kern; keine neuen Fenstertests außer den Oktavknöpfen | Der Nutzer prüft Optik, GUI und DAW selbst |
 
-Nicht in 0.1.0: Parameter-Locks, Gate-, Hüllkurven- und Glide-Regeln, zweiter
+Vom Nutzer nach dem ersten Test verlangt und in 0.2.0 umgesetzt (2026-11-16);
+die Einzelheiten selbst festgelegt:
+
+| Thema | Festlegung | Begründung |
+| --- | --- | --- |
+| Mutationssperre | Schloss-Symbol unten rechts am Mutation-Regler, Parameter 121. Zu: kein Algorithmus ändert das Muster, und der Zufallsgenerator steht. Tonic und Scale wirken weiter | Vorgabe des Nutzers: „Sequenz eingefroren und nicht mutiert bis der Lock aufgehoben wird". Tonika und Skalenwahl sind gezielte Eingriffe, keine Mutation; ein Schloss, das sie sperrt, würde verwirren |
+| Namen der Algorithmen | Drift, Runs, Ladder, Breathe, Focus; die Erklärung als Tooltip über dem Namen und dem Regler. Eingabe per Name oder Zahl | Vorgabe: Namen, „unter denen man sich etwas vorstellen kann", ersatzweise Elementnamen. Beschreibende Namen gingen; Elementnamen bleiben als Möglichkeit, falls diese nicht gefallen |
+| Weitere Skalen | Zehn dazu, 17 insgesamt: Kirchentonarten (ohne Lokrisch), harmonisch und melodisch Moll, Dur-Pentatonik, Blues, Ganzton, Hirajoshi. Jede Liste aufwärts und mit der Tonika am Ende, wie die Listen der Spezifikation | Vorgabe: „weitere geeignete / sinnvolle Skalen". Die Regel der zusätzlichen Tonika hält den Anteil der Tonika bei allen Skalen ähnlich |
+| Reihenfolge der Skalen | Erst die üblichen, dann die besonderen; „Pentatonic" heißt jetzt „Minor Pent." | Eine Liste von 17 Einträgen braucht eine Ordnung; 0.1.0 ist noch nicht gemergt |
+| Mutation nach Durchläufen | Kleiner Regler links unten an Mutation, Parameter 122: „-" (Vorgabe) mutiert wie in der Spezifikation bei jeder Sechzehntel; 1 bis 16 lässt das Muster so oft unverändert laufen, dann beginnt der nächste Durchlauf mit allen Versuchen eines Durchlaufs auf einmal | Vorschlag des Nutzers: „nach wie vielen Wiederholungen der Sequenz eine Mutation erfolgen soll", 0 = wie gesperrt. Statt 0 gibt es „-", weil das Schloss schon einfriert und die laufende Mutation der Spezifikation sonst verloren ginge. Ein Durchlauf auf einmal, damit Mutation weiter „wie viel" heißt. Der Nutzer war unsicher und entscheidet nach dem Ausprobieren |
+| Abdunkeln bei Ladder | Mutation, Notes, Schloss und kleiner Regler halbdurchsichtig, solange Algorithmus 3 gewählt ist; bedienbar bleiben sie | Der Nutzer hielt ein Muster, das bei voller Mutation stehen blieb, für einen Fehler: Ladder war gewählt, das nach der Spezifikation nie mutiert |
+| Alte Projekte | Zustand Version 2; Version 1 lädt mit offener Sperre, laufender Mutation und ihrer Skala unter der neuen Nummer. Automation von Scale aus 0.1.0 zeigt danach auf andere Skalen | Der Regler hat jetzt 17 statt 7 Stufen; normierte Automationswerte lassen sich nicht umrechnen. Betrifft nur Testprojekte |
+
+Nicht in 0.2.0: Parameter-Locks, Gate-, Hüllkurven- und Glide-Regeln, zweiter
 Oszillator, LFO-Wege, Sync-Impulse, Schrittanzeige, Feinstimmung, die
 „Age"-Idee, der Bau für Daisy.
 
@@ -281,6 +296,19 @@ wichtigste Unbekannte ist die MIDI-Steuerung: VST3 reicht Controller nicht roh
 durch. Das Plugin meldet dem Host, welcher Controller zu welchem Parameter
 gehört; ob Pitch Bend und die drei CCs ankommen, entscheidet der Host. Das
 lässt sich nur in Studio One, Waveform und Live selbst feststellen.
+
+### Toy Piano Generative: Schritt-Sequencer (für einen späteren Build)
+
+Wunsch des Nutzers vom 2026-11-16, wörtlich: „für späteres Build zusätzlicher
+monophoner / polyphoner Stepsequencer mit 16, später 32 Steps, dazu weiter
+Button (Step) mit eigener Ansichtsseite. Dieser sollte auch generativ
+‚Mutieren' können: a) Tonhöhen innerhalb der ausgewählten Skala b) Rhythmus der
+Noten." Vorbild ist ein Sequencer-Modul, dessen Firmware als Nächstes in L2A
+untersucht wird; daraus soll, wie beim jetzigen Sequencer, eine
+Verhaltensspezifikation entstehen. Noch nichts entschieden oder gebaut.
+
+Ebenfalls offen: eine Schrittanzeige für den generativen Sequencer. Der
+Nutzer denkt über die Form nach.
 
 ### Toy Piano Classic: Regler ohne `beginEdit`/`endEdit`
 

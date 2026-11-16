@@ -1,5 +1,32 @@
 # Changes
 
+## 0.2.0 (2026-11-16)
+
+After the owner's first test of 0.1.0 in Studio One ("Das Plugin und der
+Algorithmus funktioniert. Es entstehen melodische, zufällige Melodien"), three
+additions they asked for:
+
+* **Mutation lock.** A small padlock at the lower right of the Mutation knob,
+  and the parameter Mutation Lock. Closed, the pattern is frozen: no algorithm
+  changes it until the lock is opened. Tonic and scale still work.
+* **Mutate every.** A small knob at the lower left of Mutation, with the number
+  in its middle. At "-" mutation runs on every sixteenth as before; at 1 to 16
+  the pattern repeats that many passes unchanged, then the next pass begins
+  changed, by as much as one pass would have changed it.
+* **Ladder dims what it does not use.** While algorithm 3 is chosen, Mutation,
+  Notes, the lock and the small knob are dimmed; it plays the scale itself and
+  never mutates. A pattern that stopped changing at full Mutation was this.
+* **Names for the algorithms.** Drift, Runs, Ladder, Breathe, Focus instead of
+  1 to 5. Resting the mouse on the name, or on the knob, shows what the
+  algorithm does. Typed values take the name or the number.
+* **Ten more scales**, seventeen in all: Dorian, Phrygian, Lydian, Mixolydian,
+  harmonic and melodic minor, major pentatonic, blues, whole tone, hirajoshi.
+  The former Pentatonic is now Minor Pent.
+
+The saved state is version 2. Projects from 0.1.0 load: the lock open,
+mutation on every sixteenth, each scale under its new number. Automation of Scale recorded with 0.1.0 points to
+other scales now, as the knob has more positions.
+
 ## 0.1.0 (2026-11-16)
 
 First version: the sound engine of Toy Piano Classic 0.3.2, played by a

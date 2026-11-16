@@ -2,7 +2,7 @@
 
 # Its own version; moduleinfo.json takes it from here. Keep it equal to
 # FULL_VERSION_STR in source/version.h.
-project(ToyPianoGenerative VERSION 0.1.0 LANGUAGES CXX)
+project(ToyPianoGenerative VERSION 0.2.0 LANGUAGES CXX)
 
 # The sequencer on its own: plain C++, no SDK, no plug-in types. /fp:precise
 # because the SDK's /fp:fast would let the compiler assume away the NaN check

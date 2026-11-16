@@ -32,6 +32,10 @@ enum ParamId : std::uint32_t {
     kParamTuning = 119,
     // Keys and MIDI notes transpose the sequence instead of playing a note.
     kParamKeysTranspose = 120,
+    // Freezes the pattern: no mutation while it is on.
+    kParamMutationLock = 121,
+    // Mutation on every tick, or after a number of unchanged passes.
+    kParamMutateEvery = 122,
 };
 
 // MIDI controllers the host routes to the parameters above, on every channel.
@@ -58,6 +62,7 @@ constexpr int kTonicSteps = generative::kNumTonics - 1;
 constexpr int kOctaveSteps = generative::kMaxOctave;
 constexpr int kLengthSteps = generative::kNumSteps - 1;
 constexpr int kClockDivideSteps = generative::kNumClockDivides - 1;
+constexpr int kMutateEverySteps = generative::kMaxMutateEvery;
 
 // Defaults as normalized values (0..1). Attack and decay use the position of
 // the firmware's pots VR1 and VR2: 0 is fully left.
@@ -79,6 +84,38 @@ constexpr double kDefaultLength = 1.0;      // 16 steps
 constexpr double kDefaultClockDivide = 0.0; // every sixteenth
 constexpr double kDefaultTuning = 0.0;      // exact
 constexpr double kDefaultKeysTranspose = 1.0;
+constexpr double kDefaultMutationLock = 0.0;
+constexpr double kDefaultMutateEvery = 0.0; // on every tick, as the rules say
+
+// The five algorithms, by name, and what each does: shown as the value of
+// the Algorithm parameter and as the tooltip over it.
+struct AlgorithmInfo {
+    const char* name;
+    const char* description;
+};
+constexpr AlgorithmInfo kAlgorithms[generative::kNumAlgorithms] = {
+    {"Drift",
+     "Drift: now and then one of the 16 steps is drawn anew, also steps beyond the length. "
+     "Mutation sets how often."},
+    {"Runs",
+     "Runs: like Drift, and now and then three steps become a run up the scale. Mutation and "
+     "Notes set how often."},
+    {"Ladder",
+     "Ladder: plays the notes of the scale in order, one per step. The pattern is kept but not "
+     "heard; nothing mutates."},
+    {"Breathe",
+     "Breathe: like Drift, but every second pass through the pattern is silent."},
+    {"Focus",
+     "Focus: changes only the step being played. Up to 50 % only its pitch, so the rhythm stays; "
+     "above, it can also turn notes into rests and back."},
+};
+
+// The scales, in the order of the sequencer's modes.
+constexpr const char* kScaleNames[generative::kNumScaleModes] = {
+    "Major",       "Minor",      "Dorian",     "Phrygian",   "Lydian",
+    "Mixolydian",  "Harm. Minor", "Mel. Minor", "Major Pent.", "Minor Pent.",
+    "Blues",       "Whole Tone", "Hirajoshi",  "Odd",        "Octave",
+    "Fifths",      "Tonic"};
 
 // The sequencer's notes sound this many semitones higher than their numbers:
 // its default register then lies in the Toy Piano's own, around its keys.
@@ -106,7 +143,8 @@ constexpr int ParamSteps(std::uint32_t id) {
     switch(id) {
         case kParamMasterPitch: return kMasterPitchSteps;
         case kParamRun:
-        case kParamKeysTranspose: return 1;
+        case kParamKeysTranspose:
+        case kParamMutationLock: return 1;
         case kParamAlgorithm: return kAlgorithmSteps;
         case kParamNoteProbability: return kNoteProbabilitySteps;
         case kParamScale: return kScaleSteps;
@@ -114,6 +152,7 @@ constexpr int ParamSteps(std::uint32_t id) {
         case kParamOctave: return kOctaveSteps;
         case kParamLength: return kLengthSteps;
         case kParamClockDivide: return kClockDivideSteps;
+        case kParamMutateEvery: return kMutateEverySteps;
         default: return 0;
     }
 }
@@ -123,6 +162,9 @@ inline double SnapToStep(std::uint32_t id, double normalized) {
     const int steps = ParamSteps(id);
     return steps > 0 ? StepNormalized(StepIndex(normalized, steps), steps) : Clamp01(normalized);
 }
+
+// The algorithm that plays the scale itself and uses neither Mutation nor Notes.
+constexpr int kLadderAlgorithm = 3;
 
 inline bool IsOn(double normalized) {
     return normalized >= 0.5;

@@ -59,7 +59,7 @@ class SharedWords {
 };
 
 // The sequencer's state and the number of the load request it stems from.
-constexpr std::size_t kStateWords = 5;
+constexpr std::size_t kStateWords = 6;
 using StateWords = SharedWords<kStateWords>::Words;
 
 inline StateWords PackState(const generative::State& state, std::uint32_t generation) {
@@ -76,6 +76,9 @@ inline StateWords PackState(const generative::State& state, std::uint32_t genera
                | static_cast<std::uint64_t>(state.at_start) << 24
                | static_cast<std::uint64_t>(generation) << 32;
     words[4] = state.random;
+    words[5] = static_cast<std::uint64_t>(state.mutation_lock)
+               | static_cast<std::uint64_t>(state.mutate_every) << 8
+               | static_cast<std::uint64_t>(state.passes) << 16;
     return words;
 }
 
@@ -101,6 +104,9 @@ inline generative::State UnpackState(const StateWords& words) {
     state.loop_on = static_cast<std::uint8_t>(words[3] >> 16);
     state.at_start = static_cast<std::uint8_t>(words[3] >> 24);
     state.random = words[4];
+    state.mutation_lock = static_cast<std::uint8_t>(words[5]);
+    state.mutate_every = static_cast<std::uint8_t>(words[5] >> 8);
+    state.passes = static_cast<std::uint8_t>(words[5] >> 16);
     return state;
 }
 

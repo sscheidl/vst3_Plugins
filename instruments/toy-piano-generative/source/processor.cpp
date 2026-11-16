@@ -187,6 +187,10 @@ void Processor::ReadParameterChanges(IParameterChanges& changes) {
             case kParamClockDivide:
                 sequencer_.SetClockDivide(StepIndex(value, kClockDivideSteps));
                 break;
+            case kParamMutationLock: sequencer_.SetMutationLock(IsOn(value)); break;
+            case kParamMutateEvery:
+                sequencer_.SetMutateEvery(StepIndex(value, kMutateEverySteps));
+                break;
             default: continue;
         }
         state_changed_ = true;

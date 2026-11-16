@@ -1,13 +1,17 @@
 # Toy Piano Generative
 
-VST3 instrument, version 0.1.0. The sound engine of
+VST3 instrument, version 0.2.0. The sound engine of
 [Toy Piano Classic](../toy-piano-classic/) played by a generative step
 sequencer: sixteen steps that are drawn at random from a scale and keep
 rewriting themselves by rule, in time with the host.
 
-**Status:** builds, passes Steinberg's validator and its own tests. It has
-not been loaded in a DAW, its window has not been looked at, and **nobody has
-listened to it**, see [Still to be checked](#still-to-be-checked).
+**Status:** builds, passes Steinberg's validator and its own tests. Version
+0.1.0 plays in Studio One; the owner reported on 2026-11-16 that the plug-in
+and the algorithm work and make melodic random melodies. Version 0.2.0 adds
+the mutation lock, a choice to mutate only after a number of passes, names for
+the algorithms and ten more scales; it has not
+been in a DAW yet, and its window has not been looked at, see
+[Still to be checked](#still-to-be-checked).
 
 This is a test bed. The sequencer is a statistical rebuild after a behaviour
 specification of an existing generative sequencer, written by the owner and
@@ -37,17 +41,28 @@ Octave setting is added when a step is played, not stored.
 rest. Otherwise it becomes a note: the lower or the upper octave with equal
 chance, and with 30 % the tonic itself, else one entry of the scale's list,
 each entry equally likely. The lists end with one more tonic, which makes the
-tonic more likely still:
+tonic more likely still. Seven lists come from the specification (marked *);
+the other ten were added in 0.2.0 and follow the same rule:
 
 | Scale | List, semitones above the tonic | Share of notes on the tonic's pitch class |
 | --- | --- | --- |
-| Major | 0 2 4 5 7 9 11 0 | 47.5 % |
-| Minor | 0 2 3 5 7 8 10 0 | 47.5 % |
-| Pentatonic | 0 3 5 7 10 0 | 53.3 % |
-| Odd | −2 0 1 13 0 7 8 8 | 47.5 % |
-| Octave | 0 12 0 | 100 % |
-| Fifths | 0 7 12 0 | 82.5 % |
-| Tonic | 0 | 100 %, and always the lower octave |
+| Major * | 0 2 4 5 7 9 11 0 | 47.5 % |
+| Minor * | 0 2 3 5 7 8 10 0 | 47.5 % |
+| Dorian | 0 2 3 5 7 9 10 0 | 47.5 % |
+| Phrygian | 0 1 3 5 7 8 10 0 | 47.5 % |
+| Lydian | 0 2 4 6 7 9 11 0 | 47.5 % |
+| Mixolydian | 0 2 4 5 7 9 10 0 | 47.5 % |
+| Harm. Minor (harmonic) | 0 2 3 5 7 8 11 0 | 47.5 % |
+| Mel. Minor (melodic, ascending) | 0 2 3 5 7 9 11 0 | 47.5 % |
+| Major Pent. | 0 2 4 7 9 0 | 53.3 % |
+| Minor Pent. * | 0 3 5 7 10 0 | 53.3 % |
+| Blues | 0 3 5 6 7 10 0 | 50 % |
+| Whole Tone | 0 2 4 6 8 10 0 | 50 % |
+| Hirajoshi | 0 2 3 7 8 0 | 53.3 % |
+| Odd * | −2 0 1 13 0 7 8 8 | 47.5 % |
+| Octave * | 0 12 0 | 100 % |
+| Fifths * | 0 7 12 0 | 82.5 % |
+| Tonic * | 0 | 100 %, and always the lower octave |
 
 **A new instance** starts with a pattern of its own: every step is the tonic
 with the chance *Notes*, else a rest.
@@ -66,15 +81,38 @@ pattern starts over. Whenever the sequencer starts, it starts at step 1.
 **Within one tick:** advance, then mutate, then play. So a change that a tick
 makes to the step under the playhead is heard in that same tick.
 
-**Mutation**, by algorithm. Each tick tries once:
+**Mutation**, by algorithm. Each tick tries once. The window shows the
+algorithm's name; under the mouse, the name explains what it does.
 
 | Algorithm | What a tick does |
 | --- | --- |
-| 1 | With the chance *Mutation*, one of all sixteen steps is drawn anew. Steps beyond *Length* keep changing unheard. |
-| 2 | As 1. Then, with the chance *Mutation* × *Notes*, three steps in a row are written as a run up the scale's list, one or two entries at a time, an octave higher once the run passes the end of the list. |
-| 3 | No mutation. Plays the scale's list itself, entry after entry; the stored pattern is kept but not heard. |
-| 4 | As 1, and every second pass through the pattern is silent. |
-| 5 | Works on the step under the playhead. Up to 50 %: with half the chance *Mutation*, a note gets a new pitch; rests stay, so the rhythm never changes. Above 50 %: with the chance *Mutation* − 50 %, the step is drawn anew, rest included. |
+| 1 Drift | With the chance *Mutation*, one of all sixteen steps is drawn anew. Steps beyond *Length* keep changing unheard. |
+| 2 Runs | As Drift. Then, with the chance *Mutation* × *Notes*, three steps in a row are written as a run up the scale's list, one or two entries at a time, an octave higher once the run passes the end of the list. |
+| 3 Ladder | No mutation. Plays the scale's list itself, entry after entry; the stored pattern is kept but not heard. |
+| 4 Breathe | As Drift, and every second pass through the pattern is silent. |
+| 5 Focus | Works on the step under the playhead. Up to 50 %: with half the chance *Mutation*, a note gets a new pitch; rests stay, so the rhythm never changes. Above 50 %: with the chance *Mutation* − 50 %, the step is drawn anew, rest included. |
+
+**The mutation lock** freezes the pattern. While it is closed no algorithm
+changes a step, whatever *Mutation* says; the pattern plays as it stands, and
+Ladder and Breathe go on doing what they do. Changing the tonic still
+transposes it, and choosing another scale still draws a new one: both are
+deliberate acts, not mutation. Opened, the pattern mutates again from where it
+stands.
+
+**Mutate every.** By the rules, mutation is tried on every sixteenth, so the
+pattern can change in the middle of a pass. The small knob at the lower left
+of Mutation offers another way. At **-** (the default) it is as the rules say.
+At 1 to 16 the pattern plays that many whole passes unchanged; then the next
+pass begins with all the attempts that one pass would have made, at once, and
+plays changed from its first step. *Mutation* still sets how much changes: as
+much as during one pass on every sixteenth. Every start of the transport
+counts the passes anew; while the lock is closed they are not counted.
+
+How much one pass changes depends on the algorithm, as the table above says:
+Drift and Breathe redraw up to one step per sixteenth, Runs adds runs, Focus
+works on each step once per pass and at most with half the chance or with the
+chance above 50 %. Ladder uses neither Mutation nor Notes; while it is chosen
+both knobs, the lock and the small knob are shown dimmed.
 
 **The Mutation knob** is not linear: its first half covers 0 to 20 %, its
 second half 20 to 100 %, so that small amounts are easy to set.
@@ -99,10 +137,12 @@ Sequencer:
 | Control | Range | Default |
 | --- | --- | --- |
 | RUN | off, on | on |
-| Algorithm | 1 to 5 | 1 |
+| Algorithm | Drift, Runs, Ladder, Breathe, Focus (typed: the name or 1 to 5) | Drift |
 | Mutation | 0 to 100 % | 0 % |
+| Mutation Lock (the padlock at the lower right of Mutation) | off, on | off |
+| Mutate Every (the small knob at the lower left of Mutation) | Step (shown as -), 1 to 16 passes | Step |
 | Notes (Note Probability) | 0 to 100 % | 65 % |
-| Scale | Major, Minor, Pentatonic, Odd, Octave, Fifths, Tonic | Minor |
+| Scale | the 17 scales above | Minor |
 | Tonic | C, C#, D … B | A |
 | Octave | 0 to 5 | 2 |
 | Length | 1 to 16 steps | 16 |
@@ -157,7 +197,13 @@ Classic.
 ### Window
 
 Two rows of knobs, RUN, TRANSPOSE, and the screen keyboard, which **KEYS**
-shows and hides. The window scales as a whole between 50 % and 200 % and keeps
+shows and hides. A small padlock at the lower right of the Mutation knob is the
+mutation lock: closed and lit, the pattern is frozen. At its lower left a small
+knob with a number in its middle sets after how many passes the pattern
+mutates. Mutation, Notes and both small controls are dimmed while Ladder is
+chosen, which uses none of them. The name under the
+Algorithm knob, and the knob itself, explain the algorithm when the mouse rests
+on them. The window scales as a whole between 50 % and 200 % and keeps
 its aspect ratio; size, keyboard and its octave are saved with the project.
 Ctrl+click resets a knob; the mouse wheel moves a stepped knob by one step.
 
@@ -175,10 +221,15 @@ not sent to the host as MIDI.
 
 ## Saved with the project
 
-The sound settings, the sequencer's settings, RUN, TRANSPOSE, **the sixteen
-steps and the state of the random generator**. A reloaded project continues
+The sound settings, the sequencer's settings, RUN, TRANSPOSE, the mutation
+lock, mutate-every, **the sixteen steps and the state of the random
+generator**. How many passes have gone by is not saved. A reloaded project continues
 with the pattern it had and mutates on from there as the original would have.
 Loading does not draw a new pattern. Where the playhead stood is not saved.
+Projects saved with 0.1.0 load with the lock open, mutation on every step, and
+with their scale under
+its new number. Automation of Scale recorded with 0.1.0 now points to other
+scales: the knob has 17 positions instead of 7.
 
 ## Choices and deviations
 
@@ -211,6 +262,21 @@ Decided while building:
 * A new instance gets a random start, so two instances play different
   patterns.
 * The scale named "Odd" has no name in the specification.
+* The names of the algorithms (0.2.0). The owner asked for names one can
+  picture, with names of chemical elements as the fallback; names that say
+  what an algorithm does were possible.
+* The ten added scales and their order (0.2.0): the church modes, harmonic
+  and melodic minor, major pentatonic, blues, whole tone and hirajoshi, each
+  a list upwards with the tonic once more at its end, as in the
+  specification's lists. Locrian was left out as hardly usable here.
+* The mutation lock leaves the tonic and the scale choice working (0.2.0).
+* Mutate every (0.2.0): asked for by the owner as "after how many repetitions
+  a mutation follows", 1 to 16, with 0 meaning frozen. Built with "-" for the
+  rules' mutation on every sixteenth instead of 0, since the lock already
+  freezes, and with a whole pass's worth of attempts at once, so that Mutation
+  keeps its meaning. The owner was unsure and will decide after trying it.
+* Dimming the controls Ladder does not use (0.2.0), after the owner took a
+  pattern that stopped changing for a fault: Ladder was chosen.
 
 ## Left out of this version
 
@@ -249,10 +315,19 @@ administrator and rescan in the DAW.
 | Steinberg validator (SDK 3.8.0): Visual Studio 2026 Release and Debug, Visual Studio 2022 Release | 47 tests passed, 0 failed |
 | The other three plug-ins of the repository, built and tested in the same runs | validator and all tests passed |
 | Drawing, over 320 000 draws in Minor at Notes 65 %: rests 35 %, the tonic's pitch class 47.5 % of the notes, the upper octave 50 % | within the bound |
-| The tonic's share for each of the seven scales, 80 000 notes each | within the bound; Octave and Tonic exactly 100 % |
+| The tonic's share for each of the 17 scales, 80 000 notes each, against the share computed from lists typed into the test a second time | within the bound; Octave and Tonic exactly 100 % |
+| Mutation lock, each algorithm at Mutation 100 %, 4000 ticks: the pattern and the random generator stay as they are, the steps still play; the tonic still transposes; opened, it mutates again | passed |
+| Mutation lock in the plug-in: a pattern at algorithm Runs and 100 % plays exactly as stored for two seconds, then mutates once opened | bit-exact against the engine |
+| A state saved by 0.1.0: each of its seven scales lands on its new number, the lock is open, pattern and generator unchanged; in processor and controller | passed |
+| Mutate every 1, 3 and 16 passes, each algorithm but Ladder, length 5, divide 2: no change inside the passes, a change where a due pass begins, the count of passes as expected | passed |
+| Mutate every 1 against mutation on every sixteenth: steps changed per pass, 6000 passes each (Drift, 30 %) | 3.42 against 3.44, within the bound |
+| Mutate every: "-" gives the same pattern step for step as before the setting existed; restart and a new setting count anew; the lock stops the count | passed |
+| Mutate every 2 in the plug-in: two passes sound exactly as stored, the third starts changed | bit-exact against the engine |
+| The window: Mutation, Notes and their small controls dim while Ladder is chosen and come back; the small knob shows -, 4, 16 | passed |
+| Algorithm names as values, typed by name or number; each description begins with its name; the tooltip in the window follows the chosen algorithm; the lock button in the window is an edit and follows the parameter | passed |
 | Start-up pattern over 20 000 instances: the tonic or a rest, 65 % tonic | within the bound |
 | Algorithm 1 at Mutation 40 %, 200 000 ticks: redraw chance per step and tick 40 % / 16 | within the bound; all 16 steps equally, also beyond Length |
-| Algorithm 2: runs at Mutation 50 % × Notes 60 % = 30 % of the ticks; the shape of every run in all seven scales | within the bound; passed |
+| Algorithm 2: runs at Mutation 50 % × Notes 60 % = 30 % of the ticks; the shape of every run in all 17 scales | within the bound; passed |
 | Algorithm 5 at 40, 41 and 50 %: pitch changes with half the chance, the rhythm never; at 1 % nothing; at 80 % redraws with 30 % | within the bound; passed |
 | Order: with algorithm 5 a step's mutation is heard in that same step | passed |
 | Algorithm 3 ignores the stored pattern and keeps it; algorithm 4 is silent on exactly every second pass | passed |
@@ -278,10 +353,11 @@ standard deviations of the value its rule states.
 ## Still to be checked
 
 The list for the DAW is in [docs/DAW_TEST_0.1.0.md](docs/DAW_TEST_0.1.0.md).
-In short: nobody has listened to it; the window has not been looked at; how
-Studio One hands over tempo, position, loops and tempo changes; whether the
-host shows a transposition made by a MIDI note; automation of the sequencer
-parameters; save and reload; CPU load.
+In short, for 0.2.0: the window has not been looked at (the padlock, the
+small pass knob, the dimming, the tooltip, the longer scale names); the new
+scales, the lock and mutate-every have not been heard. From 0.1.0 still open: how Studio One hands over position, loops and
+tempo changes; whether the host shows a transposition made by a MIDI note;
+automation; save and reload; CPU load.
 
 ## Limits of this version
 

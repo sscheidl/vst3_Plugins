@@ -31,9 +31,23 @@ constexpr double kSigmas = 5.0;
 
 // The scale lists once more, typed in independently of the sequencer's table.
 const std::vector<std::vector<int>> kLists = {
-    {0, 2, 4, 5, 7, 9, 11, 0}, {0, 2, 3, 5, 7, 8, 10, 0}, {0, 3, 5, 7, 10, 0},
-    {-2, 0, 1, 13, 0, 7, 8, 8}, {0, 12, 0},               {0, 7, 12, 0},
-    {0},
+    {0, 2, 4, 5, 7, 9, 11, 0},  // major
+    {0, 2, 3, 5, 7, 8, 10, 0},  // minor
+    {0, 2, 3, 5, 7, 9, 10, 0},  // dorian
+    {0, 1, 3, 5, 7, 8, 10, 0},  // phrygian
+    {0, 2, 4, 6, 7, 9, 11, 0},  // lydian
+    {0, 2, 4, 5, 7, 9, 10, 0},  // mixolydian
+    {0, 2, 3, 5, 7, 8, 11, 0},  // harmonic minor
+    {0, 2, 3, 5, 7, 9, 11, 0},  // melodic minor
+    {0, 2, 4, 7, 9, 0},         // major pentatonic
+    {0, 3, 5, 7, 10, 0},        // minor pentatonic
+    {0, 3, 5, 6, 7, 10, 0},     // blues
+    {0, 2, 4, 6, 8, 10, 0},     // whole tone
+    {0, 2, 3, 7, 8, 0},         // hirajoshi
+    {-2, 0, 1, 13, 0, 7, 8, 8}, // odd
+    {0, 12, 0},                 // octaves
+    {0, 7, 12, 0},              // fifths
+    {0},                        // the tonic alone
 };
 constexpr int kA = 9; // the default tonic, in semitones
 
@@ -61,7 +75,7 @@ void CheckCount(const char* what, long long hits, double expected) {
 // The chance that a drawn note lies `relative` semitones above the tonic.
 double NoteChance(int mode, int relative) {
     const std::vector<int>& list = kLists[static_cast<std::size_t>(mode)];
-    const int spreads = mode == 6 ? 1 : 2;
+    const int spreads = mode == kTonicOnlyMode ? 1 : 2;
     double chance = 0.0;
     for(int octave = 0; octave < spreads; ++octave) {
         if(12 * octave == relative)
@@ -132,10 +146,21 @@ void TestDraws() {
     CheckShare("notes in the upper octave", upper, draws - rests, 0.50);
 
     std::printf("the tonic's share of the notes, by scale mode:\n");
-    const double expected[kNumScaleModes] = {0.475, 0.475, 0.30 + 0.70 * 2 / 6, 0.475, 1.0,
-                                             0.825, 1.0};
     sequencer.SetNoteProbability(100);
+    CHECK(static_cast<int>(kLists.size()) == kNumScaleModes);
     for(int mode = 0; mode < kNumScaleModes; ++mode) {
+        // The rule: 30 % the tonic itself, else an entry of the list, which
+        // may be the tonic or its octave.
+        const std::vector<int>& list = kLists[static_cast<std::size_t>(mode)];
+        double on_list = 0.0;
+        for(const int entry : list)
+            on_list += PitchClass(entry) == 0;
+        const double expected_share = 0.30 + 0.70 * on_list / static_cast<double>(list.size());
+        // The scale table of the sequencer holds the same lists.
+        const Scale& scale = ScaleFor(mode);
+        CHECK(scale.size == static_cast<int>(list.size()));
+        for(std::size_t i = 0; i < list.size(); ++i)
+            CHECK(scale.entries[i] == list[i]);
         long long notes = 0, on_tonic = 0, eights = 0, raised = 0;
         for(int i = 0; i < 5000; ++i) {
             sequencer.ChooseScaleMode(mode);
@@ -149,9 +174,9 @@ void TestDraws() {
         }
         char name[32];
         std::snprintf(name, sizeof(name), "mode %d", mode);
-        CheckShare(name, on_tonic, notes, expected[mode]);
-        if(mode == 3) // its list holds one entry twice
-            CheckShare("mode 3, the doubled entry", eights, notes, 0.70 * 2 / 8);
+        CheckShare(name, on_tonic, notes, expected_share);
+        if(mode == kOddMode) // its list holds one entry twice
+            CheckShare("the odd mode, the doubled entry", eights, notes, 0.70 * 2 / 8);
         if(mode == kTonicOnlyMode)
             CHECK(raised == 0); // no octave spread: the tonic itself, always
     }
@@ -309,7 +334,8 @@ void TestAlgorithm2() {
             for(int slot = 0; slot < kNumSteps && !found; ++slot)
                 for(int start = 0; start < size && !found; ++start)
                     for(int stride = 1; stride <= 2 && !found; ++stride)
-                        for(int octave = 0; octave < (mode == 6 ? 1 : 2) && !found; ++octave) {
+                        for(int octave = 0; octave < (mode == kTonicOnlyMode ? 1 : 2) && !found;
+                            ++octave) {
                             bool match = true;
                             for(int i = 0; i < 3; ++i) {
                                 const int index = start + i * stride;
@@ -579,9 +605,167 @@ void TestState() {
     CHECK(refused([](State& s) { s.divide_count = kClockDivides[s.clock_divide]; }));
     CHECK(refused([](State& s) { s.loop_on = 2; }));
     CHECK(refused([](State& s) { s.at_start = 2; }));
+    CHECK(refused([](State& s) { s.mutation_lock = 2; }));
+    CHECK(refused([](State& s) { s.mutate_every = kMaxMutateEvery + 1; }));
+    CHECK(refused([](State& s) { s.mutate_every = 0; s.passes = 1; }));
+    CHECK(refused([](State& s) { s.mutate_every = 4; s.passes = 4; }));
     CHECK(refused([](State& s) { s.steps[7] = 97; }));
     CHECK(refused([](State& s) { s.steps[0] = -25; }));
     std::printf("state: a loaded state continues identically; damaged states refused\n");
+}
+
+// The lock freezes the pattern for every algorithm, and opening it lets the
+// pattern change again.
+void TestMutationLock() {
+    for(int algorithm = 1; algorithm <= kNumAlgorithms; ++algorithm) {
+        Sequencer sequencer(31 + static_cast<std::uint64_t>(algorithm));
+        sequencer.ChooseScaleMode(1);
+        sequencer.SetAlgorithm(algorithm);
+        sequencer.SetMutation(100);
+        sequencer.SetMutationLock(true);
+        CHECK(sequencer.state().mutation_lock == 1);
+        const Steps frozen = sequencer.state().steps;
+        const std::uint64_t random = sequencer.state().random;
+        for(int tick = 0; tick < 4000; ++tick) {
+            const StepResult result = sequencer.Tick();
+            const State& state = sequencer.state();
+            CHECK(state.steps == frozen && state.random == random);
+            // It still plays: the pattern, or the scale for algorithm 3.
+            if(algorithm != 3 && (algorithm != 4 || state.loop_on)) {
+                const std::int8_t step = frozen[state.position];
+                CHECK(result.sounds == (step != kRest));
+            }
+        }
+        // A tonic change still transposes, also while it is locked.
+        sequencer.SetTonic(0);
+        for(std::size_t i = 0; i < frozen.size(); ++i)
+            CHECK(frozen[i] == kRest ? sequencer.state().steps[i] == kRest
+                                     : sequencer.state().steps[i] == frozen[i] - kA);
+        sequencer.SetTonic(kDefaultTonic);
+        sequencer.SetMutationLock(false);
+        int changed = 0;
+        for(int tick = 0; tick < 400; ++tick) {
+            const Steps before = sequencer.state().steps;
+            sequencer.Tick();
+            changed += sequencer.state().steps != before;
+        }
+        CHECK(algorithm == 3 ? changed == 0 : changed > 0);
+    }
+    std::printf("mutation lock: no algorithm changes a frozen pattern; tonic still transposes; "
+                "opened, it mutates again\n");
+}
+
+// Mutating after N whole passes: the pattern repeats N times unchanged, and
+// the next pass begins changed. How much changes is what one pass of
+// mutation on every tick would change.
+void TestMutateEvery() {
+    for(int algorithm = 1; algorithm <= kNumAlgorithms; ++algorithm) {
+        if(algorithm == 3)
+            continue;
+        for(const int every : {1, 3, 16}) {
+            Sequencer sequencer(41 + static_cast<std::uint64_t>(algorithm * 100 + every));
+            sequencer.ChooseScaleMode(1);
+            sequencer.SetAlgorithm(algorithm);
+            sequencer.SetMutation(100);
+            sequencer.SetLength(5);
+            sequencer.SetClockDivide(1); // two ticks per step
+            sequencer.SetMutateEvery(every);
+            sequencer.Restart();
+            const int pass_ticks = 5 * 2;
+            int changed_passes = 0;
+            for(int tick = 0; tick < pass_ticks * every * 12; ++tick) {
+                const Steps before = sequencer.state().steps;
+                sequencer.Tick();
+                const State& state = sequencer.state();
+                const bool pass_start = tick > 0 && tick % pass_ticks == 0;
+                const bool due = pass_start && (tick / pass_ticks) % every == 0;
+                // Changes only where a due pass begins.
+                if(!due)
+                    CHECK(state.steps == before);
+                changed_passes += due && state.steps != before;
+                CHECK(state.passes == (tick / pass_ticks) % every);
+            }
+            CHECK(changed_passes >= 8); // at 100 % nearly every due pass changes
+        }
+    }
+    // 0 is mutation on every tick, as before the setting existed: the same
+    // seed gives the same pattern step by step.
+    {
+        Sequencer plain(7), zero(7);
+        zero.SetMutateEvery(3);
+        zero.SetMutateEvery(0);
+        for(Sequencer* sequencer : {&plain, &zero}) {
+            sequencer->SetMutation(40);
+            sequencer->SetAlgorithm(2);
+        }
+        for(int tick = 0; tick < 5000; ++tick) {
+            plain.Tick();
+            zero.Tick();
+            CHECK(plain.state().steps == zero.state().steps
+                  && plain.state().random == zero.state().random);
+        }
+    }
+    // A restart and a new setting start the count anew.
+    {
+        Sequencer sequencer(9);
+        sequencer.SetMutateEvery(4);
+        sequencer.Restart();
+        for(int tick = 0; tick < 16 * 2 + 1; ++tick)
+            sequencer.Tick();
+        CHECK(sequencer.state().passes == 2);
+        sequencer.Restart();
+        CHECK(sequencer.state().passes == 0);
+        for(int tick = 0; tick < 16 * 3 + 1; ++tick)
+            sequencer.Tick();
+        CHECK(sequencer.state().passes == 3);
+        sequencer.SetMutateEvery(8);
+        CHECK(sequencer.state().passes == 0);
+        sequencer.SetMutateEvery(8);
+        sequencer.SetMutateEvery(99);
+        CHECK(sequencer.state().mutate_every == kMaxMutateEvery);
+        // Locked, the passes are not counted.
+        sequencer.SetMutationLock(true);
+        for(int tick = 0; tick < 16 * 5; ++tick)
+            sequencer.Tick();
+        CHECK(sequencer.state().passes == 0);
+    }
+    // As much change per due pass as one pass of mutation on every tick:
+    // the steps that differ between the starts of two passes, compared over
+    // many passes. Drift at 30 %, length 16.
+    std::printf("mutate every N passes:\n");
+    const auto changes_per_pass = [](int every, std::uint64_t seed) {
+        Sequencer sequencer(seed);
+        sequencer.ChooseScaleMode(1);
+        sequencer.SetMutation(30);
+        sequencer.SetMutateEvery(every);
+        sequencer.Restart();
+        std::vector<double> counts;
+        Steps start = sequencer.state().steps;
+        for(int pass = 0; pass < 6000; ++pass) {
+            for(int tick = 0; tick < kNumSteps; ++tick)
+                sequencer.Tick();
+            // The tick that begins the next pass is the last of these, so
+            // its change counts for the pass that ends here.
+            const Steps& now = sequencer.state().steps;
+            counts.push_back(Differences(start, now));
+            start = now;
+        }
+        double mean = 0.0, square = 0.0;
+        for(const double c : counts)
+            mean += c;
+        mean /= counts.size();
+        for(const double c : counts)
+            square += (c - mean) * (c - mean);
+        return std::pair{mean, std::sqrt(square / (counts.size() - 1) / counts.size())};
+    };
+    const auto [running, running_error] = changes_per_pass(0, 51);
+    const auto [burst, burst_error] = changes_per_pass(1, 52);
+    const double bound = kSigmas * std::sqrt(running_error * running_error + burst_error * burst_error);
+    std::printf("  steps changed per pass: on every tick %.3f, once per pass %.3f, bound %.3f\n",
+                running, burst, bound);
+    CHECK(std::fabs(running - burst) <= bound);
+    std::printf("mutate every N passes: unchanged for N passes, then changed as much as one pass "
+                "would; 0 as before; restart and lock\n");
 }
 
 } // namespace
@@ -600,6 +784,8 @@ int main() {
     TestClock();
     TestMutationLaw();
     TestState();
+    TestMutationLock();
+    TestMutateEvery();
     std::printf("generative sequencer: all tests passed\n");
     return 0;
 }

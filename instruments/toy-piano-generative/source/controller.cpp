@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstring>
 #include <initializer_list>
+#include <iterator>
 #include <utility>
 
 namespace taureon::toy_piano_generative {
@@ -161,19 +162,57 @@ class MutationParameter : public Parameter {
     OBJ_METHODS(MutationParameter, Parameter)
 };
 
+// The algorithm by its name, or typed as its number 1 to 5.
+class AlgorithmParameter : public StringListParameter {
+  public:
+    AlgorithmParameter(const TChar* title, ParamID tag)
+    : StringListParameter(title, tag, nullptr,
+                          ParameterInfo::kCanAutomate | ParameterInfo::kIsList) {
+        for(const AlgorithmInfo& algorithm : kAlgorithms) {
+            String128 name{};
+            UString(name, 128).fromAscii(algorithm.name);
+            appendString(name);
+        }
+    }
+
+    bool fromString(const TChar* string, ParamValue& normalized) const SMTG_OVERRIDE {
+        if(!string)
+            return false;
+        const std::string typed = StringConvert::convert(string);
+        for(int i = 0; i < generative::kNumAlgorithms; ++i)
+            if(EqualsIgnoringCase(StripUnit(typed, ""), kAlgorithms[i].name)) {
+                normalized = StepNormalized(i, kAlgorithmSteps);
+                return true;
+            }
+        double number = 0.0;
+        if(!ParseTypedNumber(typed, "", number))
+            return false;
+        normalized = StepNormalized(
+            static_cast<int>(std::lround(std::clamp(number, 1.0, 5.0))) - 1, kAlgorithmSteps);
+        return true;
+    }
+
+    OBJ_METHODS(AlgorithmParameter, StringListParameter)
+};
+
 // A choice from a list of names.
-StringListParameter* MakeList(const TChar* title, ParamID tag,
-                              std::initializer_list<const char*> names, ParamValue normalized) {
+StringListParameter* MakeList(const TChar* title, ParamID tag, const char* const* names,
+                              std::size_t count, ParamValue normalized) {
     auto* list = new StringListParameter(title, tag, nullptr,
                                          ParameterInfo::kCanAutomate | ParameterInfo::kIsList);
-    for(const char* name : names) {
+    for(std::size_t i = 0; i < count; ++i) {
         String128 string{};
-        UString(string, 128).fromAscii(name);
+        UString(string, 128).fromAscii(names[i]);
         list->appendString(string);
     }
     list->getInfo().defaultNormalizedValue = normalized;
     list->setNormalized(normalized);
     return list;
+}
+
+StringListParameter* MakeList(const TChar* title, ParamID tag,
+                              std::initializer_list<const char*> names, ParamValue normalized) {
+    return MakeList(title, tag, names.begin(), names.size(), normalized);
 }
 
 } // namespace
@@ -202,17 +241,13 @@ tresult PLUGIN_API Controller::initialize(FUnknown* context) {
 
     // The sequencer.
     parameters.addParameter(MakeList(STR16("Run"), kParamRun, {"Off", "On"}, kDefaultRun));
-    parameters.addParameter(new TypedRangeParameter(STR16("Algorithm"), kParamAlgorithm, nullptr,
-                                                    1, generative::kNumAlgorithms, 1,
-                                                    kAlgorithmSteps, ParameterInfo::kCanAutomate));
+    parameters.addParameter(new AlgorithmParameter(STR16("Algorithm"), kParamAlgorithm));
     parameters.addParameter(new MutationParameter(STR16("Mutation"), kParamMutation));
     parameters.addParameter(new TypedRangeParameter(
         STR16("Note Probability"), kParamNoteProbability, STR16("%"), 0, 100,
         generative::kDefaultNoteProbability, kNoteProbabilitySteps, ParameterInfo::kCanAutomate));
-    parameters.addParameter(MakeList(STR16("Scale"), kParamScale,
-                                     {"Major", "Minor", "Pentatonic", "Odd", "Octave", "Fifths",
-                                      "Tonic"},
-                                     kDefaultScale));
+    parameters.addParameter(MakeList(STR16("Scale"), kParamScale, kScaleNames,
+                                     std::size(kScaleNames), kDefaultScale));
     parameters.addParameter(MakeList(STR16("Tonic"), kParamTonic,
                                      {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#",
                                       "B"},
@@ -234,6 +269,12 @@ tresult PLUGIN_API Controller::initialize(FUnknown* context) {
     parameters.addParameter(
         MakeList(STR16("Keys Transpose"), kParamKeysTranspose, {"Off", "On"},
                  kDefaultKeysTranspose));
+    parameters.addParameter(MakeList(STR16("Mutation Lock"), kParamMutationLock, {"Off", "On"},
+                                     kDefaultMutationLock));
+    parameters.addParameter(MakeList(STR16("Mutate Every"), kParamMutateEvery,
+                                     {"Step", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
+                                      "11", "12", "13", "14", "15", "16"},
+                                     kDefaultMutateEvery));
     return kResultOk;
 }
 
@@ -252,6 +293,8 @@ tresult PLUGIN_API Controller::setComponentState(IBStream* state) {
     setParamNormalized(kParamTuning, saved.tuning);
     setParamNormalized(kParamRun, saved.run ? 1.0 : 0.0);
     setParamNormalized(kParamKeysTranspose, saved.keys_transpose ? 1.0 : 0.0);
+    setParamNormalized(kParamMutationLock, sequencer.mutation_lock ? 1.0 : 0.0);
+    setParamNormalized(kParamMutateEvery, StepNormalized(sequencer.mutate_every, kMutateEverySteps));
     setParamNormalized(kParamAlgorithm, StepNormalized(sequencer.algorithm - 1, kAlgorithmSteps));
     setParamNormalized(kParamMutation, generative::MutationPosition(sequencer.mutation));
     setParamNormalized(kParamNoteProbability,
