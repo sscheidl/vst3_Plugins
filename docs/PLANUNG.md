@@ -74,7 +74,7 @@ Reglerringe; Codex gab es nicht frei (drei Befunde zur Ruhe-Meldung, einer
 zur Stimmenreihenfolge). 0.3.1 nimmt die Ruhe-Meldung wieder heraus (kein
 Plugin-Nap), bringt Oktavtasten an der Bildschirm-Klaviatur und die
 Reglerfarben von Mendelejew; gebaut und automatisch geprüft, noch nicht in
-einer DAW und noch nicht nachgeprüft. Was sich wann geändert hat, steht im
+einer DAW; Codex hat 0.3.1 ohne neue Befunde freigegeben. Was sich wann geändert hat, steht im
 [Änderungsprotokoll](../instruments/torus-classic/CHANGELOG.md). Einzelheiten und Messwerte stehen im
 [Build-Bericht](../instruments/torus-classic/docs/BUILD_REPORT_0.1.0.md), die
 offene Abnahme in der

@@ -48,8 +48,8 @@ validator.
   [No Plug-in Nap](#no-plug-in-nap)), which settles those three findings;
   the fourth is documented ([what was done](docs/CODEX_REVIEW_0.3.0_UMSETZUNG.md)).
   It adds octave keys to the screen keyboard and takes the knob colours from
-  Mendelejew. Not in a DAW yet, not re-reviewed yet
-  ([review brief](docs/CODEX_PRUEFAUFTRAG_0.3.1.md)).
+  Mendelejew. Codex released it, with no new findings
+  ([review](docs/CODEX_REVIEW_0.3.1.md)); not in a DAW yet.
 * The [build report](docs/BUILD_REPORT_0.1.0.md) describes 0.1.0: what was
   verified then and what was not.
 

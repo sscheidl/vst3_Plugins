@@ -14,7 +14,7 @@ prove and records what was learned.
 | Project | Kind | Status |
 | --- | --- | --- |
 | [Toy Piano Classic](instruments/toy-piano-classic/) | Instrument | 0.3.2: builds, validated, tested and code-reviewed; 0.1.0 loads in Studio One, not yet listened to |
-| [Kekulé](instruments/torus-classic/) | Instrument | 0.3.1: builds, validated and tested automatically; 4, 8 or 16 voices, octave keys, no Plug-in Nap; not re-reviewed or tried in a DAW yet; 0.1.0 loads and plays in Studio One; Codex released 0.2.1 for the DAW test |
+| [Kekulé](instruments/torus-classic/) | Instrument | 0.3.1: builds, validated and tested automatically; 4, 8 or 16 voices, octave keys, no Plug-in Nap; released by Codex, not tried in a DAW yet; 0.1.0 loads and plays in Studio One |
 
 ## Layout
 

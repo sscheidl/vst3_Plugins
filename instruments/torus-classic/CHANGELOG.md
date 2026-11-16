@@ -4,7 +4,8 @@
 
 After Codex's review of 0.3.0 ([review](docs/CODEX_REVIEW_0.3.0.md),
 [what was done](docs/CODEX_REVIEW_0.3.0_UMSETZUNG.md)), and two wishes of the
-owner. 0.3.0 itself was never released.
+owner. 0.3.0 itself was never released. Codex released 0.3.1 with no new
+findings ([review](docs/CODEX_REVIEW_0.3.1.md)).
 
 * **No Plug-in Nap.** The rest report of 0.3.0 is gone: the tail is infinite
   again at all times, the plug-in no longer puts out exact zeros at rest,
