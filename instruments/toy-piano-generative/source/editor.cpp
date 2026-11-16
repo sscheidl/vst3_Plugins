@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
+#include <iterator>
 #include <string>
 #include <utility>
 
@@ -115,12 +117,14 @@ tresult PLUGIN_API Editor::queryInterface(const TUID _iid, void** obj) {
 bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
     frame = new CFrame(CRect(0, 0, kWidth, EditorBaseHeight(settings_.keyboard)), this);
     frame->setBackgroundColor(kBackground);
+    frame->enableTooltips(true);
     applied_zoom_ = 1.0;
     drag_ = DragConstraint{};
 
     const auto title_font = makeOwned<CFontDesc>("Segoe UI", 20, kBoldFace);
     const auto name_font = makeOwned<CFontDesc>("Segoe UI", 11, kBoldFace);
     const auto value_font = makeOwned<CFontDesc>("Segoe UI", 14);
+    const auto pass_font = makeOwned<CFontDesc>("Segoe UI", 10, kBoldFace);
 
     const auto value_of = [this](ParamID id) {
         return controller ? controller->getParamNormalized(id) : 0.0;
@@ -183,7 +187,7 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
     frame->addView(keyboard_view_);
     UpdateMarkedKey();
 
-    for(std::size_t i = 0; i < knobs_.size(); ++i) {
+    for(std::size_t i = 0; i < std::size(kKnobs); ++i) {
         const KnobSpec& spec = kKnobs[i];
         const Row& row = kRows[spec.row];
         const CCoord column_width = (kWidth - 2 * kMargin) / row.columns;
@@ -192,8 +196,9 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         const CCoord left = kMargin + static_cast<CCoord>(spec.column) * column_width;
         const CCoord knob_left = left + (column_width - knob_size) / 2;
 
-        frame->addView(MakeLabel(CRect(left, name_top, left + column_width, name_top + 16),
-                                 spec.name, name_font, kDimText, kCenterText));
+        auto* name = MakeLabel(CRect(left, name_top, left + column_width, name_top + 16), spec.name,
+                               name_font, kDimText, kCenterText);
+        frame->addView(name);
 
         int32_t style = CKnob::kCoronaOutline | CKnob::kCoronaDrawing;
         if(spec.bipolar)
@@ -216,13 +221,60 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
 
         auto* value = MakeLabel(CRect(left, value_top, left + column_width, value_top + 20), "",
                                 value_font, kText, kCenterText);
+        // The algorithm's name explains itself under the mouse: its label
+        // must take the mouse for the tooltip to show.
+        if(spec.id == kParamAlgorithm)
+            value->setMouseEnabled(true);
         frame->addView(value);
 
-        knobs_[i] = {spec.id, knob, value};
+        // The mutation lock sits at the knob's lower right.
+        if(spec.id == kParamMutation) {
+            constexpr CCoord kLockSize = 16;
+            const CCoord lock_left = knob_left + knob_size - 2;
+            const CCoord lock_top = knob_top + knob_size - kLockSize + 2;
+            mutation_lock_ = new LockButton(
+                CRect(lock_left, lock_top, lock_left + kLockSize, lock_top + kLockSize),
+                IsOn(value_of(kParamMutationLock)),
+                [this](bool locked) { SetMutationLock(locked); });
+            frame->addView(mutation_lock_);
+
+            // Its counterpart at the lower left: after how many unchanged
+            // passes the pattern mutates, the number in its middle.
+            constexpr CCoord kPassSize = 22;
+            const CCoord pass_left = knob_left - kPassSize + 3;
+            const CCoord pass_top = knob_top + knob_size - kPassSize + 3;
+            const CRect pass_rect(pass_left, pass_top, pass_left + kPassSize, pass_top + kPassSize);
+            auto* pass_knob = new CKnob(pass_rect, this, static_cast<int32_t>(kParamMutateEvery),
+                                        nullptr, nullptr, CPoint(0, 0),
+                                        CKnob::kCoronaOutline | CKnob::kCoronaDrawing);
+            pass_knob->setCoronaColor(kAccent);
+            pass_knob->setColorShadowHandle(kTrack);
+            pass_knob->setColorHandle(kTransparentCColor);
+            pass_knob->setHandleLineWidth(0);
+            pass_knob->setCoronaInset(1);
+            pass_knob->setInsetValue(0);
+            pass_knob->setDefaultValue(static_cast<float>(kDefaultMutateEvery));
+            pass_knob->setWheelInc(1.0f / kMutateEverySteps);
+            pass_knob->setTooltipText(
+                "Mutate every: '-' mutates on every step; 1 to 16 lets the pattern repeat that "
+                "many times unchanged, then the next pass starts changed.");
+            frame->addView(pass_knob);
+            auto* pass_value = MakeLabel(pass_rect, "", pass_font, kText, kCenterText);
+            frame->addView(pass_value);
+            Knob& pass = knobs_[std::size(kKnobs)];
+            pass = {kParamMutateEvery, pass_knob, pass_value, nullptr};
+            const ParamValue pass_normalized = value_of(kParamMutateEvery);
+            pass_knob->setValue(static_cast<float>(pass_normalized));
+            ShowValue(pass, pass_normalized);
+        }
+
+        knobs_[i] = {spec.id, knob, value, name};
         const ParamValue normalized = controller ? controller->getParamNormalized(spec.id) : 0.0;
         knob->setValue(static_cast<float>(normalized));
         ShowValue(knobs_[i], normalized);
     }
+
+    UpdateDimming();
 
     if(!frame->open(parent, platformType)) {
         frame->forget();
@@ -231,6 +283,7 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         keyboard_view_ = nullptr;
         keyboard_button_ = transpose_button_ = run_button_ = nullptr;
         octave_down_ = octave_up_ = nullptr;
+        mutation_lock_ = nullptr;
         return false;
     }
     // `rect` is the size the host gave the window. Fill it, then ask for the
@@ -330,6 +383,71 @@ void Editor::EditSwitch(ParamID id, bool on) {
     controller->endEdit(id);
 }
 
+void Editor::SetMutationLock(bool locked) {
+    EditSwitch(kParamMutationLock, locked);
+}
+
+int Editor::ShownMutationLock() const {
+    return mutation_lock_ ? (mutation_lock_->Locked() ? 1 : 0) : -1;
+}
+
+void Editor::UpdateDimming() {
+    if(!controller)
+        return;
+    const bool ladder = 1 + StepIndex(controller->getParamNormalized(kParamAlgorithm),
+                                      kAlgorithmSteps)
+                        == kLadderAlgorithm;
+    const float alpha = ladder ? 0.35f : 1.0f;
+    for(Knob& knob : knobs_) {
+        if(knob.id != kParamMutation && knob.id != kParamNoteProbability
+           && knob.id != kParamMutateEvery)
+            continue;
+        for(CView* view : {static_cast<CView*>(knob.knob), static_cast<CView*>(knob.value),
+                           static_cast<CView*>(knob.name)})
+            if(view && view->getAlphaValue() != alpha) {
+                view->setAlphaValue(alpha);
+                view->invalid();
+            }
+        if(knob.id != kParamMutateEvery && knob.knob)
+            knob.knob->setTooltipText(ladder ? "Ladder plays the scale itself and does not use "
+                                               "this control. Choose another algorithm."
+                                             : nullptr);
+    }
+    if(mutation_lock_ && mutation_lock_->getAlphaValue() != alpha) {
+        mutation_lock_->setAlphaValue(alpha);
+        mutation_lock_->invalid();
+    }
+}
+
+bool Editor::SequencerControlsDimmed() const {
+    for(const Knob& knob : knobs_)
+        if(knob.id == kParamMutation && knob.knob)
+            return knob.knob->getAlphaValue() < 1.0f;
+    return false;
+}
+
+std::string Editor::MutateEveryText() const {
+    for(const Knob& knob : knobs_)
+        if(knob.id == kParamMutateEvery && knob.value)
+            return knob.value->getText().getString();
+    return {};
+}
+
+std::string Editor::AlgorithmTooltip() const {
+    for(const Knob& knob : knobs_)
+        if(knob.id == kParamAlgorithm && knob.value) {
+            uint32_t size = 0;
+            if(!knob.value->getAttributeSize(kCViewTooltipAttribute, size) || size == 0)
+                return {};
+            std::string tip(size, '\0');
+            if(!knob.value->getAttribute(kCViewTooltipAttribute, size, tip.data(), size))
+                return {};
+            tip.resize(std::strlen(tip.c_str()));
+            return tip;
+        }
+    return {};
+}
+
 void Editor::UpdateMarkedKey() {
     if(!keyboard_view_ || !controller)
         return;
@@ -427,6 +545,7 @@ void PLUGIN_API Editor::close() {
     keyboard_view_ = nullptr;
     keyboard_button_ = transpose_button_ = run_button_ = nullptr;
     octave_down_ = octave_up_ = nullptr;
+    mutation_lock_ = nullptr;
     if(frame) {
         frame->removeAll(true);
         if(frame->getNbReference() == 1)
@@ -463,10 +582,14 @@ void Editor::controlEndEdit(CControl* control) {
 void Editor::ParameterChanged(ParamID id, ParamValue normalized) {
     if(id == kParamRun && run_button_)
         run_button_->SetOn(IsOn(normalized));
+    if(id == kParamMutationLock && mutation_lock_)
+        mutation_lock_->SetLocked(IsOn(normalized));
     if(id == kParamKeysTranspose && transpose_button_)
         transpose_button_->SetOn(IsOn(normalized));
     if(id == kParamKeysTranspose || id == kParamTonic || id == kParamOctave)
         UpdateMarkedKey();
+    if(id == kParamAlgorithm)
+        UpdateDimming();
     for(Knob& knob : knobs_) {
         if(knob.id != id || !knob.knob)
             continue;
@@ -495,7 +618,19 @@ void Editor::ShowValue(Knob& knob, ParamValue normalized) {
             break;
         }
     }
+    if(knob.id == kParamMutateEvery) {
+        // Only the number fits in the small knob; "-" is on every step.
+        const int every = StepIndex(normalized, kMutateEverySteps);
+        display = every == 0 ? "-" : std::to_string(every);
+    }
     knob.value->setText(display.c_str());
+    if(knob.id == kParamAlgorithm) {
+        // What the chosen algorithm does, under the mouse.
+        const char* tip = kAlgorithms[StepIndex(normalized, kAlgorithmSteps)].description;
+        knob.value->setTooltipText(tip);
+        if(knob.knob)
+            knob.knob->setTooltipText(tip);
+    }
 }
 
 tresult PLUGIN_API Editor::setContentScaleFactor(ScaleFactor factor) {

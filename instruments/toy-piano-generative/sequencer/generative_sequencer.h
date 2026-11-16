@@ -20,9 +20,12 @@ constexpr std::int8_t kRest = -128;
 constexpr int kNumTonics = 12;
 constexpr int kDefaultTonic = 9; // A
 
-constexpr int kNumScaleModes = 7;
+// The scale modes, in the order a knob offers them: the seven of the
+// original first in the musical order of the list below, then the others.
+constexpr int kNumScaleModes = 17;
 constexpr int kDefaultScaleMode = 1; // minor
-constexpr int kTonicOnlyMode = 6;
+constexpr int kOddMode = 13;         // the list without a name, with one entry twice
+constexpr int kTonicOnlyMode = 16;
 
 constexpr int kNumAlgorithms = 5; // numbered 1 to 5
 constexpr int kMaxOctave = 5;
@@ -33,6 +36,11 @@ constexpr int kDefaultNoteProbability = 65; // percent
 constexpr int kNumClockDivides = 9;
 constexpr std::array<std::uint8_t, kNumClockDivides> kClockDivides = {1, 2,  3,  4, 6,
                                                                       8, 16, 32, 64};
+
+// Mutation either runs on: one attempt on every tick, as the rules say (0).
+// Or the pattern repeats a number of whole passes unchanged, and the pass
+// after them begins with all the attempts of one pass at once (1 to 16).
+constexpr int kMaxMutateEvery = 16;
 
 // Fixed properties of a draw: how often it is the tonic itself, and over how
 // many octaves it spreads.
@@ -70,6 +78,9 @@ struct State {
     std::uint8_t divide_count = 0;                      // sixteenths into the step
     std::uint8_t loop_on = 1;                           // toggles with every pass
     std::uint8_t at_start = 1;                          // the next tick plays step 1
+    std::uint8_t mutation_lock = 0;                     // 1: the pattern is frozen
+    std::uint8_t mutate_every = 0;                      // 0: on every tick; else passes
+    std::uint8_t passes = 0;                            // whole passes since the last
     std::uint64_t random = 0;                           // state of the generator
 };
 
@@ -97,6 +108,12 @@ class Sequencer {
     void SetTonic(int semitone);
     // None of these touch the stored steps.
     void SetAlgorithm(int algorithm);
+    // Locked, no algorithm changes the pattern: it plays as it stands until
+    // the lock is opened. Choosing a scale and changing the tonic still work.
+    void SetMutationLock(bool locked);
+    // 0: mutate on every tick. 1 to 16: after that many unchanged passes.
+    // A change starts the count anew.
+    void SetMutateEvery(int passes);
     void SetMutation(int percent);
     void SetNoteProbability(int percent);
     void SetOctave(int octave);
@@ -114,8 +131,12 @@ class Sequencer {
     int Spread();
     std::int8_t DrawNote();
     std::int8_t Draw();
-    void Advance();
-    void Mutate();
+    // True when the playhead has just come back to the first step.
+    bool Advance();
+    // One attempt of the algorithm, as if the playhead stood at `position`.
+    void Mutate(int position);
+    // All the attempts of one pass, at once.
+    void MutatePass();
     void RedrawOneOfAll();
     void WriteRun();
     StepResult Fetch() const;

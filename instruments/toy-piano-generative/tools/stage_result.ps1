@@ -45,7 +45,7 @@ foreach ($entry in $licenses) {
     Copy-Item $entry[0] (Join-Path $target "licenses\$($entry[1])") -Force
 }
 foreach ($document in 'README.md', 'CHANGELOG.md', 'docs\DAW_TEST_0.1.0.md',
-    'docs\CODEX_PRUEFAUFTRAG_0.1.0.md') {
+    'docs\CODEX_PRUEFAUFTRAG_0.1.0.md', 'docs\CODEX_PRUEFAUFTRAG_0.2.0.md') {
     $source = Join-Path $plugin $document
     if (Test-Path $source) { Copy-Item $source (Join-Path $target (Split-Path $document -Leaf)) -Force }
 }

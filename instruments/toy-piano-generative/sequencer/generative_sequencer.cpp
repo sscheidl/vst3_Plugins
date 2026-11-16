@@ -6,14 +6,27 @@
 namespace taureon::generative {
 namespace {
 
+// The seven lists of the original are major, minor, minor pentatonic, odd,
+// octaves, fifths and the tonic alone. The others follow their rule: the
+// scale's notes upwards, then the tonic once more.
 constexpr std::array<Scale, kNumScaleModes> kScales = {{
-    {8, {0, 2, 4, 5, 7, 9, 11, 0}}, // major
-    {8, {0, 2, 3, 5, 7, 8, 10, 0}}, // minor
-    {6, {0, 3, 5, 7, 10, 0}},       // pentatonic
-    {8, {-2, 0, 1, 13, 0, 7, 8, 8}},
-    {3, {0, 12, 0}},    // octaves
-    {4, {0, 7, 12, 0}}, // fifths
-    {1, {0}},           // the tonic alone
+    {8, {0, 2, 4, 5, 7, 9, 11, 0}},  // major
+    {8, {0, 2, 3, 5, 7, 8, 10, 0}},  // minor
+    {8, {0, 2, 3, 5, 7, 9, 10, 0}},  // dorian
+    {8, {0, 1, 3, 5, 7, 8, 10, 0}},  // phrygian
+    {8, {0, 2, 4, 6, 7, 9, 11, 0}},  // lydian
+    {8, {0, 2, 4, 5, 7, 9, 10, 0}},  // mixolydian
+    {8, {0, 2, 3, 5, 7, 8, 11, 0}},  // harmonic minor
+    {8, {0, 2, 3, 5, 7, 9, 11, 0}},  // melodic minor
+    {6, {0, 2, 4, 7, 9, 0}},         // major pentatonic
+    {6, {0, 3, 5, 7, 10, 0}},        // minor pentatonic
+    {7, {0, 3, 5, 6, 7, 10, 0}},     // blues
+    {7, {0, 2, 4, 6, 8, 10, 0}},     // whole tone
+    {6, {0, 2, 3, 7, 8, 0}},         // hirajoshi
+    {8, {-2, 0, 1, 13, 0, 7, 8, 8}}, // odd
+    {3, {0, 12, 0}},                 // octaves
+    {4, {0, 7, 12, 0}},              // fifths
+    {1, {0}},                        // the tonic alone
 }};
 
 // Stored notes stay within this range whatever the rules do; a saved state
@@ -66,7 +79,9 @@ bool IsValid(const State& state) {
            && state.length <= kNumSteps && state.clock_divide < kNumClockDivides
            && state.position < kNumSteps
            && state.divide_count < kClockDivides[state.clock_divide] && state.loop_on <= 1
-           && state.at_start <= 1;
+           && state.at_start <= 1 && state.mutation_lock <= 1
+           && state.mutate_every <= kMaxMutateEvery
+           && (state.mutate_every == 0 ? state.passes == 0 : state.passes < state.mutate_every);
 }
 
 Sequencer::Sequencer(std::uint64_t seed) {
@@ -127,20 +142,23 @@ void Sequencer::Restart() {
     state_.divide_count = 0;
     state_.loop_on = 1;
     state_.at_start = 1;
+    state_.passes = 0;
 }
 
-void Sequencer::Advance() {
+bool Sequencer::Advance() {
     if(state_.at_start) { // the first tick after a restart plays the first step
         state_.at_start = 0;
-        return;
+        return false;
     }
     state_.divide_count = static_cast<std::uint8_t>((state_.divide_count + 1)
                                                     % kClockDivides[state_.clock_divide]);
     if(state_.divide_count != 0)
-        return;
+        return false;
     state_.position = static_cast<std::uint8_t>((state_.position + 1) % state_.length);
-    if(state_.position == 0)
-        state_.loop_on ^= 1;
+    if(state_.position != 0)
+        return false;
+    state_.loop_on ^= 1;
+    return true;
 }
 
 // One of all sixteen steps, whatever the length: steps beyond the length keep
@@ -167,7 +185,7 @@ void Sequencer::WriteRun() {
     }
 }
 
-void Sequencer::Mutate() {
+void Sequencer::Mutate(int position) {
     switch(state_.algorithm) {
         case 1:
         case 4: RedrawOneOfAll(); break;
@@ -180,7 +198,7 @@ void Sequencer::Mutate() {
         case 5: {
             // Works on the step at the playhead. Up to 50 % it only changes
             // pitches, so the rhythm stays; above, it redraws, rests included.
-            std::int8_t& step = state_.steps[state_.position];
+            std::int8_t& step = state_.steps[static_cast<std::size_t>(position)];
             if(state_.mutation <= 50) {
                 if(Chance(state_.mutation / 2) && step != kRest)
                     step = DrawNote();
@@ -213,9 +231,26 @@ StepResult Sequencer::Fetch() const {
     return {true, step + raise};
 }
 
+// A pass has length × divide ticks; Focus works on each step `divide` times.
+void Sequencer::MutatePass() {
+    const int divide = kClockDivides[state_.clock_divide];
+    for(int position = 0; position < state_.length; ++position)
+        for(int tick = 0; tick < divide; ++tick)
+            Mutate(position);
+}
+
 StepResult Sequencer::Tick() {
-    Advance();
-    Mutate();
+    const bool new_pass = Advance();
+    // Frozen: no algorithm touches the pattern, and no random number is used.
+    if(!state_.mutation_lock) {
+        if(state_.mutate_every == 0) {
+            Mutate(state_.position);
+        } else if(new_pass && ++state_.passes >= state_.mutate_every) {
+            // The passes before were heard unchanged; this one starts changed.
+            state_.passes = 0;
+            MutatePass();
+        }
+    }
     return Fetch();
 }
 
@@ -243,6 +278,18 @@ void Sequencer::SetTonic(int semitone) {
 
 void Sequencer::SetAlgorithm(int algorithm) {
     state_.algorithm = static_cast<std::uint8_t>(Clamp(algorithm, 1, kNumAlgorithms));
+}
+
+void Sequencer::SetMutationLock(bool locked) {
+    state_.mutation_lock = locked ? 1 : 0;
+}
+
+void Sequencer::SetMutateEvery(int passes) {
+    const auto every = static_cast<std::uint8_t>(Clamp(passes, 0, kMaxMutateEvery));
+    if(every != state_.mutate_every) {
+        state_.mutate_every = every;
+        state_.passes = 0;
+    }
 }
 
 void Sequencer::SetMutation(int percent) {

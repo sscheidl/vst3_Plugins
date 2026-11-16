@@ -7,6 +7,7 @@
 #include "vstgui/lib/cgraphicspath.h"
 #include "vstgui/lib/events.h"
 
+#include <algorithm>
 #include <string>
 #include <utility>
 
@@ -191,6 +192,78 @@ void ToggleButton::onMouseDownEvent(MouseDownEvent& event) {
     invalid();
     if(toggled_)
         toggled_(on_);
+    event.consumed = true;
+}
+
+LockButton::LockButton(const CRect& size, bool locked, std::function<void(bool)> toggled)
+: CView(size), locked_(locked), toggled_(std::move(toggled)) {
+    UpdateTooltip();
+}
+
+void LockButton::UpdateTooltip() {
+    setTooltipText(locked_ ? "Mutation lock, closed: the pattern is frozen. Click to let it mutate."
+                           : "Mutation lock, open: the pattern mutates. Click to freeze it.");
+}
+
+void LockButton::SetLocked(bool locked) {
+    if(locked == locked_)
+        return;
+    locked_ = locked;
+    UpdateTooltip();
+    invalid();
+}
+
+void LockButton::draw(CDrawContext* context) {
+    // Everything is a fraction of the view's size `s`, so it stays sharp at
+    // every zoom. Closed and lit while the pattern is frozen; open and quiet
+    // while it mutates.
+    const CRect area = getViewSize();
+    const CCoord s = std::min(area.getWidth(), area.getHeight());
+    const CPoint c = area.getCenter();
+    const CColor colour = locked_ ? kPressed : kOffText;
+    context->setDrawMode(kAntiAliasing | kNonIntegralMode);
+
+    CRect circle(c.x - s / 2.0, c.y - s / 2.0, c.x + s / 2.0, c.y + s / 2.0);
+    circle.inset(1.0, 1.0);
+    context->setFillColor(kGap);
+    context->setFrameColor(locked_ ? kPressed : kOffFrame);
+    context->setLineWidth(1.5);
+    context->setLineStyle(kLineSolid);
+    context->drawEllipse(circle, kDrawFilledAndStroked);
+
+    // The body of the padlock.
+    const CCoord body_top = c.y - 0.02 * s;
+    FillRoundRect(context, CRect(c.x - 0.21 * s, body_top, c.x + 0.21 * s, body_top + 0.30 * s),
+                  0.05 * s, colour);
+
+    // Its shackle: two legs and a half circle. Open, it is lifted and its
+    // right leg ends above the body.
+    const CCoord radius = 0.13 * s;
+    const CCoord bow = body_top - 0.08 * s - (locked_ ? 0.0 : 0.09 * s);
+    const CCoord k = 0.5523 * radius; // a quarter circle as a cubic curve
+    if(auto path = owned(context->createGraphicsPath())) {
+        path->beginSubpath(c.x - radius, body_top);
+        path->addLine(c.x - radius, bow);
+        path->addBezierCurve(c.x - radius, bow - k, c.x - k, bow - radius, c.x, bow - radius);
+        path->addBezierCurve(c.x + k, bow - radius, c.x + radius, bow - k, c.x + radius, bow);
+        path->addLine(c.x + radius, locked_ ? body_top : bow + 0.05 * s);
+        context->setFrameColor(colour);
+        context->setLineWidth(0.09 * s);
+        context->setLineStyle(CLineStyle(CLineStyle::kLineCapRound, CLineStyle::kLineJoinRound));
+        context->drawGraphicsPath(path, CDrawContext::kPathStroked);
+        context->setLineStyle(kLineSolid);
+    }
+    setDirty(false);
+}
+
+void LockButton::onMouseDownEvent(MouseDownEvent& event) {
+    if(!event.buttonState.isLeft())
+        return;
+    locked_ = !locked_;
+    UpdateTooltip();
+    invalid();
+    if(toggled_)
+        toggled_(locked_);
     event.consumed = true;
 }
 

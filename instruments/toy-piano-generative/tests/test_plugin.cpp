@@ -472,7 +472,7 @@ void TestPitchBend() {
 void TestController() {
     IPtr<Controller> controller = owned(new Controller());
     CHECK(controller->initialize(nullptr) == kResultOk);
-    CHECK(controller->getParameterCount() == 16);
+    CHECK(controller->getParameterCount() == 18);
 
     const auto text = [&](ParamID id, double normalized) {
         String128 string{};
@@ -1150,6 +1150,31 @@ void TestEditorInWindow() {
     editor->ShiftKeyboard(1);
     CHECK(editor->Settings().keyboard_shift == kKeyboardDefaultShift && octave() == 2);
 
+    // The mutation lock: a click is an edit, and a change from elsewhere shows.
+    CHECK(editor->ShownMutationLock() == 0);
+    editor->SetMutationLock(true);
+    CHECK(controller->getParamNormalized(kParamMutationLock) == 1.0
+          && editor->ShownMutationLock() == 1);
+    CHECK(controller->setParamNormalized(kParamMutationLock, 0.0) == kResultOk);
+    CHECK(editor->ShownMutationLock() == 0);
+    // The algorithm's tooltip follows the chosen algorithm.
+    CHECK(editor->AlgorithmTooltip() == kAlgorithms[0].description);
+    CHECK(controller->setParamNormalized(kParamAlgorithm, StepNormalized(2, kAlgorithmSteps))
+          == kResultOk);
+    CHECK(editor->AlgorithmTooltip() == kAlgorithms[2].description);
+    // Ladder uses neither Mutation nor Notes: they dim, and come back.
+    CHECK(editor->SequencerControlsDimmed());
+    CHECK(controller->setParamNormalized(kParamAlgorithm, StepNormalized(4, kAlgorithmSteps))
+          == kResultOk);
+    CHECK(!editor->SequencerControlsDimmed());
+    // The small pass knob shows its number in the middle.
+    CHECK(editor->MutateEveryText() == "-");
+    CHECK(controller->setParamNormalized(kParamMutateEvery, StepNormalized(4, kMutateEverySteps))
+          == kResultOk);
+    CHECK(editor->MutateEveryText() == "4");
+    CHECK(controller->setParamNormalized(kParamMutateEvery, 1.0) == kResultOk);
+    CHECK(editor->MutateEveryText() == "16");
+
     // Closed properly, then opened again with the settings it had.
     CHECK(view->removed() == kResultOk);
     CHECK(controller->OpenEditorCount() == 0);
@@ -1707,12 +1732,95 @@ void TestSequencerState() {
         session.Set(kParamTuning, 0.25);
         session.Set(kParamRun, 0.0);
         session.Set(kParamKeysTranspose, 1.0);
+        session.Set(kParamMutationLock, 1.0);
+        session.Set(kParamMutateEvery, StepNormalized(4, kMutateEverySteps));
         session.Render(64);
         const SavedState set = StateOf(session.processor());
         CHECK(set.sequencer.algorithm == 4 && set.sequencer.mutation == 35
               && set.sequencer.note_probability == 80 && set.sequencer.octave == 4
               && set.sequencer.length == 7 && set.sequencer.clock_divide == 5
-              && set.tuning == 0.25 && !set.run && set.keys_transpose);
+              && set.tuning == 0.25 && !set.run && set.keys_transpose
+              && set.sequencer.mutation_lock == 1 && set.sequencer.mutate_every == 4);
+    }
+    {
+        // Mutate every 2 passes, in the plug-in: two passes sound exactly as
+        // stored, the third starts changed.
+        SavedState every = pattern;
+        every.sequencer.algorithm = 1;
+        every.sequencer.mutation = 100;
+        every.sequencer.mutate_every = 2;
+        every.sequencer.length = 8;
+        Session session;
+        session.Load(every);
+        session.Play(120.0);
+        const int pass = 8 * 6000;
+        CHECK(Identical(session.Render(2 * pass - 100),
+                        RenderCore(48000.0f, PatternScore(every.sequencer, 0, 16, 0, 6000),
+                                   2 * pass - 100, AttackSeconds(kDefaultAttack),
+                                   DecaySeconds(kDefaultDecay))));
+        CHECK(StateOf(session.processor()).sequencer.steps == pattern.sequencer.steps);
+        session.Render(200);
+        CHECK(StateOf(session.processor()).sequencer.steps != pattern.sequencer.steps);
+    }
+    {
+        // The lock freezes a pattern that would mutate on every step, while
+        // it plays; opened, it mutates again.
+        SavedState locked = pattern;
+        locked.sequencer.algorithm = 2;
+        locked.sequencer.mutation = 100;
+        locked.sequencer.mutation_lock = 1;
+        Session session;
+        session.Load(locked);
+        session.Play(120.0);
+        CHECK(Identical(session.Render(2 * 48000),
+                        RenderCore(48000.0f, PatternScore(pattern.sequencer, 0, 16, 0, 6000),
+                                   2 * 48000, AttackSeconds(kDefaultAttack),
+                                   DecaySeconds(kDefaultDecay))));
+        const SavedState frozen = StateOf(session.processor());
+        CHECK(frozen.sequencer.steps == pattern.sequencer.steps
+              && frozen.sequencer.random == pattern.sequencer.random);
+        session.Set(kParamMutationLock, 0.0);
+        session.Render(48000);
+        const SavedState opened = StateOf(session.processor());
+        CHECK(opened.sequencer.mutation_lock == 0 && opened.sequencer.steps != pattern.sequencer.steps);
+    }
+    {
+        // A state of version 1, as plug-in 0.1.0 saved it: no lock, and the
+        // scale modes numbered as they were then.
+        const auto version_1 = [&](int scale) {
+            SavedState old = pattern;
+            old.sequencer.scale_mode = static_cast<std::uint8_t>(scale);
+            const auto current = StateStream(old);
+            std::vector<char> bytes(current->getData(), current->getData() + current->getSize());
+            const std::int32_t one = 1;
+            std::memcpy(bytes.data(), &one, sizeof(one));
+            bytes.erase(bytes.begin() + 4 + 40 + 2 + 8, bytes.begin() + 4 + 40 + 2 + 10); // lock, every
+            CHECK(static_cast<int>(bytes.size()) == kStateSizeVersion1);
+            auto stream = owned(new MemoryStream());
+            int32 written = 0;
+            stream->write(bytes.data(), static_cast<int32>(bytes.size()), &written);
+            int64 start = 0;
+            stream->seek(0, IBStream::kIBSeekSet, &start);
+            return stream;
+        };
+        const int moved[7] = {0, 1, 9, generative::kOddMode, 14, 15, generative::kTonicOnlyMode};
+        for(int scale = 0; scale < 7; ++scale) {
+            Session session;
+            CHECK(session.processor().setState(version_1(scale)) == kResultOk);
+            const SavedState loaded = StateOf(session.processor());
+            CHECK(loaded.sequencer.scale_mode == moved[scale] && loaded.sequencer.mutation_lock == 0
+                  && loaded.sequencer.mutate_every == 0
+                  && loaded.sequencer.steps == pattern.sequencer.steps
+                  && loaded.sequencer.random == pattern.sequencer.random);
+            IPtr<Controller> controller = owned(new Controller());
+            CHECK(controller->initialize(nullptr) == kResultOk);
+            CHECK(controller->setComponentState(version_1(scale)) == kResultOk);
+            CHECK(controller->getParamNormalized(kParamScale) == StepNormalized(moved[scale], kScaleSteps)
+                  && controller->getParamNormalized(kParamMutationLock) == 0.0);
+            controller->terminate();
+        }
+        Session session;
+        CHECK(session.processor().setState(version_1(7)) != kResultOk); // version 1 had seven
     }
     {
         // A project saved while its pattern mutates and loaded again goes on
@@ -1756,7 +1864,11 @@ void TestSequencerState() {
         };
         CHECK(refused({}));
         CHECK(refused(std::vector<char>(good.begin(), good.end() - 1))); // cut short
-        CHECK(refused(with(0, 2)));                // another version
+        CHECK(refused(with(0, 3)));                // another version
+        CHECK(refused(with(0, 0)));
+        CHECK(refused(with(4 + 42 + 8, 2)));       // the lock neither 0 nor 1
+        CHECK(refused(with(4 + 42 + 9, 17)));      // mutate-every beyond 16
+        CHECK(refused(with(4 + 42 + 1, 17)));      // a scale mode beyond the last
         CHECK(refused(with(4 + 7, 0x7F)));         // master pitch far out of range
         CHECK(refused(with(4 + 40, 2)));           // run neither 0 nor 1
         CHECK(refused(with(4 + 42, 12)));          // tonic
@@ -1937,13 +2049,20 @@ void TestSequencerController() {
     };
     const auto shown = [&](ParamID id) { return text(id, controller->getParamNormalized(id)); };
     // The defaults.
-    CHECK(shown(kParamRun) == "On" && shown(kParamAlgorithm) == "1" && shown(kParamMutation) == "0"
+    CHECK(shown(kParamRun) == "On" && shown(kParamAlgorithm) == "Drift"
+          && shown(kParamMutation) == "0" && shown(kParamMutationLock) == "Off"
+          && shown(kParamMutateEvery) == "Step"
           && shown(kParamNoteProbability) == "65" && shown(kParamScale) == "Minor"
           && shown(kParamTonic) == "A" && shown(kParamOctave) == "2" && shown(kParamLength) == "16"
           && shown(kParamClockDivide) == "1" && shown(kParamTuning) == "0"
           && shown(kParamKeysTranspose) == "On");
     // Every value of the stepped ones, as the processor reads it.
-    const char* scales[] = {"Major", "Minor", "Pentatonic", "Odd", "Octave", "Fifths", "Tonic"};
+    const char* scales[] = {"Major",       "Minor",       "Dorian",     "Phrygian",
+                            "Lydian",      "Mixolydian",  "Harm. Minor", "Mel. Minor",
+                            "Major Pent.", "Minor Pent.", "Blues",      "Whole Tone",
+                            "Hirajoshi",   "Odd",         "Octave",     "Fifths",
+                            "Tonic"};
+    CHECK(std::size(scales) == generative::kNumScaleModes);
     for(int i = 0; i <= kScaleSteps; ++i)
         CHECK(text(kParamScale, StepNormalized(i, kScaleSteps)) == scales[i]);
     const char* tonics[] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
@@ -1953,7 +2072,10 @@ void TestSequencerController() {
         CHECK(text(kParamClockDivide, StepNormalized(i, kClockDivideSteps))
               == std::to_string(generative::kClockDivides[static_cast<std::size_t>(i)]));
     for(int i = 0; i <= kAlgorithmSteps; ++i)
-        CHECK(text(kParamAlgorithm, StepNormalized(i, kAlgorithmSteps)) == std::to_string(i + 1));
+        CHECK(text(kParamAlgorithm, StepNormalized(i, kAlgorithmSteps)) == kAlgorithms[i].name);
+    // Each description starts with its name.
+    for(const AlgorithmInfo& algorithm : kAlgorithms)
+        CHECK(std::string(algorithm.description).rfind(std::string(algorithm.name) + ": ", 0) == 0);
     for(int i = 0; i <= kLengthSteps; ++i)
         CHECK(text(kParamLength, StepNormalized(i, kLengthSteps)) == std::to_string(i + 1));
     for(int i = 0; i <= kOctaveSteps; ++i)
@@ -1982,11 +2104,22 @@ void TestSequencerController() {
     CHECK(generative::MutationPercent(typed(kParamMutation, "250")) == 100);
     CHECK(StepIndex(typed(kParamNoteProbability, "80"), kNoteProbabilitySteps) == 80);
     CHECK(StepIndex(typed(kParamAlgorithm, "4"), kAlgorithmSteps) == 3);
+    CHECK(StepIndex(typed(kParamAlgorithm, "ladder"), kAlgorithmSteps) == 2);
+    CHECK(StepIndex(typed(kParamAlgorithm, " Focus "), kAlgorithmSteps) == 4);
+    CHECK(StepIndex(typed(kParamAlgorithm, "9"), kAlgorithmSteps) == 4);
+    {
+        String128 wide{};
+        StringConvert::convert(std::string("Nonsense"), wide);
+        ParamValue normalized = 0.5;
+        CHECK(controller->getParamValueByString(kParamAlgorithm, wide, normalized) != kResultOk
+              && normalized == 0.5);
+    }
     CHECK(StepIndex(typed(kParamLength, "7"), kLengthSteps) == 6);
     CHECK(StepIndex(typed(kParamLength, "99"), kLengthSteps) == kLengthSteps);
     CHECK(StepIndex(typed(kParamOctave, "5"), kOctaveSteps) == 5);
     CHECK(std::fabs(typed(kParamTuning, "25 %") - 0.25) < 1e-12);
-    CHECK(StepIndex(typed(kParamScale, "Fifths"), kScaleSteps) == 5);
+    CHECK(StepIndex(typed(kParamScale, "Fifths"), kScaleSteps) == 15);
+    CHECK(StepIndex(typed(kParamScale, "Dorian"), kScaleSteps) == 2);
     CHECK(StepIndex(typed(kParamTonic, "F#"), kTonicSteps) == 6);
     // No sequencer parameter is tied to a MIDI controller.
     for(int cc = 0; cc < 128; ++cc) {
@@ -2025,7 +2158,9 @@ void TestSequencerController() {
     state.run = false;
     state.keys_transpose = true;
     state.sequencer.tonic = 4;
-    state.sequencer.scale_mode = 5;
+    state.sequencer.scale_mode = 15;
+    state.sequencer.mutation_lock = 1;
+    state.sequencer.mutate_every = 12;
     state.sequencer.algorithm = 3;
     state.sequencer.mutation = 45;
     state.sequencer.note_probability = 12;
@@ -2038,7 +2173,8 @@ void TestSequencerController() {
           && controller->getParamNormalized(kParamVolume) == 0.8 && shown(kParamTuning) == "60");
     CHECK(shown(kParamRun) == "Off" && shown(kParamKeysTranspose) == "On"
           && shown(kParamTonic) == "E" && shown(kParamScale) == "Fifths"
-          && shown(kParamAlgorithm) == "3" && shown(kParamMutation) == "45"
+          && shown(kParamAlgorithm) == "Ladder" && shown(kParamMutation) == "45"
+          && shown(kParamMutationLock) == "On" && shown(kParamMutateEvery) == "12"
           && shown(kParamNoteProbability) == "12" && shown(kParamOctave) == "1"
           && shown(kParamLength) == "9" && shown(kParamClockDivide) == "16");
     controller->terminate();

@@ -56,4 +56,25 @@ class ToggleButton : public VSTGUI::CView {
     VSTGUI::SharedPointer<VSTGUI::CFontDesc> font_;
 };
 
+// The mutation lock below the Mutation knob: a small padlock in a circle,
+// without text. Closed and lit, the pattern is frozen; open, it mutates. A
+// click opens or closes it. What it means is also its tooltip. Drawn as in
+// Kekule's tuning lock.
+class LockButton : public VSTGUI::CView {
+  public:
+    LockButton(const VSTGUI::CRect& size, bool locked, std::function<void(bool locked)> toggled);
+
+    // Shows the lock closed or open, without calling back.
+    void SetLocked(bool locked);
+    bool Locked() const { return locked_; }
+    void draw(VSTGUI::CDrawContext* context) override;
+    void onMouseDownEvent(VSTGUI::MouseDownEvent& event) override;
+
+  private:
+    void UpdateTooltip();
+
+    bool locked_;
+    std::function<void(bool)> toggled_;
+};
+
 } // namespace taureon::toy_piano_generative

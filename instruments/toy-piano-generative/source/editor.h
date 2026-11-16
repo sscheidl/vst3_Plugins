@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <functional>
+#include <string>
 
 namespace VSTGUI {
 class CKnob;
@@ -21,6 +22,7 @@ class CTextLabel;
 namespace taureon::toy_piano_generative {
 
 class KeyboardView;
+class LockButton;
 class ToggleButton;
 
 // Window size at zoom 1 on a display without scaling: the two rows of knobs,
@@ -140,6 +142,16 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // Shows or hides the keyboard, as the KEYS button does. If the host
     // refuses the new window size, nothing changes.
     void SetKeyboardVisible(bool show);
+    // What a click on the mutation lock does: an edit the host records.
+    void SetMutationLock(bool locked);
+    // 1 for the closed lock, 0 for the open one, -1 while the window is closed.
+    int ShownMutationLock() const;
+    // The tooltip over the Algorithm knob and its value; empty while closed.
+    std::string AlgorithmTooltip() const;
+    // True while Mutation and Notes are shown dimmed; false while closed.
+    bool SequencerControlsDimmed() const;
+    // The text in the middle of the small pass knob; empty while closed.
+    std::string MutateEveryText() const;
     bool KeyboardVisible() const { return settings_.keyboard; }
     // What an octave button does: moves the visible keys by octaves, as far
     // as they go, and tells the controller to move the sequence along.
@@ -173,7 +185,11 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
         Steinberg::Vst::ParamID id = 0;
         VSTGUI::CKnob* knob = nullptr; // owned by the frame
         VSTGUI::CTextLabel* value = nullptr;
+        VSTGUI::CTextLabel* name = nullptr; // none for the small pass knob
     };
+    // Mutation, Notes and their small controls dim while Ladder plays,
+    // which uses none of them.
+    void UpdateDimming();
     void ShowValue(Knob& knob, Steinberg::Vst::ParamValue normalized);
     // Window size in pixels for the current zoom, display scale and keyboard.
     Steinberg::ViewRect ScaledSize() const;
@@ -191,13 +207,15 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // Lights the key at which the sequence's tonic sounds, while keys transpose.
     void UpdateMarkedKey();
 
-    std::array<Knob, 13> knobs_{};
+    // The 13 knobs of the two rows, then the small pass knob at Mutation.
+    std::array<Knob, 14> knobs_{};
     KeyboardView* keyboard_view_ = nullptr; // owned by the frame, as all below
     ToggleButton* keyboard_button_ = nullptr;
     ToggleButton* transpose_button_ = nullptr;
     ToggleButton* run_button_ = nullptr;
     ToggleButton* octave_down_ = nullptr;
     ToggleButton* octave_up_ = nullptr;
+    LockButton* mutation_lock_ = nullptr;
     double scale_ = 1.0; // the host's display scale factor
     EditorSettings settings_;
     EditorCallbacks callbacks_;
