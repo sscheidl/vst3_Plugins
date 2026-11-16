@@ -18,4 +18,4 @@
 #define stringPluginNameUtf8 "Kekul\xC3\xA9"
 
 // Keep equal to the version in ../CMakeLists.txt and ../components.json.
-#define FULL_VERSION_STR "0.2.2"
+#define FULL_VERSION_STR "0.3.1"

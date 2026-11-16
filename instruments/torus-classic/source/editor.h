@@ -1,5 +1,7 @@
 #pragma once
 
+#include "view_layout.h"
+
 #include "pluginterfaces/gui/iplugviewcontentscalesupport.h"
 #include "public.sdk/source/vst/vstguieditor.h"
 #include "vstgui/lib/controls/icontrollistener.h"
@@ -18,7 +20,9 @@ class CTextLabel;
 
 namespace torus_classic {
 
+class ChoiceSelector;
 class KeyboardView;
+class LockButton;
 class ModelSelector;
 class ToggleButton;
 
@@ -102,6 +106,7 @@ class DragConstraint {
 struct EditorSettings {
     double zoom = 1.0;
     bool keyboard = true;
+    int transpose = kKeyboardDefaultTranspose; // of the keyboard, in semitones
 };
 
 // How the window talks back to the controller.
@@ -116,9 +121,12 @@ struct EditorCallbacks {
     std::function<void(int note)> release;
 };
 
-// The plug-in window: a model selector, eight knobs, a small switch for free
-// tuning beside the Tune knob, and an on-screen keyboard that a button shows
-// and hides. The layout is fixed and drawn as vectors, so
+// The plug-in window: the choice of the number of voices, a model selector,
+// eight knobs, a small lock beside the Tune knob (closed: semitones, open:
+// free tuning), and an on-screen keyboard that a button shows and hides, with
+// two octave keys beside it. The
+// rings of the knobs have three colours, by what a knob acts on (see
+// editor.cpp). The layout is fixed and drawn as vectors, so
 // the window scales as a whole: by the zoom the user picks when resizing it,
 // times the host's display scale factor. The aspect ratio stays the same.
 //
@@ -138,13 +146,24 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // refuses the new window size, nothing changes.
     void SetKeyboardVisible(bool show);
     bool KeyboardVisible() const { return settings_.keyboard; }
+    // Moves the keyboard by octaves, as the octave keys do; saved with the
+    // project like the window size.
+    void SetKeyboardTranspose(int semitones);
     const EditorSettings& Settings() const { return settings_; }
     // Selects a model, as a click on the selector does: an edit the host records.
     void ChooseModel(int model);
-    // Switches free tuning, as a click on FREE does: an edit the host records.
+    // Switches free tuning, as a click on the lock does: an edit the host
+    // records. Free is the open lock.
     void SetTuneFree(bool free);
+    // Chooses the number of voices by its place in kPolyphonyVoices, as a
+    // click on the selector does: an edit for the processor and the project,
+    // though not one a host can automate.
+    void ChoosePolyphony(int choice);
     // What the window currently shows; -1 while it is closed. For tests.
     int ShownModel() const;
+    int ShownPolyphony() const;
+    // 1 for the closed lock, 0 for the open one, -1 while the window is closed.
+    int ShownTuneLock() const;
     float ShownKnobValue(Steinberg::Vst::ParamID id) const;
     // The knob of a parameter while the window is open, else nullptr. For tests.
     VSTGUI::CKnob* KnobOf(Steinberg::Vst::ParamID id) const;
@@ -197,8 +216,11 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     std::array<Knob, kKnobCount> knobs_{};
     KeyboardView* keyboard_view_ = nullptr; // owned by the frame, like the next two
     ToggleButton* keyboard_button_ = nullptr;
-    ToggleButton* tune_free_button_ = nullptr;
+    ToggleButton* octave_down_ = nullptr;
+    ToggleButton* octave_up_ = nullptr;
+    LockButton* tune_lock_ = nullptr;
     ModelSelector* model_selector_ = nullptr;
+    ChoiceSelector* voice_selector_ = nullptr;
     double scale_ = 1.0; // the host's display scale factor
     EditorSettings settings_;
     EditorCallbacks callbacks_;

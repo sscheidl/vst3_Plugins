@@ -26,22 +26,24 @@ inline bool WriteSavedValues(Steinberg::IBStream* state, const SavedValues& valu
 }
 
 // A state of version 1 (0.1.x) in today's terms: Damping mirrored, the filter
-// open, and free tuning on exactly if the saved Tune is no whole semitone.
+// open, free tuning on exactly if the saved Tune is no whole semitone, and
+// four voices.
 inline SavedValues FromVersion1(const std::array<double, kStateV1Values>& old) {
     SavedValues values{};
     for(int i = 0; i < kStateV1Values; ++i)
         values[i] = old[i];
     values[Index(kParamDamping)] = 1.0 - old[Index(kParamDamping)];
     const double semitones = TuneSemitones(old[Index(kParamTune)]);
-    values[8] = kDefaultFilter;
-    values[9] = std::fabs(semitones - std::round(semitones)) > 1e-9 ? 1.0 : 0.0;
+    values[kSavedFilter] = kDefaultFilter;
+    values[kSavedTuneFree] = std::fabs(semitones - std::round(semitones)) > 1e-9 ? 1.0 : 0.0;
+    values[kSavedPolyphony] = kDefaultPolyphony;
     return values;
 }
 
 // Reads and checks a whole state. False, with `values` untouched, for an
 // unknown version, a state cut short, or a value that is not a finite number
-// from 0 to 1. The model and the tuning switch come back as the value of the
-// step they fall on.
+// from 0 to 1. The model, the tuning switch and the number of voices come
+// back as the value of the step they fall on.
 inline bool ReadSavedValues(Steinberg::IBStream* state, SavedValues& values) {
     Steinberg::IBStreamer stream(state, kLittleEndian);
     Steinberg::int32 version = 0;
@@ -58,17 +60,24 @@ inline bool ReadSavedValues(Steinberg::IBStream* state, SavedValues& values) {
                 return false;
         read = FromVersion1(old);
     } else {
-        for(double& value : read)
-            if(!read_value(value))
+        // Version 2 ends before the number of voices: four, as it was then.
+        const int count = version == 2 ? kStateV2Values : kSavedParamCount;
+        read[kSavedPolyphony] = kDefaultPolyphony;
+        for(int i = 0; i < count; ++i)
+            if(!read_value(read[static_cast<std::size_t>(i)]))
                 return false;
     }
     double& model = read[Index(kParamModel)];
     model = ModelNormalized(ModelIndex(model));
-    read[9] = IsOn(read[9]) ? 1.0 : 0.0;
+    read[kSavedTuneFree] = IsOn(read[kSavedTuneFree]) ? 1.0 : 0.0;
+    read[kSavedPolyphony] = PolyphonyNormalized(PolyphonyIndex(read[kSavedPolyphony]));
     values = read;
     return true;
 }
 
-static_assert(kSavedIndex[8] == Index(kParamFilter) && kSavedIndex[9] == Index(kParamTuneFree));
+static_assert(kSavedIndex[kSavedFilter] == Index(kParamFilter)
+              && kSavedIndex[kSavedTuneFree] == Index(kParamTuneFree)
+              && kSavedIndex[kSavedPolyphony] == Index(kParamPolyphony));
+static_assert(kStateV2Values == kSavedPolyphony && kStateV1Values == kSavedFilter);
 
 } // namespace torus_classic

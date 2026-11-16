@@ -68,8 +68,15 @@ und spielt in Studio One (erster DAW-Test des Nutzers am 2026-11-14). Codex
 fand in 0.1.0 vier Fehler; sie sind seit 0.1.1 behoben. 0.2.0 bringt die
 Ergänzungen aus dem DAW-Test und ist gebaut und automatisch geprüft, in
 einer DAW aber noch nicht ausprobiert. Codex hat 0.2.1 für den DAW-Test
-freigegeben; ein Punkt der Priorität P3 (TC-R10) ist offen. Seit 0.2.2 heißt
-das Plugin Kekulé. Was sich wann geändert hat, steht im
+freigegeben; der eine offene Punkt der Priorität P3 (TC-R10) ist seit 0.3.0
+behoben. Seit 0.2.2 heißt das Plugin Kekulé. 0.3.0 brachte die drei
+Folgeschritte aus der Nachprüfung von 0.2.0 (wählbare Stimmenzahl,
+Ruhe-Erkennung für Plugin-Nap, Schloss statt FREE) und dreifarbige
+Reglerringe; Codex gab es nicht frei (drei Befunde zur Ruhe-Meldung, einer
+zur Stimmenreihenfolge). 0.3.1 nimmt die Ruhe-Meldung wieder heraus (kein
+Plugin-Nap), bringt Oktavtasten an der Bildschirm-Klaviatur und die
+Reglerfarben von Mendelejew; gebaut und automatisch geprüft, noch nicht in
+einer DAW; Codex hat 0.3.1 ohne neue Befunde freigegeben. Was sich wann geändert hat, steht im
 [Änderungsprotokoll](../instruments/torus-classic/CHANGELOG.md). Einzelheiten und Messwerte stehen im
 [Build-Bericht](../instruments/torus-classic/docs/BUILD_REPORT_0.1.0.md), die
 offene Abnahme in der
@@ -106,6 +113,30 @@ Einzelheiten darin selbst festgelegt:
 | Limiter | Am Ende der Kette, nach Filter und Sampleratenwandlung; Decke −6 dBFS, beide Kanäle gemeinsam, sofortiger Zugriff, Erholung 0,15 s, kein Look-ahead | Vorgabe: einfacher Limiter gegen Übersteuerung. Die Decke ist eine Konstante im Quelltext (`OutputStage::kCeiling`) und bei Bedarf in einer Zeile zu ändern. Ohne Look-ahead keine Latenz; dafür kann ein sehr lauter Anschlag eine hörbare Kante bekommen |
 | MIDI aus der Bildschirm-Klaviatur | Event-Ausgang „MIDI Out"; Note-on beim Anschlag, Note-off beim Loslassen | Vorgabe des Nutzers. Ohne Note-off blieben aufgenommene Noten hängen; die Engine selbst kennt weiterhin kein Note-off |
 | Tests | Nur automatische Prüfungen des Verhaltens; keine Fenster- oder DAW-Tests der Ergänzungen | Der Nutzer prüft Optik, GUI und DAW selbst |
+
+Auftrag vom 2026-11-15 (`docs/CLAUDE_BUILDAUFTRAG_KEKULE_0.3.0.md`, liegt
+beim Nutzer), umgesetzt in 0.3.0. Vorgegeben waren: 4, 8 oder 16 Stimmen,
+nur im Fenster wählbar, ohne MIDI-CC und ohne Automation; Plugin-Nap in
+Studio One 7; ein Schloss statt FREE; Reglerfarben. Selbst festgelegt:
+
+| Thema | Festlegung | Begründung |
+| --- | --- | --- |
+| Mehr als vier Stimmen | Bänke: bis zu vier unveränderte Vier-Stimmen-`Part`s im Synth (`engine/synth.h`). Der vendorte Kern ist nicht angefasst | Empfehlung des Auftrags. `kMaxPolyphony` hochzusetzen ginge nicht: Auflösung der Modalfilter, Akkordtabellen und Saitenzahl hängen an der Vier. So klingt jede Stimme wie bisher, und mit einer Bank ist der Ablauf Anweisung für Anweisung der der Firmware |
+| Verteilung der Noten | Anschläge füllen die Stimmen reihum, bankweise zu je vier. Im vollen Instrument trifft es die am längsten nicht angeschlagene Stimme; kurz nach einer Erhöhung der Stimmenzahl nur ungefähr (TC-R14, im README beschrieben), weil jeder `Part` seine eigene Reihenfolge behält. Je Bank starten höchstens vier Anschläge je 12-Sample-Quantum, also 4, 8 oder 16 | Die Regel der Firmware, fortgesetzt. Bankweise und nicht reihum über die Bänke, weil der `Part` seine Stimmen abwechselnd links und rechts ausgibt: reihum über vier Bänke lägen vier aufeinanderfolgende Noten alle links |
+| Pegel | Keine Pegelkorrektur je Stimmenzahl. Die Bänke werden vor Blende und Ausgangsstufe der Firmware summiert | Empfehlung des Auftrags: Eine Note ist bei jeder Stimmenzahl gleich laut. Gemessen mit 16 lauten Noten auf einmal, alle Modelle: 0,71 bis 0,77 vor dem Limiter (derselbe Akkord mit vier Stimmen: 0,61 bis 0,68). Die Kniekennlinie hält die Summe unter 0,8, der Limiter am Ende bei −6 dBFS |
+| Akkordmodelle | Jede Stimme jeder Bank hat ihre zwei Saiten; der mit Structure gewählte Akkord gilt für alle Bänke | Folgt aus den unveränderten Bänken |
+| Zufallsgenerator | Je Bank ein eigener Startwert: Startwert der Instanz plus Banknummer × 0x9E3779B9 | Deterministisch. Bank 0 behält den bisherigen Startwert, der Vier-Stimmen-Modus bleibt bitgenau. Gleiche Startwerte ließen zwei Bänke bei gleicher Vorgeschichte dasselbe Rauschen ziehen |
+| Umschalten im Spiel | Mehr Stimmen: klingende Noten bleiben unberührt, die nächsten Anschläge gehen zuerst in die neuen Bänke. Weniger: Die Noten der wegfallenden Bänke blenden in 4 ms aus (192 Samples, wie beim Modellwechsel), die der bleibenden klingen weiter. Wirksam am nächsten Quantum | Kein Knacken, und was bleiben kann, bleibt. Das ganze Instrument neu zu starten wäre einfacher gewesen, hätte aber alle Noten gekappt |
+| Ruhende Bänke | Eine Bank jenseits der ersten wird nur gerechnet, solange sie klingt: vom ersten Anschlag bis eine Sekunde nach ihrem letzten Sample ab −180 dBFS. Dann wird sie in ihren Anfangszustand zurückgesetzt | 16 Stimmen gewählt und 4 klingend kostet so viel wie 4 Stimmen. Die erste Bank läuft immer: Sonst gälte der Firmware-Vergleich nach einer Pause nicht mehr (LFO-Phasen, Rauschzustand, Stimmenzeiger) |
+| Speicher | Alle vier Bänke liegen ab der Konstruktion im Synth: 446 KB statt 111 KB je Instanz. Eine Bank wird an Ort und Stelle zurückgesetzt | Im Audio-Thread wird nichts angelegt. Der Test „no allocation" gilt weiter, jetzt auch für Stimmenwechsel und weggelegte Bänke |
+| Stimmenzahl: Bedienung und Weg | Parameter 111 „Polyphony", Liste 4/8/16, ohne `kCanAutomate`, ohne CC. Die Wahl sitzt im Fenster neben dem Titel | Entscheidung des Nutzers vom 2026-11-15: nur GUI, kein CC, keine Automation. Als Parameter und nicht als eigene Nachricht, weil er so auf dem vorhandenen Weg samplegenau beim Prozessor ankommt, mit dem Zustand gespeichert wird und das Undo des Hosts mitmacht. CC 29 der Firmware bleibt frei |
+| 32 Stimmen | Nicht angeboten, aber nicht verbaut: `kMaxBanks` 8, ein vierter Listeneintrag, eine neue Zustandsversion | Der Nutzer hält 32 für übertrieben (2026-11-15) |
+| Rechenzeit | Gemessen mit `bench_torus_classic` (Release, ein Kern eines i7-8700K, 48 kHz, alle Stimmen zweimal je Sekunde neu angeschlagen): 4 Stimmen 0,9 bis 1,5 %, 8 Stimmen 1,5 bis 2,8 %, 16 Stimmen 2,8 bis 5,3 % je nach Modell (0.3.1); bei 192 kHz mit 16 Stimmen bis 6,9 %. Einzelne Quanten dauerten unter Windows bis rund 440 µs; eine harte Obergrenze ist das nicht | Vom Auftrag verlangt: Die geringe CPU-Anzeige in Studio One ersetzt die Messung nicht. Die Kosten wachsen linear mit der Zahl klingender Bänke |
+| Zustand | Version 3 mit elf Werten. Version 1 und 2 laden mit vier Stimmen | Vorgabe |
+| Plugin-Nap (0.3.1) | Nicht unterstützt. Fester Tail `kInfiniteTail`, keine exakten Nullen in Ruhe, keine Ruhe-Meldung zwischen den Threads. Weggelegt werden nur stille Bänke jenseits der ersten, im Inneren der Engine | **Entscheidung des Nutzers vom 2026-11-15** nach Codex' Review von 0.3.0 (TC-R11 bis TC-R13): Der Tail ist ein Wert, den Hosts beim Einrichten lesen; eine Ruhe-Meldung über Threads hinweg hatte Lücken, und ausstehende Note-offs gingen nicht ein. Der Gewinn wäre klein: Eine ruhende Instanz kostet rund 1 % eines Kerns. Dafür ist das Plugin wieder ohne Ausnahme bitgleich zur Firmware |
+| Oktavtasten (0.3.1) | **<<** und **>>** neben der Klaviatur verschieben sie in Oktaven, ±2 um C4–C6; Start bei C3–C5. Eine gehaltene Taste wird vorher losgelassen. Gespeichert im Fensterzustand (Version 2), Version 1 öffnet bei C3–C5 | Wunsch des Nutzers vom 2026-11-15: wie Mendelejew 0.1.4, dessen Lösung übernommen ist (Code kopiert, nichts nach `common/`) |
+| Schloss | Vektorzeichnung in `widgets.cpp`, alle Maße relativ zur Größe. Geschlossen grau, offen bernstein. Tooltip | Vorgabe. Parameter 110 bleibt, wie er ist; das Schloss zeigt ihn invertiert |
+| Reglerfarben | Weiß: Tune, Filter, Volume. Magenta: Structure, Brightness, Damping. Türkis: Position, Excitation. Drei benannte Konstanten in `editor.cpp`; seit 0.3.1 genau die Töne von Mendelejew | Anregung des Nutzers, mit Verweis auf Mendelejew. Zuordnung nach Aufgabe: Rahmen, Resonator, Anschlag. Übernommen sind nur Farben; im Produkt steht kein fremder Name, die Hommage steht im README |
 
 ### Mendelejew (Projektname Elements)
 
