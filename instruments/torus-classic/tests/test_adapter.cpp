@@ -1,8 +1,9 @@
 // Tests of the streaming adapter (layer 3): no sample lost or doubled at any
 // block size, events on the quantum grid by absolute time, the resampling
 // filter's passband, stopband, delay and long-run position, queue limits,
-// reset and freedom from allocation. Most use small stand-in engines; the
-// block-size test at the end runs the real dry engine through the adapter.
+// reset, rest and freedom from allocation. Most use small stand-in engines;
+// the block-size test at the end runs the real dry engine through the
+// adapter, with every number of voices.
 
 #define TEST_SUPPORT_COUNT_ALLOCATIONS
 #include "test_support.h"
@@ -19,6 +20,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <xmmintrin.h>
 
 using namespace torus_classic;
 using namespace test_support;
@@ -493,7 +495,7 @@ void TestQueueLimits() {
         StreamAdapter adapter(engine);
         CHECK(adapter.Prepare(48000.0));
         for(int i = 1; i <= points; ++i)
-            CHECK(adapter.AddEvent(12 * i, ControlEvent(Control::Tune, static_cast<float>(i))));
+            CHECK(adapter.AddEvent(12 * i, ControlEvent(Control::Structure, static_cast<float>(i))));
         CHECK(adapter.DroppedControlPoints() == 44);
         CHECK(adapter.PendingEvents() == StreamAdapter::kControlCapacity && engine.logged == 0);
         adapter.Process(left, right, 2048);
@@ -519,7 +521,7 @@ void TestQueueLimits() {
         for(int start = 0; start < 4096; start += 64) {
             for(; next <= points && 12 * next < start + 64; ++next)
                 CHECK(adapter.AddEvent(12 * next - start,
-                                       ControlEvent(Control::Tune, static_cast<float>(next))));
+                                       ControlEvent(Control::Structure, static_cast<float>(next))));
             adapter.Process(left, right, 64);
         }
         CHECK(adapter.DroppedControlPoints() == 0 && engine.logged == static_cast<std::size_t>(points));
@@ -537,12 +539,12 @@ void TestQueueLimits() {
         StreamAdapter adapter(engine);
         CHECK(adapter.Prepare(48000.0));
         for(int i = 1; i <= points; ++i)
-            CHECK(adapter.AddEvent(12 * i, ControlEvent(Control::Tune, static_cast<float>(i))));
+            CHECK(adapter.AddEvent(12 * i, ControlEvent(Control::Structure, static_cast<float>(i))));
         CHECK(adapter.AddEvent(24, ControlEvent(Control::Damping, 0.5f)));
         CHECK(adapter.AddEvent(24, ModelEvent(3)) && adapter.AddEvent(24, BendEvent(100)));
         CHECK(adapter.AddEvent(24, NoteEvent(60, 100)));
         adapter.Process(left, right, 36); // quanta 0, 1, 2
-        CHECK(engine.logged == 6); // Tune for quanta 1 and 2, and the four at quantum 2
+        CHECK(engine.logged == 6); // Structure for quanta 1 and 2, and the four at quantum 2
         std::size_t at_two = 0;
         for(std::size_t k = 0; k < engine.logged; ++k)
             at_two += engine.log[k].quantum == 2;
@@ -556,7 +558,7 @@ void TestQueueLimits() {
         StreamAdapter adapter(engine);
         CHECK(adapter.Prepare(48000.0));
         for(int i = 0; i < 100000; ++i) {
-            CHECK(adapter.AddEvent(0, ControlEvent(Control::Tune, static_cast<float>(i % 100) / 100.0f)));
+            CHECK(adapter.AddEvent(0, ControlEvent(Control::Structure, static_cast<float>(i % 100) / 100.0f)));
             CHECK(adapter.AddEvent(0, BendEvent(static_cast<unsigned>(i % 16384))));
             CHECK(adapter.AddEvent(0, ModelEvent(static_cast<unsigned>(i % 6))));
         }
@@ -910,6 +912,10 @@ std::vector<HostEvent> HostScore(std::int64_t total) {
         score.push_back({t, NoteEvent(48 + static_cast<unsigned>(t % 36), 100)});
     for(unsigned i = 0; i < 9; ++i) // nine notes on one sample: three quanta of triggers
         score.push_back({3000, NoteEvent(40 + 4 * i, 110)});
+    // More voices from here, then every number in turn while notes ring.
+    score.push_back({3300, PolyphonyEvent(16)});
+    for(unsigned i = 0; i < 12; ++i)
+        score.push_back({3400, NoteEvent(38 + 3 * i, 100)});
     std::int64_t t = 3500;
     while(t < total) {
         t += 1 + random.Below(1400);
@@ -928,14 +934,22 @@ std::vector<HostEvent> HostScore(std::int64_t total) {
             case 4:
             case 5:
             case 6:
-            case 7:
-                score.push_back({t, ControlEvent(static_cast<Control>(random.Below(kControlCount)),
-                                                 random.Unit())});
+            case 7: {
+                // Tune travels as a Tune event, with its semitone beside the
+                // value; every other control as its value alone.
+                const auto control = static_cast<Control>(random.Below(kControlCount));
+                const float value = random.Unit();
+                score.push_back({t, control == Control::Tune
+                                        ? TuneEvent(static_cast<double>(value))
+                                        : ControlEvent(control, value)});
                 break;
+            }
             case 8: score.push_back({t, BendEvent(random.Below(16384))}); break;
             default:
                 if(random.Below(4) == 0)
                     score.push_back({t, ModelEvent(random.Below(6))});
+                else
+                    score.push_back({t, PolyphonyEvent(4u << random.Below(3))});
                 break;
         }
     }
@@ -1004,9 +1018,31 @@ void TestBlockSizesWithEngine() {
     std::vector<float> left, right;
     float l[kQ], r[kQ];
     std::size_t next = 0;
+    // What Tune has to arrive at: free tuning is off in this score, so the
+    // engine's target is the whole semitone of the Tune event sent last.
+    int tune_events = 0, tune_semitones_seen = 0;
+    std::array<bool, 49> semitone_seen{};
+    float tune_target = static_cast<float>(kDefaultTune);
+    // Denormal numbers count as zero here as they do while the adapter
+    // renders; a decaying tail differs in its last bits otherwise.
+    const unsigned int saved_csr = _mm_getcsr();
+    _mm_setcsr(saved_csr | 0x8040u);
     for(std::int64_t quantum = 0; quantum * kQ < total; ++quantum) {
-        for(; next < score.size() && (score[next].sample + kQ - 1) / kQ <= quantum; ++next)
-            bridge.HandleEvent(score[next].event);
+        for(; next < score.size() && (score[next].sample + kQ - 1) / kQ <= quantum; ++next) {
+            const EngineEvent& event = score[next].event;
+            bridge.HandleEvent(event);
+            if(event.type != EngineEvent::kControl
+               || event.index != static_cast<unsigned>(Control::Tune))
+                continue;
+            const int step = TuneStep(static_cast<double>(event.value));
+            CHECK(event.data == step + EngineBridge::kTuneStepOffset);
+            tune_target = static_cast<float>(TuneNormalized(step));
+            CHECK(engine.ControlTarget(Control::Tune) == tune_target);
+            ++tune_events;
+            auto& seen = semitone_seen[static_cast<std::size_t>(step + 24)];
+            tune_semitones_seen += !seen;
+            seen = true;
+        }
         engine.Render(l, r);
         for(int i = 0; i < kQ; ++i)
             stage.Process(l[i], r[i]);
@@ -1016,9 +1052,66 @@ void TestBlockSizesWithEngine() {
     left.resize(static_cast<std::size_t>(total));
     right.resize(static_cast<std::size_t>(total));
     left.insert(left.end(), right.begin(), right.end());
+    _mm_setcsr(saved_csr);
     CHECK(left == through_adapter);
+    // The score moves Tune, to more than one semitone, and after the last
+    // event the engine glides to exactly that semitone.
+    CHECK(tune_events >= 3 && tune_semitones_seen >= 3);
+    for(int i = 0; i < 4000; ++i)
+        engine.Render(l, r);
+    CHECK(engine.ControlValue(Control::Tune) == tune_target);
     std::printf("block sizes with the real engine: one absolute event list gives one result "
-                "at 44.1, 48, 88.2, 96 and 192 kHz; at 48 kHz it is the engine's own output\n");
+                "at 44.1, 48, 88.2, 96 and 192 kHz; at 48 kHz it is the engine's own output; "
+                "%d Tune events arrive as %d different semitones\n",
+                tune_events, tune_semitones_seen);
+}
+
+// Tune events through the adapter's queues into the real engine: the semitone
+// travels with the value, also where the adapter merges two points of one
+// quantum or replaces the newest point of a full queue. (TC-R10)
+void TestTuneEvents() {
+    DryEngine engine;
+    EngineBridge bridge(engine);
+    StreamAdapter adapter(bridge);
+    CHECK(adapter.Prepare(48000.0));
+    std::vector<float> left(4096), right(4096);
+    const auto settle = [&] {
+        for(int i = 0; i < 12; ++i)
+            adapter.Process(left.data(), right.data(), 4096);
+        return engine.ControlValue(Control::Tune);
+    };
+    // The general helper gives a valid Tune event: the middle stays the
+    // middle, not the lowest semitone its empty data field used to mean.
+    const EngineEvent helper = ControlEvent(Control::Tune, 0.5f);
+    CHECK(helper.data == EngineBridge::kTuneStepOffset && helper.value == 0.5f);
+    CHECK(adapter.AddEvent(0, helper));
+    CHECK(settle() == 0.5f);
+    for(const double semitones : {-24.0, -7.0, -0.4, 0.4, 5.0, 11.6, 24.0}) {
+        const float value = static_cast<float>(TuneNormalized(semitones));
+        CHECK(adapter.AddEvent(0, ControlEvent(Control::Tune, value)));
+        const float expected =
+            static_cast<float>(TuneNormalized(TuneStep(static_cast<double>(value))));
+        CHECK(settle() == expected);
+    }
+    // Two points on one quantum: the later one wins whole.
+    CHECK(adapter.AddEvent(0, TuneEvent(TuneNormalized(-9.0))));
+    CHECK(adapter.AddEvent(0, TuneEvent(TuneNormalized(7.0))));
+    CHECK(adapter.PendingEvents() == 1);
+    CHECK(settle() == static_cast<float>(TuneNormalized(7.0)));
+    // A full queue: the newest waiting point gives way, whole again.
+    for(int i = 1; i <= StreamAdapter::kControlCapacity + 5; ++i)
+        CHECK(adapter.AddEvent(12 * i, TuneEvent(TuneNormalized(i % 2 ? -12.0 : 3.0))));
+    CHECK(adapter.DroppedControlPoints() == 5);
+    CHECK(adapter.AddEvent(12 * (StreamAdapter::kControlCapacity + 6),
+                           TuneEvent(TuneNormalized(-5.0))));
+    CHECK(settle() == static_cast<float>(TuneNormalized(-5.0)));
+    // Free tuning takes the value itself.
+    CHECK(adapter.AddEvent(0, TuneFreeEvent(true)));
+    const float free_value = static_cast<float>(TuneNormalized(2.37));
+    CHECK(adapter.AddEvent(0, ControlEvent(Control::Tune, free_value)));
+    CHECK(settle() == free_value);
+    std::printf("tune events: the semitone arrives with the value, through the general "
+                "helper, a merged quantum and a full queue\n");
 }
 
 } // namespace
@@ -1035,6 +1128,7 @@ int main() {
     TestNoAllocation();
     TestOutputStage();
     TestBlockSizesWithEngine();
+    TestTuneEvents();
     std::printf("PASS\n");
     return 0;
 }

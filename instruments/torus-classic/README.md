@@ -1,9 +1,9 @@
 # Kekulé
 
-VST3 instrument, version 0.2.2, Windows x64. The Rings/Torus keyboard engine
+VST3 instrument, version 0.3.1, Windows x64. The Rings/Torus keyboard engine
 of the Daisy Seed3 firmware *Physical Modeling*, without its reverb, inside a
-native plug-in: six synthesis models, four voices, dry stereo output, with a
-low-pass and a limiter at the end.
+native plug-in: six synthesis models, 4, 8 or 16 voices, dry stereo output,
+with a low-pass and a limiter at the end.
 
 ![The plug-in window](docs/editor.png)
 
@@ -36,14 +36,26 @@ validator.
   ([what was done](docs/CODEX_REVIEW_0.2.0_UMSETZUNG.md)).
 * Codex re-reviewed 0.2.1 and released it for the DAW test
   ([review](docs/CODEX_REVIEW_0.2.1.md)): the five defects are fixed, nothing
-  new of priority P0 to P2. One minor point (TC-R10, P3) concerns a test and
-  an internal helper, not the plug-in's own path; it is still open.
+  new of priority P0 to P2. One minor point (TC-R10, P3) concerned a test and
+  an internal helper, not the plug-in's own path; 0.3.0 fixes it.
 * 0.2.2 only renames the plug-in to Kekulé.
+* 0.3.0 added a choice of 4, 8 or 16 voices, a report of rest for Studio
+  One's Plug-in Nap, a lock instead of the FREE switch and knob rings in
+  three colours. Codex reviewed it and did not release it
+  ([review](docs/CODEX_REVIEW_0.3.0.md)): three findings concerned the rest
+  report, one the order of voices after a change of their number.
+* 0.3.1 drops the rest report: Plug-in Nap is not supported (see
+  [No Plug-in Nap](#no-plug-in-nap)), which settles those three findings;
+  the fourth is documented ([what was done](docs/CODEX_REVIEW_0.3.0_UMSETZUNG.md)).
+  It adds octave keys to the screen keyboard and takes the knob colours from
+  Mendelejew. Codex released it, with no new findings
+  ([review](docs/CODEX_REVIEW_0.3.1.md)); not in a DAW yet.
 * The [build report](docs/BUILD_REPORT_0.1.0.md) describes 0.1.0: what was
   verified then and what was not.
 
-The picture above shows 0.1.0; 0.2.0 has an eighth knob (FILTER) and a small
-FREE switch beside TUNE.
+The picture above shows 0.1.0. Since then the window has gained an eighth
+knob (FILTER), the choice of voices beside the title, a small lock beside
+TUNE, rings in three colours, and octave keys beside the screen keyboard.
 
 ## Sound
 
@@ -62,18 +74,19 @@ Six models, in the order of the firmware:
 name referred to: the synthesis is the same. At Position 0.5 its two channels
 are exact opposites, so a mono sum of that model cancels.
 
-Four voices, always. A fifth strike takes over the voice that was struck
-longest ago. There is no note-off: a struck resonator rings until it has
-decayed, and Damping decides how long. At Damping 0 the string models and the
-FM voice sustain without end.
+Four voices as on the Daisy kit, or 8 or 16: see [Voices](#voices). A strike
+on a full instrument takes over the voice that was struck longest ago. There
+is no note-off: a struck resonator rings until it has decayed, and Damping
+decides how long. At Damping 0 the string models and the FM voice sustain
+without end.
 
 **No reverb.** The plug-in computes none, holds no reverb memory and has no
 reverb or dry/wet control. Add one in the DAW if wanted.
 
 | Control | Range | Default | Notes |
 | --- | --- | --- | --- |
-| Tune | −24 to +24 semitones | 0 | In whole semitones; continuous with FREE on. Sounding notes follow |
-| FREE (switch beside Tune) | off, on | off | Free tuning: Tune no longer snaps to semitones |
+| Tune | −24 to +24 semitones | 0 | In whole semitones; continuous with the lock open. Sounding notes follow |
+| Lock (beside Tune) | closed, open | closed | Open is free tuning: Tune no longer snaps to semitones. For the host this is the parameter *Tune Free*, off or on |
 | Structure | 0 to 1 | 0.5 | Meaning depends on the model; chord in Western Chords |
 | Brightness | 0 to 1 | 0.5 | |
 | Damping | 0 to 1 | 0.5 | More is shorter: 1 damps most, 0 sustains |
@@ -82,21 +95,85 @@ reverb or dry/wet control. Add one in the DAW if wanted.
 | Filter | 100 Hz to 20 kHz, then off | off | Low-pass over the whole output, 12 dB per octave |
 | Model | six models | Modal Resonator | A change fades out, switches, fades in: about 8 ms |
 | Volume | 0 to 100 % | 100 % | The firmware's master, in front of the output stages |
+| Voices | 4, 8, 16 | 4 | Chosen in the window; not for automation, no MIDI controller. See [Voices](#voices) |
 
 Controls take effect within about 5 ms. Ctrl+click resets a knob; the mouse
 wheel moves it in small steps, Tune in semitones. Typed values accept one
-number and optionally the unit: `-7`, `-7.5 st` (rounded unless FREE is on),
-`50 %`, `1000 Hz` or `off` for the filter, `2,5`; the model its name or its
-number 1 to 6. Anything else is refused.
+number and optionally the unit: `-7`, `-7.5 st` (rounded unless the lock is
+open), `50 %`, `1000 Hz` or `off` for the filter, `2,5`; the model its name
+or its number 1 to 6; the voices `4`, `8` or `16`. Anything else is refused.
 
 **Damping** runs the other way round than in 0.1.x and on the Daisy kit, where
 the knob follows Rings and a higher value sustains. Projects saved with 0.1.x
 are converted when loaded and sound as before.
 
-**Tune** with FREE off sounds, reads and types in whole semitones, also when a
-host automates it or CC 20 moves it: the nearest semitone counts. The
-parameter itself stays continuous for the host, so existing automation keeps
-its meaning once FREE is on.
+**Tune** with the lock closed sounds, reads and types in whole semitones,
+also when a host automates it or CC 20 moves it: the nearest semitone counts.
+The parameter itself stays continuous for the host, so existing automation
+keeps its meaning once the lock is open.
+
+### Voices
+
+The firmware has four voices. The plug-in can have 8 or 16: chosen with
+**VOICES** beside the title, saved with the project. Four is the default and
+is the instrument of the versions before, sample for sample.
+
+More voices are more of the same instrument, not a thinner one. The engine
+runs **banks** of four voices; each bank is the firmware's unchanged
+four-voice engine. (The original engine can share its resources among 1, 2
+or 4 voices and gives each voice less the more there are; that is not used
+here. Every voice of every bank has what one of the four always had.)
+
+* **Which voice a note takes.** Strikes fill the voices in turn, bank by
+  bank; on a full instrument a strike takes over the voice that was struck
+  longest ago, as with four. Left and right alternate from strike to strike
+  as before. With 16 voices, sixteen notes can start on one 12-sample step
+  (see Timing).
+* **Right after more voices are chosen** that order holds only roughly. The
+  next strikes go to the new banks first, but each bank keeps its own turn
+  among its four voices, so for a while a strike can take over a voice in
+  one bank while an older note rings on in another. Example from Codex's
+  review: with 8 voices, nine notes 41 to 49; then 16 voices and notes 50 to
+  60; note 61 then replaces 49 while 45 rings on. It settles once every bank
+  has had its round. Keeping the order exactly would mean changing the
+  vendored engine's voice allocation, which stays as it is. A strike never
+  replaces a voice whose note has not sounded yet.
+* **Level.** A note is exactly as loud as with four voices: there is no gain
+  correction for the number of voices. The banks are summed in front of the
+  firmware's output stage, which holds any sum below 0.8 of full scale; the
+  limiter at the end holds it at −6 dBFS. Sixteen loud notes struck at once
+  reach 0.71 to 0.77 of full scale in front of the limiter with sixteen
+  voices, depending on the model, and 0.61 to 0.68 with four (where only
+  four of them can ring): dense chords are louder and lean on the limiter
+  more.
+* **Models with chords** (Sympathetic Strings, Western Chords). Every voice
+  brings its two strings, as with four voices; the chord that Structure
+  selects is the same for all banks.
+* **Noise.** Every bank has its own noise source, started from the
+  instance's seed and the bank's number. A project still renders the same
+  way every time.
+* **Changing the number while notes ring.** More voices: nothing happens to
+  the sound; the next notes go to the new voices first. Fewer voices: the
+  first bank or banks ring on, the notes of the banks that go fade out
+  within 4 ms. A change takes effect on the next 12-sample step, like every
+  control.
+* **Computing time.** A bank beyond the first is computed only while it
+  sounds: from its first note until a second after its last sample above
+  −180 dBFS (36 dB below what a 24-bit converter resolves; a resonator never
+  decays to exact zero). With 16 voices chosen and four notes ringing, the plug-in costs
+  what it costs with four voices. All sixteen ringing cost about four times
+  as much: see the figures under [Build and test](#build-and-test).
+* **Memory.** Everything for sixteen voices is allocated when the plug-in is
+  loaded: 446 KB of DSP state per instance instead of 111 KB. Nothing is
+  allocated while audio runs, whatever the number of voices does.
+
+The number of voices is a parameter for the host (*Polyphony*, 111), so that
+it reaches the audio side at a defined sample and is saved and undone like
+everything else. It is not marked as automatable and has no MIDI controller:
+the firmware's polyphony controller (CC 29) stays unassigned.
+
+Thirty-two voices would be eight banks instead of four, a fourth entry in
+the choice and a new state version; nothing in the design stands against it.
 
 ### Level
 
@@ -132,10 +209,10 @@ finite samples leaves the plug-in.
 | CC 74 | Filter |
 
 CC 20 to 33 are the firmware's controller numbers; its reverb controllers (26,
-27, 30, 31, 32) and its polyphony controller (29) are not assigned. Two things
-differ from the firmware: CC 23 now damps more with higher values, and CC 20
-moves Tune in semitones unless FREE is on. CC 74 is new. No MPE, no
-aftertouch.
+27, 30, 31, 32) and its polyphony controller (29) are not assigned. The
+number of voices has no controller. Two things differ from the firmware: CC
+23 now damps more with higher values, and CC 20 moves Tune in semitones
+unless the lock is open. CC 74 is new. No MPE, no aftertouch.
 
 VST3 hosts do not pass MIDI controllers through. The plug-in tells the host
 which controller belongs to which parameter; whether pitch wheel and CCs
@@ -143,8 +220,16 @@ arrive is up to the host. In Studio One the pitch wheel does.
 
 ### Screen keyboard
 
-25 keys, C4 to C6, velocity 100. A click strikes a key; dragging strikes each
-new key. **KEYS** shows and hides the keyboard.
+25 keys, velocity 100. A click strikes a key; dragging strikes each new key.
+**KEYS** shows and hides the keyboard.
+
+**Octave keys**, as in Mendelejew: **<<** left of the keyboard and **>>**
+right of it move it by one octave, from C2–C4 at the lowest to C6–C8 at the
+highest. It starts at C3–C5; the C keys are labelled with their octave. A
+key held at that moment is let go first, so the host gets the note-off of
+the old pitch. The range is saved with the project, like the window size;
+projects of 0.3.0 and before open at C3–C5. (Up to 0.3.0 the keyboard was
+fixed at C4–C6.)
 
 The screen keys also leave the plug-in as MIDI, on its event output "MIDI
 Out": a note-on for each strike, a note-off when the key is let go. A host can
@@ -164,10 +249,35 @@ host offers none in a block, the note-off comes in a later block.
 ### Window
 
 Resizable between 50 % and 200 %, aspect ratio kept, drawn as vectors; on top
-of that it follows the Windows display scale. Size and keyboard are saved
-with the project, apart from the sound. If a host refuses the larger window
+of that it follows the Windows display scale. Size, keyboard and its octave
+are saved with the project, apart from the sound. If a host refuses the larger window
 that KEYS needs, the keyboard stays hidden; if a host forces a smaller window,
 the content shrinks to fit.
+
+**The lock** at the lower right of the TUNE knob is a small padlock in a
+circle, without text. Closed and grey: Tune moves in semitones. Open and
+amber: free tuning. A click opens or closes it; resting the mouse on it
+shows what it does. For hosts and screen readers the control is the
+parameter *Tune Free*.
+
+**The rings of the knobs** have three colours, by what a knob acts on:
+
+| Colour | Knobs | Why |
+| --- | --- | --- |
+| White | TUNE, FILTER, VOLUME | The frame around the sound: its pitch at one end, the output at the other |
+| Magenta | STRUCTURE, BRIGHTNESS, DAMPING | The resonator: what rings, how bright, how long |
+| Turquoise | POSITION, EXCITATION | The strike: where it lands and how hard |
+
+The colours are a tribute to the modules of Mutable Instruments, where this
+engine began as Rings, and to the knobs of its sibling Elements: white,
+magenta for the sustained excitations there, turquoise for the strike. Here
+magenta marks what sustains and turquoise, again, the strike. Since 0.3.1
+the three shades are exactly those of Mendelejew, our Elements plug-in, so
+the two look like one family. The colours are all that is taken: no name,
+logo, panel graphic or layout of a module appears in the plug-in. Kekulé is
+not made, endorsed or supported by Mutable Instruments. The values are three
+named constants in `source/editor.cpp`; amber stays the plug-in's own colour
+for what is selected or switched on.
 
 ## Timing: what is exact and what is not
 
@@ -180,8 +290,9 @@ never early. The steps run through from the moment the plug-in is activated;
 they do not restart with each block. The same events at the same sample
 positions give the same output for every block size.
 
-**At most four strikes per step.** More notes on one step start in the
-following steps, in the order they arrived: a nine-note chord is spread over
+**At most four strikes per bank and step**: four with 4 voices, eight with
+8, sixteen with 16. More notes on one step start in the following steps, in
+the order they arrived: with four voices a nine-note chord is spread over
 0.5 ms. Up to 256 strikes can wait in the engine and 1024 notes in front of
 it; beyond that notes are dropped. Of each control 256 automation points can
 wait; beyond that the newest waiting point gives way to the next, so a step
@@ -208,27 +319,47 @@ The latency depends on the sample rate alone. It is fixed when the host sets
 the rate, which hosts do while the plug-in is inactive, and never changes
 while audio runs. After activation the filter starts from silence, so the
 first samples up to the latency are silent. There is nothing to flush at the
-end: resonators can ring without end, and the plug-in reports an infinite
-tail.
+end: resonators can ring without end, and the plug-in always reports an
+infinite tail.
 
 Parameter automation is applied point by point, as steps that the engine's
 5 ms smoothing rounds off; ramps between points are not interpolated. The
 filter follows the same rule; its change lands at or just after the sample it
 was sent for, by at most the 0.25 ms step plus the latency.
 
+## No Plug-in Nap
+
+Kekulé does not tell the host when it is idle, on purpose. 0.3.0 tried: at
+rest it put out exact zeros and reported no tail, so that Studio One's
+Plug-in Nap could stop calling it. Codex's review showed three ways in which
+that could mislead a host (a tail read once at setup and kept, a screen key
+on its way between the threads, a note-off still owed to the host), and the
+gain is small: an idle instance costs about 1 % of one core, about as much
+as one with four voices playing. 0.3.1 took the rest report out again.
+
+So the plug-in reports an infinite tail at all times, as up to 0.2.2, and
+sets the silence flags only for blocks that are exactly zero. Whether Studio
+One naps it anyway, by its own judgement, is up to Studio One; PreSonus
+publishes no rule. A bank of voices beyond the first that has gone quiet is
+still put away inside the engine (see [Voices](#voices)), which is where
+most of the computing time of 8 or 16 voices goes.
+
 ## State
 
-The project stores ten values: the seven knobs of the sound, the model, the
-filter and the FREE switch (state version 2). The pitch wheel is not stored
+The project stores eleven values: the seven knobs of the sound, the model,
+the filter, the tuning lock and the number of voices (state version 3). The
+pitch wheel is not stored
 and returns to its centre on loading. Sounding notes are not stored either:
 **loading a state silences the instrument** and restarts it with the loaded
 values, as does activating the plug-in. A damaged state (unknown version, cut
 short, values that are not numbers from 0 to 1) is refused whole and changes
 nothing.
 
+States of version 2, saved by 0.2.x, load as they are, with four voices.
 States of version 1, saved by 0.1.x, still load: Damping is mirrored, the
-filter is open, and FREE is on exactly if the saved Tune was not a whole
-semitone. An old project sounds as it did, except for the limiter.
+filter is open, the lock is open exactly if the saved Tune was not a whole
+semitone, and there are four voices. An old project sounds as it did, except
+for the limiter.
 
 Every instance has its own noise source, started from the same seed at every
 activation and every loaded state. A project therefore renders the same way
@@ -241,17 +372,17 @@ every time; two instances given the same notes sound identical.
 * A low-pass and a limiter follow the firmware's output stage; the firmware
   has neither. Loud passages, above −6 dBFS, are therefore quieter than the
   kit's.
-* Damping runs the other way round, and Tune moves in semitones unless FREE
-  is on.
-* With the firmware's Dry/Wet at exactly 0, the filter open and the level
-  below the limiter's ceiling, the plug-in at 48 kHz delivers the firmware
-  engine's output sample for sample, given the same events on the same
-  12-sample steps and the two mappings above. This is tested against a pinned
-  copy of the firmware engine, compiled by the same compiler; it says nothing
-  about ARM builds.
+* Damping runs the other way round, and Tune moves in semitones unless the
+  lock is open.
+* 8 or 16 voices, if chosen; the firmware has four.
+* With four voices, the firmware's Dry/Wet at exactly 0, the filter open and
+  the level below the limiter's ceiling, the plug-in at 48 kHz delivers the
+  firmware engine's output sample for sample, given the same events on the
+  same 12-sample steps and the two mappings above. This is tested against a
+  pinned copy of the firmware engine, compiled by the same compiler; it says
+  nothing about ARM builds.
 * Denormal numbers count as zero while the plug-in renders: without that a
-  decayed tail costs about forty times the computing time. Tails therefore end
-  in exact silence.
+  decayed tail costs about forty times the computing time.
 * No hardware keys, pots or switches. Host parameters replace them; a model
   change needs no 20 ms debounce.
 * The pitch wheel arrives as a host parameter and is mapped back to the
@@ -262,14 +393,19 @@ every time; two instances given the same notes sound identical.
 Nothing is installed automatically. Copy the bundle `Kekule.vst3`
 (the whole folder) from `build/windows-vs2026-x64/VST3/Release/`, or from
 `out/torus-classic-<version>/` after a release build was staged there, to a
-VST3 folder, then let the DAW rescan: `%LOCALAPPDATA%\Programs\Common\VST3\`
-for the current user (no administrator rights; where Toy Piano Classic sits on
-the development machine) or `C:\Program Files\Common Files\VST3\` for all
-users. The plug-in needs no Visual C++ redistributable.
+VST3 folder, then let the DAW rescan: `C:\Program Files\Common Files\VST3\`
+for all users (needs administrator rights; where the development machine
+keeps its test builds since 2026-11-15, beside its other plug-ins, so that
+Studio One finds them) or `%LOCALAPPDATA%\Programs\Common\VST3\` for the
+current user alone. The plug-in needs no Visual C++ redistributable.
 
-Remove an older `Torus Classic.vst3` from the VST3 folders first. Both
-bundles carry the same class IDs, so a host would find the same plug-in
-twice and use either of them.
+Keep the bundle in one VST3 folder only, and remove an older
+`Torus Classic.vst3` first. All of them carry the same class IDs, so a host
+would find the same plug-in twice and use either of them.
+
+A bundle copied from `out/` shows as a plain folder in Explorer until its
+folder has the System attribute again (and `desktop.ini` and `PlugIn.ico` in
+it System too); hosts do not care.
 
 ## Build and test
 
@@ -283,13 +419,32 @@ ctest --preset windows-vs2026-x64-release -R torus-classic
 
 | Test | What it covers |
 | --- | --- |
-| `torus-classic.engine` | Dry engine against the pinned firmware engine; six models, notes, tails, voice stealing; instance isolation; no allocation |
-| `torus-classic.adapter` | Block sizes, event timing, filter passband and rejection, latency, long-run sample counts, queue limits, reset |
-| `torus-classic.plugin` | The VST3 processor against the firmware engine; block sizes in 32 and 64 bit; sample rates; several instances; life cycle; states; controller; editor in a window |
+| `torus-classic.engine` | Dry engine against the pinned firmware engine; six models, notes, tails, voice stealing; 8 and 16 voices: order of the voices, changes while notes ring, idle banks, level; instance isolation; no allocation |
+| `torus-classic.adapter` | Block sizes (with every number of voices), event timing, Tune events, filter passband and rejection, latency, long-run sample counts, queue limits, reset |
+| `torus-classic.plugin` | The VST3 processor against the firmware engine; block sizes in 32 and 64 bit with 4, 8 and 16 voices; sample rates; several instances; life cycle; states of versions 1 to 3; voices; controller, window state with the keyboard's octave; editor in a window |
 | `torus-classic.provenance` | Copied files match the recorded hashes; one version number everywhere |
 
-`bench_torus_classic` prints the performance figures of the build report; it
-is built with the tests and run by hand.
+`bench_torus_classic` prints performance figures; it is built with the
+tests and run by hand. For 0.3.1, Release build, one core of an i7-8700K, at
+48 kHz with every voice re-struck twice a second:
+
+| Voices | Modal Resonator | Sympathetic Strings | Inharmonic Strings | FM Voice | Western Chords | Stereo Strings |
+| --- | --- | --- | --- | --- | --- | --- |
+| 4 | 1.1 % | 1.5 % | 1.4 % | 0.9 % | 1.5 % | 1.4 % |
+| 8 | 2.0 % | 2.8 % | 2.7 % | 1.5 % | 2.8 % | 2.8 % |
+| 16 | 3.9 % | 5.3 % | 5.3 % | 2.8 % | 5.2 % | 5.3 % |
+
+At 44.1, 96 and 192 kHz the rate conversion comes on top: 1.1 to 3.0 % with
+four voices, 3.1 to 6.9 % with sixteen. One 12-sample step of the engine
+(250 µs of audio) with sixteen voices takes 7 to 12 µs in the median and
+less than 45 µs in 999 of 1000 cases; single steps took up to 440 µs, which
+on Windows without real-time priority says more about the scheduler than
+about the engine, but is no guaranteed bound either. An instance that
+sounds nothing costs about 0.9 %: the first four voices always run, as the
+firmware's do. With 16 voices, three banks are put away about a second after
+short notes have died away.
+The figures hold for that machine and build; a DAW's CPU meter does not
+replace them, nor they it.
 
 ## Structure
 
@@ -299,7 +454,7 @@ through a small header.
 | Layer | Directory | Interface | Contents |
 | --- | --- | --- | --- |
 | 1 | [`core/`](core/) | Torus headers | Vendored Torus DSP and stmlib parts, patched for the desktop |
-| 2 | [`engine/`](engine/) | `dry_engine.h` | Dry instrument: notes, voices, parameters, output stage |
+| 2 | [`engine/`](engine/) | `dry_engine.h` | Dry instrument: notes, voices in banks of four, parameters, output stage |
 | 3 | [`adapter/`](adapter/) | `stream_adapter.h` | Sample rate, 12-sample steps, event time, latency; the output stage with low-pass and limiter |
 | 4 | [`source/`](source/) | VST3 | Processor, controller, state, editor |
 

@@ -1,5 +1,85 @@
 # Changes
 
+## 0.3.1 (2026-11-16)
+
+After Codex's review of 0.3.0 ([review](docs/CODEX_REVIEW_0.3.0.md),
+[what was done](docs/CODEX_REVIEW_0.3.0_UMSETZUNG.md)), and two wishes of the
+owner. 0.3.0 itself was never released. Codex released 0.3.1 with no new
+findings ([review](docs/CODEX_REVIEW_0.3.1.md)).
+
+* **No Plug-in Nap.** The rest report of 0.3.0 is gone: the tail is infinite
+  again at all times, the plug-in no longer puts out exact zeros at rest,
+  and its output is again the firmware engine's, sample for sample, with no
+  exception for rest. That settles the review's points TC-R11 to TC-R13
+  (a tail read once at setup, a screen key between the threads, an owed
+  note-off). An idle instance costs about 1 % of one core; not worth the
+  risk. Silent banks beyond the first are still put away inside the engine.
+* **Octave keys** beside the screen keyboard, as in Mendelejew: **<<** and
+  **>>** move it by octaves between C2–C4 and C6–C8. It starts at C3–C5
+  (before: C4–C6). A held key is let go before the move. Saved with the
+  project in the window state, now version 2; version 1 opens at C3–C5.
+* **Knob colours** in the shades of Mendelejew; the assignment stays.
+* **Order of voices after more voices are chosen (TC-R14).** Documented in
+  the README, section Voices: for a while a strike can take a younger voice
+  than an older one in another bank. The vendored voice allocation is left
+  as it is.
+
+Component versions: engine 0.2.1 (rest removed; banks as in 0.2.0), adapter
+0.2.1 (as in 0.2.2: the rest code of 0.3.0 is gone), shell 0.3.1.
+
+Not changed: sound, parameters and their IDs, the sound state (version 3),
+MIDI controllers, latency.
+
+## 0.3.0 (2026-11-15, not released)
+
+The three steps agreed during the review of 0.2.0, the knob colours asked
+for on 2026-11-15, and the open point of the review of 0.2.1. Built and
+tested automatically; not in a DAW yet, and not reviewed yet
+([review brief](docs/CODEX_PRUEFAUFTRAG_0.3.0.md)).
+
+* **4, 8 or 16 voices.** Chosen in the window, beside the title; four is the
+  default and sounds as before. More voices are more of the same instrument:
+  banks of four, each one the firmware's unchanged four-voice engine. A note
+  is as loud as it was; a fifth note no longer takes over the first. The
+  number of voices is parameter 111, *Polyphony*: saved with the project,
+  not automatable, without a MIDI controller. Details in the README, section
+  Voices.
+* **Rest, for Plug-in Nap.** The plug-in now knows when nothing sounds and
+  nothing waits. It then puts out exact zeros, sets the silence flags and
+  reports no tail; while anything rings it reports an infinite tail as
+  before. A host can use that to stop processing an idle instance. Whether
+  Studio One 7 does is for the DAW test to show: PreSonus publishes no rule,
+  and its Plug-in Nap was for effects only when it was introduced. Details
+  and limits in the README, section Rest.
+* **A lock instead of FREE.** The switch beside TUNE is a small padlock in a
+  circle, without text: closed, Tune moves in semitones; open, it is free.
+  It has a tooltip. The parameter behind it is still 110, *Tune Free*, with
+  its meaning unchanged; the lock shows its opposite.
+* **Knob rings in three colours**, in memory of the modules this engine
+  descends from: white for pitch and output, magenta for the resonator,
+  turquoise for the strike. Colours only; see the README, section Window.
+* **Tune events of the internal helper (TC-R10).** `ControlEvent` built a
+  Tune event without its semitone, which the bridge read as −24. The plug-in
+  never used that path; a test did. The helper now passes Tune on to
+  `TuneEvent`, and the adapter test checks the semitone that arrives.
+* **State version 3**: the eleven saved values now include the number of
+  voices. States of versions 1 and 2 load with four voices.
+* Install folder in the documents: the development machine keeps its test
+  builds in `C:\Program Files\Common Files\VST3\` since 2026-11-15.
+
+One sentence of 0.1.0 to 0.2.2 no longer holds as it stood: the plug-in
+delivers the firmware engine's output sample for sample *except at rest*,
+where it puts out exact zeros and the firmware what is left of its
+resonators, below −180 dBFS. The first note after a rest is the firmware's
+again, bit for bit.
+
+Component versions: engine 0.2.0 (banks, rest), adapter 0.3.0 (rest; the
+output filter empties itself below −180 dBFS once exact zeros come in).
+
+Not changed: the vendored DSP, the sound of four voices, sample rate
+conversion, latency, the IDs and meaning of parameters 100 to 110, MIDI
+controllers.
+
 ## 0.2.2 (2026-11-15)
 
 The plug-in is now called **Kekulé**, after August Kekulé, who found the

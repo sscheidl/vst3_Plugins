@@ -24,7 +24,8 @@ uint64 ChannelMask(int32 numChannels) {
 
 // The engine control a parameter drives directly, with the value the engine
 // gets for it. False for Tune (which goes through the bridge, with its
-// switch), Model, Pitch Bend, Filter and the switch itself.
+// switch), Model, Pitch Bend, Filter, the switch itself and the number of
+// voices.
 bool DirectControl(int index, double value, Control& control, float& engine_value) {
     engine_value = static_cast<float>(value);
     switch(kFirstParam + static_cast<std::uint32_t>(index)) {
@@ -109,6 +110,7 @@ void Processor::Restart(const ParameterState::Values& values) {
     bridge_.JumpTune(values[Index(kParamTune)], IsOn(values[Index(kParamTuneFree)]));
     engine_.JumpModel(static_cast<unsigned>(ModelIndex(values[Index(kParamModel)])));
     engine_.JumpPitchBend(static_cast<unsigned>(PitchBendRaw(values[Index(kParamPitchBend)])));
+    engine_.JumpPolyphony(static_cast<unsigned>(PolyphonyVoices(values[Index(kParamPolyphony)])));
     adapter_.JumpOutputFilter(static_cast<float>(values[Index(kParamFilter)]));
 }
 
@@ -172,6 +174,10 @@ void Processor::QueueParameter(int32 offset, ParamID id, double value) {
             break;
         case kParamFilter:
             adapter_.AddEvent(offset, FilterEvent(static_cast<float>(value)));
+            break;
+        case kParamPolyphony:
+            adapter_.AddEvent(offset,
+                              PolyphonyEvent(static_cast<unsigned>(PolyphonyVoices(value))));
             break;
         default: break;
     }
