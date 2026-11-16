@@ -1,6 +1,6 @@
 # Kekulé
 
-VST3 instrument, version 0.3.0, Windows x64. The Rings/Torus keyboard engine
+VST3 instrument, version 0.3.1, Windows x64. The Rings/Torus keyboard engine
 of the Daisy Seed3 firmware *Physical Modeling*, without its reverb, inside a
 native plug-in: six synthesis models, 4, 8 or 16 voices, dry stereo output,
 with a low-pass and a limiter at the end.
@@ -39,18 +39,23 @@ validator.
   new of priority P0 to P2. One minor point (TC-R10, P3) concerned a test and
   an internal helper, not the plug-in's own path; 0.3.0 fixes it.
 * 0.2.2 only renames the plug-in to Kekulé.
-* 0.3.0 adds a choice of 4, 8 or 16 voices, tells the host when the
-  instrument is at rest (for Studio One's Plug-in Nap), replaces the FREE
-  switch by a lock and gives the knob rings three colours. None of that has
-  been in a DAW yet, and Codex has not reviewed it yet
-  ([review brief](docs/CODEX_PRUEFAUFTRAG_0.3.0.md)). Whether Studio One
-  actually lets the plug-in nap can only be seen there; see [Rest](#rest).
+* 0.3.0 added a choice of 4, 8 or 16 voices, a report of rest for Studio
+  One's Plug-in Nap, a lock instead of the FREE switch and knob rings in
+  three colours. Codex reviewed it and did not release it
+  ([review](docs/CODEX_REVIEW_0.3.0.md)): three findings concerned the rest
+  report, one the order of voices after a change of their number.
+* 0.3.1 drops the rest report: Plug-in Nap is not supported (see
+  [No Plug-in Nap](#no-plug-in-nap)), which settles those three findings;
+  the fourth is documented ([what was done](docs/CODEX_REVIEW_0.3.0_UMSETZUNG.md)).
+  It adds octave keys to the screen keyboard and takes the knob colours from
+  Mendelejew. Not in a DAW yet, not re-reviewed yet
+  ([review brief](docs/CODEX_PRUEFAUFTRAG_0.3.1.md)).
 * The [build report](docs/BUILD_REPORT_0.1.0.md) describes 0.1.0: what was
   verified then and what was not.
 
 The picture above shows 0.1.0. Since then the window has gained an eighth
 knob (FILTER), the choice of voices beside the title, a small lock beside
-TUNE, and rings in three colours.
+TUNE, rings in three colours, and octave keys beside the screen keyboard.
 
 ## Sound
 
@@ -124,6 +129,15 @@ here. Every voice of every bank has what one of the four always had.)
   longest ago, as with four. Left and right alternate from strike to strike
   as before. With 16 voices, sixteen notes can start on one 12-sample step
   (see Timing).
+* **Right after more voices are chosen** that order holds only roughly. The
+  next strikes go to the new banks first, but each bank keeps its own turn
+  among its four voices, so for a while a strike can take over a voice in
+  one bank while an older note rings on in another. Example from Codex's
+  review: with 8 voices, nine notes 41 to 49; then 16 voices and notes 50 to
+  60; note 61 then replaces 49 while 45 rings on. It settles once every bank
+  has had its round. Keeping the order exactly would mean changing the
+  vendored engine's voice allocation, which stays as it is. A strike never
+  replaces a voice whose note has not sounded yet.
 * **Level.** A note is exactly as loud as with four voices: there is no gain
   correction for the number of voices. The banks are summed in front of the
   firmware's output stage, which holds any sum below 0.8 of full scale; the
@@ -145,7 +159,8 @@ here. Every voice of every bank has what one of the four always had.)
   control.
 * **Computing time.** A bank beyond the first is computed only while it
   sounds: from its first note until a second after its last sample above
-  −180 dBFS. With 16 voices chosen and four notes ringing, the plug-in costs
+  −180 dBFS (36 dB below what a 24-bit converter resolves; a resonator never
+  decays to exact zero). With 16 voices chosen and four notes ringing, the plug-in costs
   what it costs with four voices. All sixteen ringing cost about four times
   as much: see the figures under [Build and test](#build-and-test).
 * **Memory.** Everything for sixteen voices is allocated when the plug-in is
@@ -205,8 +220,16 @@ arrive is up to the host. In Studio One the pitch wheel does.
 
 ### Screen keyboard
 
-25 keys, C4 to C6, velocity 100. A click strikes a key; dragging strikes each
-new key. **KEYS** shows and hides the keyboard.
+25 keys, velocity 100. A click strikes a key; dragging strikes each new key.
+**KEYS** shows and hides the keyboard.
+
+**Octave keys**, as in Mendelejew: **<<** left of the keyboard and **>>**
+right of it move it by one octave, from C2–C4 at the lowest to C6–C8 at the
+highest. It starts at C3–C5; the C keys are labelled with their octave. A
+key held at that moment is let go first, so the host gets the note-off of
+the old pitch. The range is saved with the project, like the window size;
+projects of 0.3.0 and before open at C3–C5. (Up to 0.3.0 the keyboard was
+fixed at C4–C6.)
 
 The screen keys also leave the plug-in as MIDI, on its event output "MIDI
 Out": a note-on for each strike, a note-off when the key is let go. A host can
@@ -226,8 +249,8 @@ host offers none in a block, the note-off comes in a later block.
 ### Window
 
 Resizable between 50 % and 200 %, aspect ratio kept, drawn as vectors; on top
-of that it follows the Windows display scale. Size and keyboard are saved
-with the project, apart from the sound. If a host refuses the larger window
+of that it follows the Windows display scale. Size, keyboard and its octave
+are saved with the project, apart from the sound. If a host refuses the larger window
 that KEYS needs, the keyboard stays hidden; if a host forces a smaller window,
 the content shrinks to fit.
 
@@ -248,11 +271,13 @@ parameter *Tune Free*.
 The colours are a tribute to the modules of Mutable Instruments, where this
 engine began as Rings, and to the knobs of its sibling Elements: white,
 magenta for the sustained excitations there, turquoise for the strike. Here
-magenta marks what sustains and turquoise, again, the strike. The colours
-are all that is taken: no name, logo, panel graphic or layout of a module
-appears in the plug-in. Kekulé is not made, endorsed or supported by Mutable
-Instruments. The values are three named constants in `source/editor.cpp`;
-amber stays the plug-in's own colour for what is selected or switched on.
+magenta marks what sustains and turquoise, again, the strike. Since 0.3.1
+the three shades are exactly those of Mendelejew, our Elements plug-in, so
+the two look like one family. The colours are all that is taken: no name,
+logo, panel graphic or layout of a module appears in the plug-in. Kekulé is
+not made, endorsed or supported by Mutable Instruments. The values are three
+named constants in `source/editor.cpp`; amber stays the plug-in's own colour
+for what is selected or switched on.
 
 ## Timing: what is exact and what is not
 
@@ -294,81 +319,30 @@ The latency depends on the sample rate alone. It is fixed when the host sets
 the rate, which hosts do while the plug-in is inactive, and never changes
 while audio runs. After activation the filter starts from silence, so the
 first samples up to the latency are silent. There is nothing to flush at the
-end: resonators can ring without end, and while anything sounds the plug-in
-reports an infinite tail. See [Rest](#rest) for when it does not.
+end: resonators can ring without end, and the plug-in always reports an
+infinite tail.
 
 Parameter automation is applied point by point, as steps that the engine's
 5 ms smoothing rounds off; ramps between points are not interpolated. The
 filter follows the same rule; its change lands at or just after the sample it
 was sent for, by at most the 0.25 ms step plus the latency.
 
-## Rest
+## No Plug-in Nap
 
-Since 0.3.0 the plug-in knows when it has nothing to do, and tells the host.
+Kekulé does not tell the host when it is idle, on purpose. 0.3.0 tried: at
+rest it put out exact zeros and reported no tail, so that Studio One's
+Plug-in Nap could stop calling it. Codex's review showed three ways in which
+that could mislead a host (a tail read once at setup and kept, a screen key
+on its way between the threads, a note-off still owed to the host), and the
+gain is small: an idle instance costs about 1 % of one core, about as much
+as one with four voices playing. 0.3.1 took the rest report out again.
 
-**What rest is.** Nothing sounds and nothing waits: no note, control change
-or screen key is on its way, no voice has put out a sample of −180 dBFS or
-more for one second, the sample rate converter holds nothing but zeros, the
-filter is empty and the limiter has let go. A level is needed because a
-resonator never arrives at zero: the modal filters and the FM envelope
-settle 720 to 760 dB down and stay there for good. −180 dBFS is 36 dB below
-what a 24-bit converter resolves. It is one constant
-(`DryEngine::kRestLevel`).
-
-**What the plug-in does at rest.** Every output sample is exactly zero, the
-silence flags of the output are set, and the tail it reports to the host is
-none. While anything sounds or waits, the tail is infinite and the flags say
-what the samples are. Rest ends with the next note. It also ends, without a
-note, when a control brings a voice back above −168 dBFS: on the FM voice,
-Damping at 0 turns a decayed voice into a drone, as it does on the Daisy
-kit. A screen key ends the rest the moment it is clicked, before the next
-audio block.
-
-**How long it takes**, from one loud note to rest, four voices:
-
-| Model | Damping 0.25 | 0.5 (default) | 0.75 | 1 |
-| --- | --- | --- | --- | --- |
-| Modal Resonator | 60 s | 7 s | 1.6 s | 1.1 s |
-| Sympathetic Strings | 38 s | 38 s | 34 s | 34 s |
-| Inharmonic Strings | 19 s | 7 s | 2.7 s | 2.2 s |
-| FM Voice | 17 s | 5 s | 2.0 s | 1.3 s |
-| Western Chords | 40 s | 38 s | 36 s | 30 s |
-| Stereo Strings | 37 s | 18 s | 5.4 s | 2.2 s |
-
-The two models with sympathetic strings ring long whatever Damping says:
-their extra strings are built to. At Damping 0 the strings and the FM voice
-sustain, and the plug-in never rests until the model is changed, the
-plug-in is deactivated or a state is loaded.
-
-**Studio One's Plug-in Nap.** A host may stop calling a plug-in that is at
-rest; nothing is cut off, and when it calls again the plug-in goes on where
-it stopped. What Studio One looks at is not published. PreSonus says only
-that Plug-in Nap keeps plug-ins from processing "when no audio is passed"
-and that it can be switched off per plug-in in the Performance Monitor
-([knowledge base](https://support.presonus.com/hc/en-us/articles/29252442184333-Studio-One-Pro-7-Managing-CPU-usage-and-overcoming-high-CPU-problems-on-your-system));
-when it was introduced in version 5.4 it applied to effects only, not to
-instruments
-([Sound On Sound, December 2021](https://www.soundonsound.com/techniques/studio-one-54-plug-nap-real-time-chord-detection)),
-and PreSonus then wrote that it is suspended while a plug-in's window is
-open (quoted in a
-[KVR thread](https://www.kvraudio.com/forum/viewtopic.php?t=570596); not
-checked against Studio One 7). Kekulé offers everything VST3 has for the
-purpose: exact silence, silence flags and a truthful tail. Whether Studio
-One 7 lets it nap, and wakes it for a note, is on the
-[DAW test list](docs/DAW_TEST_0.1.0.md) and has not been tried.
-
-Two things to know:
-
-* **The plug-in itself does not stop computing at rest.** The first four
-  voices keep running underneath, as the firmware's do, so that the next
-  note sounds exactly as it would have (about 1 % of one core at rest). Only
-  the host can save that, by not calling.
-* **A host that naps the plug-in must wake it for whatever should sound.**
-  Notes are the host's business. Screen keys travel as a message from the
-  window; if a host napped with the window open and did not wake for that
-  message, the key would be dropped after half a second, like any key
-  clicked while no audio runs. The FM drone above needs a running plug-in
-  too.
+So the plug-in reports an infinite tail at all times, as up to 0.2.2, and
+sets the silence flags only for blocks that are exactly zero. Whether Studio
+One naps it anyway, by its own judgement, is up to Studio One; PreSonus
+publishes no rule. A bank of voices beyond the first that has gone quiet is
+still put away inside the engine (see [Voices](#voices)), which is where
+most of the computing time of 8 or 16 voices goes.
 
 ## State
 
@@ -407,10 +381,6 @@ every time; two instances given the same notes sound identical.
   same 12-sample steps and the two mappings above. This is tested against a
   pinned copy of the firmware engine, compiled by the same compiler; it says
   nothing about ARM builds.
-* One exception to that, since 0.3.0: at [rest](#rest) the plug-in puts out
-  exact zeros where the firmware puts out what is left of its resonators,
-  below −180 dBFS. The voices run on underneath, so the first note after a
-  rest is the firmware's again, bit for bit; that is tested too.
 * Denormal numbers count as zero while the plug-in renders: without that a
   decayed tail costs about forty times the computing time.
 * No hardware keys, pots or switches. Host parameters replace them; a model
@@ -449,27 +419,30 @@ ctest --preset windows-vs2026-x64-release -R torus-classic
 
 | Test | What it covers |
 | --- | --- |
-| `torus-classic.engine` | Dry engine against the pinned firmware engine, also through a rest; six models, notes, tails, voice stealing; 8 and 16 voices: order of the voices, changes while notes ring, idle banks, level; rest; instance isolation; no allocation |
-| `torus-classic.adapter` | Block sizes (with every number of voices), event timing, Tune events, filter passband and rejection, latency, long-run sample counts, queue limits, reset, rest |
-| `torus-classic.plugin` | The VST3 processor against the firmware engine; block sizes in 32 and 64 bit with 4, 8 and 16 voices; sample rates; several instances; life cycle; states of versions 1 to 3; voices; rest, tail and a pause in the calls; controller; editor in a window |
+| `torus-classic.engine` | Dry engine against the pinned firmware engine; six models, notes, tails, voice stealing; 8 and 16 voices: order of the voices, changes while notes ring, idle banks, level; instance isolation; no allocation |
+| `torus-classic.adapter` | Block sizes (with every number of voices), event timing, Tune events, filter passband and rejection, latency, long-run sample counts, queue limits, reset |
+| `torus-classic.plugin` | The VST3 processor against the firmware engine; block sizes in 32 and 64 bit with 4, 8 and 16 voices; sample rates; several instances; life cycle; states of versions 1 to 3; voices; controller, window state with the keyboard's octave; editor in a window |
 | `torus-classic.provenance` | Copied files match the recorded hashes; one version number everywhere |
 
 `bench_torus_classic` prints performance figures; it is built with the
-tests and run by hand. For 0.3.0, Release build, one core of an i7-8700K, at
+tests and run by hand. For 0.3.1, Release build, one core of an i7-8700K, at
 48 kHz with every voice re-struck twice a second:
 
 | Voices | Modal Resonator | Sympathetic Strings | Inharmonic Strings | FM Voice | Western Chords | Stereo Strings |
 | --- | --- | --- | --- | --- | --- | --- |
-| 4 | 1.2 % | 1.7 % | 1.8 % | 1.0 % | 1.8 % | 1.6 % |
-| 8 | 2.4 % | 3.1 % | 3.0 % | 1.7 % | 3.0 % | 3.1 % |
-| 16 | 4.2 % | 6.1 % | 5.5 % | 3.0 % | 5.5 % | 5.4 % |
+| 4 | 1.1 % | 1.5 % | 1.4 % | 0.9 % | 1.5 % | 1.4 % |
+| 8 | 2.0 % | 2.8 % | 2.7 % | 1.5 % | 2.8 % | 2.8 % |
+| 16 | 3.9 % | 5.3 % | 5.3 % | 2.8 % | 5.2 % | 5.3 % |
 
-At 44.1, 96 and 192 kHz the rate conversion comes on top: 1.2 to 3.0 % with
-four voices, 3.3 to 6.9 % with sixteen. One 12-sample step of the engine
-(250 µs of audio) with sixteen voices takes 7 to 13 µs in the median and
-less than 62 µs in 999 of 1000 cases; the step in which a model change sets
-up all four banks, and the one in which three banks are put away, were not
-longer than the longest ordinary steps. At rest the plug-in costs about 1 %.
+At 44.1, 96 and 192 kHz the rate conversion comes on top: 1.1 to 3.0 % with
+four voices, 3.1 to 6.9 % with sixteen. One 12-sample step of the engine
+(250 µs of audio) with sixteen voices takes 7 to 12 µs in the median and
+less than 45 µs in 999 of 1000 cases; single steps took up to 440 µs, which
+on Windows without real-time priority says more about the scheduler than
+about the engine, but is no guaranteed bound either. An instance that
+sounds nothing costs about 0.9 %: the first four voices always run, as the
+firmware's do. With 16 voices, three banks are put away about a second after
+short notes have died away.
 The figures hold for that machine and build; a DAW's CPU meter does not
 replace them, nor they it.
 
@@ -481,9 +454,9 @@ through a small header.
 | Layer | Directory | Interface | Contents |
 | --- | --- | --- | --- |
 | 1 | [`core/`](core/) | Torus headers | Vendored Torus DSP and stmlib parts, patched for the desktop |
-| 2 | [`engine/`](engine/) | `dry_engine.h` | Dry instrument: notes, voices in banks of four, parameters, output stage, rest |
+| 2 | [`engine/`](engine/) | `dry_engine.h` | Dry instrument: notes, voices in banks of four, parameters, output stage |
 | 3 | [`adapter/`](adapter/) | `stream_adapter.h` | Sample rate, 12-sample steps, event time, latency; the output stage with low-pass and limiter |
-| 4 | [`source/`](source/) | VST3 | Processor, controller, state, editor; what the host is told about rest |
+| 4 | [`source/`](source/) | VST3 | Processor, controller, state, editor |
 
 Versions and origins of all parts: [`components.json`](components.json).
 Where the code comes from and what was changed:

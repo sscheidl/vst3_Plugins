@@ -1842,8 +1842,10 @@ void TestController() {
         CHECK(controller->setComponentState(nullptr) != kResultOk);
     }
 
-    // The controller's own state: the window's zoom and whether the keyboard shows.
-    const auto window_state = [](int32 version, double zoom, int keyboard) {
+    // The controller's own state: the window's zoom, whether the keyboard
+    // shows, and (version 2) where its octave keys have put it.
+    constexpr int32 kNone = -1000;
+    const auto window_state = [](int32 version, double zoom, int keyboard, int32 transpose) {
         auto stream = owned(new MemoryStream());
         int32 written = 0;
         stream->write(&version, sizeof(version), &written);
@@ -1852,36 +1854,45 @@ void TestController() {
             int8 flag = static_cast<int8>(keyboard);
             stream->write(&flag, sizeof(flag), &written);
         }
+        if(transpose != kNone)
+            stream->write(&transpose, sizeof(transpose), &written);
         int64 start = 0;
         stream->seek(0, IBStream::kIBSeekSet, &start);
         return stream;
     };
-    const auto is = [&](double zoom, bool keyboard) {
+    const auto is = [&](double zoom, bool keyboard, int32 transpose) {
         MemoryStream state;
         CHECK(controller->getState(&state) == kResultOk);
-        CHECK(state.getSize() == 4 + 8 + 1);
-        int32 version = 0;
+        CHECK(state.getSize() == 4 + 8 + 1 + 4);
+        int32 version = 0, saved_transpose = 0;
         double saved_zoom = 0.0;
         std::memcpy(&version, state.getData(), sizeof(version));
         std::memcpy(&saved_zoom, state.getData() + 4, sizeof(saved_zoom));
+        std::memcpy(&saved_transpose, state.getData() + 13, sizeof(saved_transpose));
         return version == kControllerStateVersion && saved_zoom == zoom
-               && (state.getData()[12] != 0) == keyboard;
+               && (state.getData()[12] != 0) == keyboard && saved_transpose == transpose
+               && controller->WindowSettings().transpose == transpose;
     };
-    CHECK(is(1.0, true)); // keyboard shown by default
-    CHECK(controller->setState(window_state(1, 1.5, 0)) == kResultOk);
-    CHECK(is(1.5, false));
-    CHECK(controller->setState(window_state(1, 10.0, 1)) == kResultOk);
-    CHECK(is(kMaxEditorZoom, true)); // finite but out of range: pulled in
-    CHECK(controller->setState(window_state(1, 0.01, 0)) == kResultOk);
-    CHECK(is(kMinEditorZoom, false));
+    CHECK(is(1.0, true, -12)); // keyboard shown by default, at C3..C5
+    CHECK(controller->setState(window_state(2, 1.5, 0, 24)) == kResultOk);
+    CHECK(is(1.5, false, 24));
+    // Version 1 has no transposition: the keyboard starts at C3..C5 again.
+    CHECK(controller->setState(window_state(1, 10.0, 1, kNone)) == kResultOk);
+    CHECK(is(kMaxEditorZoom, true, -12)); // finite but out of range: pulled in
+    CHECK(controller->setState(window_state(2, 0.01, 0, -24)) == kResultOk);
+    CHECK(is(kMinEditorZoom, false, -24));
     for(const auto& bad :
-        {window_state(2, 1.5, 1), window_state(0, 1.5, 1), window_state(1, 1.5, -1),
-         window_state(1, std::numeric_limits<double>::quiet_NaN(), 1),
-         window_state(1, std::numeric_limits<double>::infinity(), 1), window_state(1, 1.5, 2),
-         window_state(1, 1.5, 255)}) {
+        {window_state(3, 1.5, 1, 0), window_state(0, 1.5, 1, kNone), window_state(1, 1.5, -1, kNone),
+         window_state(2, 1.5, 1, kNone), window_state(2, 1.5, 1, 6), window_state(2, 1.5, 1, 36),
+         window_state(2, 1.5, 1, -36),
+         window_state(1, std::numeric_limits<double>::quiet_NaN(), 1, kNone),
+         window_state(1, std::numeric_limits<double>::infinity(), 1, kNone),
+         window_state(1, 1.5, 2, kNone), window_state(1, 1.5, 255, kNone)}) {
         CHECK(controller->setState(bad) != kResultOk);
-        CHECK(is(kMinEditorZoom, false)); // a rejected state changes nothing
+        CHECK(is(kMinEditorZoom, false, -24)); // a rejected state changes nothing
     }
+    CHECK(ClampKeyboardTranspose(-13) == -12 && ClampKeyboardTranspose(100) == 24
+          && ClampKeyboardTranspose(-100) == -24 && ClampKeyboardTranspose(11) == 0);
     MemoryStream empty;
     CHECK(controller->setState(&empty) != kResultOk && controller->setState(nullptr) != kResultOk);
     // No host messages available: a screen key plays nothing and nothing breaks.
@@ -2423,7 +2434,7 @@ void TestEditorInWindow() {
     // A loaded window state reaches the remaining window.
     {
         MemoryStream state;
-        const int32 version = kControllerStateVersion;
+        const int32 version = 1; // without a transposition: C3..C5
         const double zoom = 0.75;
         int8 keyboard = 0;
         int32 written = 0;

@@ -41,7 +41,7 @@ vendored DSP: TAUREON, MIT. License texts: [`licenses/`](licenses/).
 | `core/torus/` (18 files) | `torus/` | 9 unchanged, 9 patched, see below |
 | `core/torus/dsp/rng.h` | `third_party/stmlib/utils/random.h` | new file with that generator's arithmetic |
 | `core/stmlib/` (9 files) | `third_party/stmlib/` | unchanged |
-| `engine/synth.{h,cpp}` | `src/physical_modeling.{h,cpp}` | adapted: reverb removed; since 0.3.0 up to four `Part`s and rest |
+| `engine/synth.{h,cpp}` | `src/physical_modeling.{h,cpp}` | adapted: reverb removed; since 0.3.0 up to four `Part`s |
 | `engine/parameter_manager.h` | `src/parameter_manager.h` | adapted |
 | `engine/audio_output.h`, `engine/config.h` | `src/` | adapted |
 | `source/spsc_queue.h` | `src/spsc_queue.h` | namespace renamed |
@@ -100,9 +100,9 @@ The further banks get the same patch and performance state, are summed in
 front of the fade and `Output()`, take their strikes in turn (four per bank
 and quantum) and have their own noise seeds. A bank beyond the first is
 rendered only while it sounds and is rebuilt in place when it has gone
-quiet or the number of voices leaves it out. New as well: the notion of
-rest (`AtRest()`), at which `Render()` puts out exact zeros instead of a
-residue below −180 dBFS. The header describes all of it.
+quiet (a second below −180 dBFS) or the number of voices leaves it out.
+The header describes all of it. (0.3.0 also had a notion of rest, with exact
+zeros in place of the residue; 0.3.1, engine 0.2.1, removed it again.)
 
 Other differences:
 

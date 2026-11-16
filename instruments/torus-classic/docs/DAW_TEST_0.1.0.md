@@ -28,13 +28,11 @@ Hosts: **Studio One 7**, **Tracktion Waveform 14**, **Ableton Live 12 Lite**.
 Note per item and host: ok, or what happened. A crash or a hang ends the test
 for that host; note the last step.
 
-## New in 0.3.0, to try
+## New in 0.3.0 and 0.3.1, to try
 
-Voices, rest, the lock and the colours. Steps 9.6 to 9.11 are about Studio
-One's Plug-in Nap: Performance Monitor open, "Enable Plug-in Nap" ticked,
-and the box to the right of Kekulé ticked as well. A napping plug-in shows a
-moon instead of its CPU figure. What Studio One does with an instrument is
-not documented; "it never naps" is a result too, and so is anything cut off.
+Voices, the lock, the colours and the octave keys. Plug-in Nap is not
+supported since 0.3.1 (the steps about it are gone); 9.6 only checks that
+nothing is cut off if Studio One naps the plug-in anyway.
 
 | # | Step | Expected | S1 | Waveform | Live |
 | --- | --- | --- | --- | --- | --- |
@@ -43,16 +41,12 @@ not documented; "it never naps" is a result too, and so is anything cut off.
 | 9.3 | Each of the six models with 16 voices, dense chords | Sounds like the model with four voices, only fuller; note the CPU figure with all sixteen ringing | | | |
 | 9.4 | While sixteen notes ring, switch VOICES to 4, then back to 16 | To 4: most notes end at once without a click, up to four ring on. To 16: nothing changes, the next notes add to the sound | | | |
 | 9.5 | Save the project with VOICES at 8, reopen; open a project saved with 0.2.x | 8 is back; the old project has 4 and sounds as it did. The host's automation list does not offer Polyphony | | | |
-| 9.6 | Nap: load Kekulé, play nothing | Note whether the moon appears, and after how long | | | |
-| 9.7 | Nap: Modal Resonator, play a short note (Damping at 1), wait | The note rings out completely; note whether and when the moon appears (the plug-in is at rest about 1 to 2 s after the note has gone) | | | |
-| 9.8 | Nap: Modal Resonator, Damping at 0.25, one loud note, listen on headphones at high volume until it has gone | The tail fades to nothing without a step or a cut; this takes about a minute | | | |
-| 9.9 | Nap: with the moon showing, play a note from the MIDI keyboard, and one from a recorded clip | It sounds at once, complete from its first sample, like a note without a nap | | | |
-| 9.10 | Nap: with the moon showing, open the window and click a screen key | It sounds. If not, note it: the key reaches the plug-in as a message, and the host has to wake for it | | | |
-| 9.11 | Nap: Stereo Strings, Damping at 0, one note | It sustains without end and the moon never appears | | | |
-| 9.12 | The lock beside TUNE: click it, turn TUNE, rest the mouse on it | Closed and grey: whole semitones. Open and amber: decimals. A tooltip says so. Sharp at 50 %, 100 % and 200 % window size and at each display scale | | | |
-| 9.13 | Automate "Tune Free" in the host, or switch it in the parameter list | The lock opens for On and closes for Off | | | |
-| 9.14 | Look at the knob rings | TUNE, FILTER, VOLUME white; STRUCTURE, BRIGHTNESS, DAMPING magenta; POSITION, EXCITATION turquoise. Readable on the dark background; say if the assignment or a colour should change | | | |
-| 9.15 | FM Voice, Damping at 0.5: one note, wait until it has gone, then turn Damping to 0 | A drone starts without a note, as on the Daisy kit. Note whether it also does with the moon showing | | | |
+| 9.6 | Studio One, Plug-in Nap on: Modal Resonator, Damping at 0.25, one loud note, listen until it has gone; then play again | The tail fades without a step or a cut, the next note sounds at once. Note whether a moon ever appears beside Kekulé | | | |
+| 9.7 | Octave keys: click **>>** twice, **<<** four times, then **>>** again | The C labels go C5…C7, C6…C8, then down to C2…C4; at either end the key dims and does nothing. Notes sound at the shown pitch | | | |
+| 9.8 | Save with the keyboard at C5…C7, reopen; open a project saved with 0.3.0 or before | C5…C7 is back; the old project shows C3…C5 | | | |
+| 9.9 | The lock beside TUNE: click it, turn TUNE, rest the mouse on it | Closed and grey: whole semitones. Open and amber: decimals. A tooltip says so. Sharp at 50 %, 100 % and 200 % window size and at each display scale | | | |
+| 9.10 | Automate "Tune Free" in the host, or switch it in the parameter list | The lock opens for On and closes for Off | | | |
+| 9.11 | Look at the knob rings, beside Mendelejew | TUNE, FILTER, VOLUME white; STRUCTURE, BRIGHTNESS, DAMPING magenta; POSITION, EXCITATION turquoise, in the same shades as Mendelejew. Readable on the dark background; say if the assignment or a colour should change | | | |
 
 ## New in 0.2.0, to try
 

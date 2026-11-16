@@ -1,6 +1,35 @@
 # Changes
 
-## 0.3.0 (2026-11-15)
+## 0.3.1 (2026-11-16)
+
+After Codex's review of 0.3.0 ([review](docs/CODEX_REVIEW_0.3.0.md),
+[what was done](docs/CODEX_REVIEW_0.3.0_UMSETZUNG.md)), and two wishes of the
+owner. 0.3.0 itself was never released.
+
+* **No Plug-in Nap.** The rest report of 0.3.0 is gone: the tail is infinite
+  again at all times, the plug-in no longer puts out exact zeros at rest,
+  and its output is again the firmware engine's, sample for sample, with no
+  exception for rest. That settles the review's points TC-R11 to TC-R13
+  (a tail read once at setup, a screen key between the threads, an owed
+  note-off). An idle instance costs about 1 % of one core; not worth the
+  risk. Silent banks beyond the first are still put away inside the engine.
+* **Octave keys** beside the screen keyboard, as in Mendelejew: **<<** and
+  **>>** move it by octaves between C2–C4 and C6–C8. It starts at C3–C5
+  (before: C4–C6). A held key is let go before the move. Saved with the
+  project in the window state, now version 2; version 1 opens at C3–C5.
+* **Knob colours** in the shades of Mendelejew; the assignment stays.
+* **Order of voices after more voices are chosen (TC-R14).** Documented in
+  the README, section Voices: for a while a strike can take a younger voice
+  than an older one in another bank. The vendored voice allocation is left
+  as it is.
+
+Component versions: engine 0.2.1 (rest removed; banks as in 0.2.0), adapter
+0.2.1 (as in 0.2.2: the rest code of 0.3.0 is gone), shell 0.3.1.
+
+Not changed: sound, parameters and their IDs, the sound state (version 3),
+MIDI controllers, latency.
+
+## 0.3.0 (2026-11-15, not released)
 
 The three steps agreed during the review of 0.2.0, the knob colours asked
 for on 2026-11-15, and the open point of the review of 0.2.1. Built and
