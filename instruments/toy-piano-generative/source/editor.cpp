@@ -186,20 +186,20 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
     for(std::size_t i = 0; i < knobs_.size(); ++i) {
         const KnobSpec& spec = kKnobs[i];
         const Row& row = kRows[spec.row];
-        const CCoord kColumnWidth = (kWidth - 2 * kMargin) / row.columns;
-        const CCoord kKnobSize = row.knob_size;
-        const CCoord kNameTop = row.name_top, kKnobTop = row.knob_top, kValueTop = row.value_top;
-        const CCoord left = kMargin + static_cast<CCoord>(spec.column) * kColumnWidth;
-        const CCoord knob_left = left + (kColumnWidth - kKnobSize) / 2;
+        const CCoord column_width = (kWidth - 2 * kMargin) / row.columns;
+        const CCoord knob_size = row.knob_size;
+        const CCoord name_top = row.name_top, knob_top = row.knob_top, value_top = row.value_top;
+        const CCoord left = kMargin + static_cast<CCoord>(spec.column) * column_width;
+        const CCoord knob_left = left + (column_width - knob_size) / 2;
 
-        frame->addView(MakeLabel(CRect(left, kNameTop, left + kColumnWidth, kNameTop + 16),
+        frame->addView(MakeLabel(CRect(left, name_top, left + column_width, name_top + 16),
                                  spec.name, name_font, kDimText, kCenterText));
 
         int32_t style = CKnob::kCoronaOutline | CKnob::kCoronaDrawing;
         if(spec.bipolar)
             style |= CKnob::kCoronaFromCenter;
-        auto* knob = new CKnob(CRect(knob_left, kKnobTop, knob_left + kKnobSize,
-                                     kKnobTop + kKnobSize),
+        auto* knob = new CKnob(CRect(knob_left, knob_top, knob_left + knob_size,
+                                     knob_top + knob_size),
                                this, static_cast<int32_t>(spec.id), nullptr, nullptr, CPoint(0, 0),
                                style);
         knob->setCoronaColor(kAccent);
@@ -214,7 +214,7 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         knob->setWheelInc(steps > 0 ? 1.0f / static_cast<float>(steps) : 0.01f);
         frame->addView(knob);
 
-        auto* value = MakeLabel(CRect(left, kValueTop, left + kColumnWidth, kValueTop + 20), "",
+        auto* value = MakeLabel(CRect(left, value_top, left + column_width, value_top + 20), "",
                                 value_font, kText, kCenterText);
         frame->addView(value);
 

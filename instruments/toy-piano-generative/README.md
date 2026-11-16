@@ -244,7 +244,31 @@ administrator and rescan in the DAW.
 
 ## Verified
 
-VERIFIED_TABLE
+| Check | Result |
+| --- | --- |
+| Steinberg validator (SDK 3.8.0): Visual Studio 2026 Release and Debug, Visual Studio 2022 Release | 47 tests passed, 0 failed |
+| The other three plug-ins of the repository, built and tested in the same runs | validator and all tests passed |
+| Drawing, over 320 000 draws in Minor at Notes 65 %: rests 35 %, the tonic's pitch class 47.5 % of the notes, the upper octave 50 % | within the bound |
+| The tonic's share for each of the seven scales, 80 000 notes each | within the bound; Octave and Tonic exactly 100 % |
+| Start-up pattern over 20 000 instances: the tonic or a rest, 65 % tonic | within the bound |
+| Algorithm 1 at Mutation 40 %, 200 000 ticks: redraw chance per step and tick 40 % / 16 | within the bound; all 16 steps equally, also beyond Length |
+| Algorithm 2: runs at Mutation 50 % × Notes 60 % = 30 % of the ticks; the shape of every run in all seven scales | within the bound; passed |
+| Algorithm 5 at 40, 41 and 50 %: pitch changes with half the chance, the rhythm never; at 1 % nothing; at 80 % redraws with 30 % | within the bound; passed |
+| Order: with algorithm 5 a step's mutation is heard in that same step | passed |
+| Algorithm 3 ignores the stored pattern and keeps it; algorithm 4 is silent on exactly every second pass | passed |
+| Scale change draws anew and rescues an empty pattern; tonic change transposes, rests stay; divide 1 to 64, length, octave, restart; the knob law; a saved sequencer continues identically, damaged ones refused | passed |
+| Step clock: every sixteenth once and on its sample at block sizes 1, 16, 64, 333, 1024, 2048; start, stop, jump, tempo change; no tempo, no song position | passed |
+| The sequencer in the plug-in against the same notes sent to the bare engine: 6 block sizes, 32 and 64 bit; a start inside a sixteenth; length, divide and octave | bit-exact |
+| A mutating pattern at 44.1 kHz and 97.3 BPM, 4 block sizes | the same audio and the same pattern afterwards |
+| Transport: stop, start elsewhere in the song, RUN off and on | notes exactly as the pattern says, bit-exact against the engine |
+| State: loaded and saved at once gives the same bytes; loading draws nothing; a project saved while mutating and reloaded continues identically; damaged states refused whole, by processor and controller | passed |
+| `getState` and `setState` from one thread while another renders and mutates | every state read was a whole, valid one |
+| A MIDI note with TRANSPOSE on: acts at its sample, is reported to the host, does not sound; the steps after it sound from the new tonic | bit-exact against the engine, 4 block sizes |
+| Keys C1 to B6 and back; folding above note 127; the screen keyboard's keys and octave buttons through controller and window | passed |
+| Tuning, measured on the output: A1 at 0, 50 and 100 % | 55.000, 54.500 and 54.000 Hz |
+| Tuning: A4 at 0 and 100 %; C4 at 100 % | 440.000 and 439.000 Hz; 261.000 Hz |
+| Parameter texts and typed values of all sequencer parameters; no MIDI controller on them | passed |
+| Taken over from Toy Piano Classic and run again here: bit-exact against the firmware engine at 7 block sizes in 32 and 64 bit, sample rates, master pitch, pitch wheel, volume, Nyquist guard, harmonic fade, glides, screen keyboard notes, typed values, the window in a stand-in host | passed, with this plug-in's window size |
 
 All of it is automated and ran on one machine: Windows 11 x64, MSVC 19.51
 (Visual Studio Build Tools 2026) and MSVC 19.44 (Build Tools 2022). The
