@@ -3,8 +3,8 @@
 Stand: 2026-11-14. Das erste Testobjekt, Toy Piano Classic 0.3.2, ist gebaut
 und automatisch geprüft. In Studio One lädt es, die Regler reagieren. Angehört
 wurde es noch nicht; Waveform und Live stehen aus. Dazugekommen sind Torus
-Classic und, als dritter Port, Mendelejew (Projekt Elements); ihr Stand steht in den
-Abschnitten unten.
+Classic und, als dritter Port, Mendelejew (Projekt Elements), seit 2026-11-17 als
+vierter Messier (Projekt messier); ihr Stand steht in den Abschnitten unten.
 
 ## Entscheidungen
 
@@ -191,6 +191,59 @@ weil der Auftrag es offen ließ:
 | Schutz | Liefert die DSP je ein nicht endliches Sample: Stille, DSP neu, Tasten los | Ein Filter oder der Hall käme aus NaN nicht von selbst heraus |
 | Gemeinsamer Code | Adapter, Parameterübergabe, Texteingabe und Fenster sind Kopien aus Torus Classic 0.2.0 im eigenen Namensraum; nichts nach `common/` verschoben | Verschieben hätte Torus Classic geändert, dessen Prüfung noch läuft. Kandidaten für `common/` stehen dort im README |
 | Tests | Bitgenauer Vergleich bei 32 kHz, Messungen bei 48 und 96 kHz gegen das Original, Engine- und Plugin-Tests; keine Fenstertests | Der Nutzer prüft Optik, GUI und DAW selbst |
+
+### Messier (Projekt messier)
+
+Vierter Port, Auftrag vom 2026-11-17 (`docs/CLAUDE_BUILDAUFTRAG_MESSIER_0.1.0.md`,
+liegt beim Nutzer): der Granular Looper `instruments/granular` aus Daisy-Seed (Nebulae
+on Daisy 0.2.2) als VST3-Instrument, nur mit der File-Quelle. Version 0.1.0 ist gebaut,
+vom validator geprüft und automatisch getestet, in einer DAW aber weder ausprobiert noch
+angehört; Codex' Prüfung steht aus
+([Prüfauftrag](../instruments/messier/docs/CODEX_PRUEFAUFTRAG_0.1.0.md)). Messwerte und
+Testprotokoll stehen im
+[Build-Bericht](../instruments/messier/docs/BUILD_REPORT_0.1.0.md), die offene Abnahme in
+der [DAW-Prüfliste](../instruments/messier/docs/DAW_TEST_0.1.0.md), Herkunft und Patches
+in [UPSTREAM.md](../instruments/messier/UPSTREAM.md).
+
+Vom Nutzer am 2026-11-17 entschieden:
+
+| Thema | Entscheidung |
+| --- | --- |
+| Weg | Natives C++ aus dem Daisy-Kern, keine Cabbage-/Csound-Hülle, keine neue Bibliothek |
+| Name | „Messier“, nach Charles Messiers Nebelkatalog; Hersteller TAUREON, Bundle `Messier.vst3`, eigene FUIDs |
+| Vocoder | Der geprüfte Kern wird übernommen, obwohl er LGPL-2.1-or-later ist (aus Csound `pvlock.c`); Lizenztexte, Eintrag in `THIRD_PARTY_NOTICES.md`, Bau-Weg im README |
+| Umfang 0.1.0 | Nur die File-Quelle; Live, Overdub, Circular, Dry-Blend, Eingangsverstärkung und Grain-FM folgen in 0.2.0 |
+| Plugin-Art | Instrument mit einem (noch ungenutzten) Sidechain-Bus |
+| Quantum | Fest 64 Samples, die Kontrollperiode des Originals |
+| Grain-Pegel (F42) | 0,90 wie das Original statt 0,45 wie der Kern 0.2.2: der einzige Klang-Patch am Kern |
+| Dateien | PCM 16/24 Bit, Float 32 Bit, EXTENSIBLE, mono/stereo, 8–192 kHz; mehr als 16 Bit ohne Dither gerundet; höchstens 256 MiB PCM16 |
+| Fenster | Keine Wellenform, keine Positionsanzeige, kein Drag-and-drop in 0.1.0 |
+| Zweitfunktionen | Ohne MIDI-CC, wie in der Firmware |
+
+Bei der Umsetzung selbst festgelegt, weil der Auftrag es offen ließ:
+
+| Thema | Festlegung | Begründung |
+| --- | --- | --- |
+| Quellstand | Daisy-Seed `8226a31` (0.2.2), gelesen mit `git archive`/`git show`; `origin/main` stand beim Kopieren schon bei `53fd8a0` (0.3.0, 24-Bit-WAV) | Der Auftrag nennt 0.2.2 bei `8226a31`. Die übernommenen Dateien sind in beiden Ständen gleich, bis auf den Teil von `wav.h`, den Messier nicht nimmt |
+| FFT des Vocoders | Eigenes Backend `core/fft_desktop.cpp` hinter dem `fft.h` der Firmware: reelle 2048-Punkt-FFT über eine komplexe 1024-Punkt-FFT. Konstante Tabellen, kein weiterer Zustand | Die Firmware rechnet seit 0.2.2 mit CMSIS-DSP (Apache-2.0); das wäre eine neue Bibliothek. Der unveränderte Vocodertest der Firmware läuft gegen das Backend und besteht ihre Grenzwerte (FFT-Fehler 2,4e-7). Zwei Instanzen in zwei Threads teilen nichts Beschreibbares |
+| Dateipuffer | Patch P1: `Engine::SetFileBuffer()`, eine Zeile in `engine.h`; `wav.h` auf `FileBridge` und `WavInfo` gekürzt (P2) | Die Firmware hat einen festen Puffer und überschreibt ihn bei stummer Engine. Mit einem Puffer je Datei bleibt bei jedem Fehler die alte Datei spielbar, und der Audio-Thread wartet nie auf eine Kopie. Klangneutral; der Referenztest fährt den ungepatchten Kern auf Firmware-Art durch einen Dateiwechsel, bitgenau |
+| Referenztest | `tests/reference/` enthält nur die Upstream-Kopien (mit der F42-Zeile); der Treiber `tests/reference_api.cpp` ist eigener Code daneben, unabhängig von `engine/` geschrieben | Ein Test prüft, dass die Kopien bis auf die eine Zeile der Firmware gleichen; der Vergleich ruft nicht zweimal denselben Wrapper |
+| Adapter | Kekulés Adapter in der Form, die Mendelejew schon nutzt: mit Note-off, ohne Ausgangsstufe; Quantum 64, Noten mit MIDI-Kanal, das Rad als 14-Bit-Wert, und `Render()` bekommt schon ein Eingangspaar (in 0.1.0 Stille) | Kein neuer Filter, kein Limiter (Auftrag). Der Eingangsweg von 0.2.0 kann so ergänzt werden, ohne die Zeitrechnung umzubauen |
+| Pitch Bend | Ein Rad für alle Kanäle: Die Engine bekommt den Wert auf allen 16 MIDI-Kanälen. Er wirkt nur bei gehaltener Note | So rechnet der Kern ohne Änderung; wie in der Firmware beugt das Rad die gehaltene Note |
+| Bildschirm-Klaviatur | Noten auf MIDI-Kanal 1, Velocity 100, mit Loslassen; der Weg (Warteschlange mit Platz für jedes Loslassen) aus Mendelejew 0.1.4, Oktavtasten aus Kekulé 0.3.1 | Kekulés Engine kennt kein Note-off, Mendelejews schon |
+| Reset | Parameter 121 als Taster: Die Flanke 0→1 wirkt, nicht gespeichert | Ein Knopf im Fenster und automatisierbar; ein gehaltener Wert löst nichts wiederholt aus |
+| Volume | Linear 0 bis 100 % hinter dem Kern wie Kekulés Volume, Vorgabe 100 %; Sprünge gleiten mit höchstens 1/240 je Sample (0 bis 100 % in 5 ms) | Bei 100 % bleiben die Samples des Kerns exakt; ohne Gleiten knackt Automation |
+| Anzeige | Der Wert, den das Gesetz des Kerns aus dem Poti macht (Speed als Faktor, Pitch in Oktaven, Density in Grains/s, Size als Anteil, Window mit Namen); Texteingabe rechnet zurück, auch für die Rastbänder. Die Gesetze sind für die Anzeige kopiert, ein Test vergleicht sie mit denen des Kerns | Vorgabe „angezeigt wird der wirkliche Wert“ |
+| Zustand | Version 1: die 16 gespeicherten Werte als Double, dann der Pfad als UTF-8 (höchstens 32 KiB). Alles wird gelesen und geprüft; ein Wert außerhalb 0 bis 1, ein abgeschnittener Zustand oder ungültiges UTF-8 wird abgelehnt | Wie bei Kekulé: ein Teilzustand soll nie entstehen |
+| Fehlende Datei | Stille, der Pfad bleibt im Zustand, das Fenster zeigt ihn mit „File not found“ | Vorgabe; ein erneutes Speichern verliert den Verweis nicht |
+| Dateistatus im Fenster | Der Processor antwortet nur im UI-Thread: auf die Ladeanforderung und auf Statusfragen, die das Fenster während eines Ladevorgangs alle 100 ms stellt | Nachrichten aus dem Audio- oder Ladethread wären bei manchen Hosts unsicher |
+| Neustart | Aktivierung und Projektladen bauen `neb::Engine` an Ort und Stelle neu (placement new, keine Allokation); die Datei bleibt. Eine mit dem Projekt gelesene Datei ist sofort da, ohne Überblendung | Startwert des Zufalls gleich, ein Projekt rendert jedes Mal gleich |
+| Freigabe alter Dateien | Der Audio-Thread reicht losgelassene Dateien über eine Warteschlange an den Ladethread, der sie freigibt; bis zu drei Dateien zugleich im Speicher (alte, neue, wartende) | In `process` keine Freigabe, keine Sperre |
+| Kein Clip | Hinter der Ratenwandlung wird nicht begrenzt (gemessen bis 1,03 bei dichten Rechteck-Grains und 192 kHz) | Auftrag: kein anderer Limiter. Bei 48 kHz bleibt der Ausgang unter 0,95 |
+| Fenster | 700 × 306 Pixel (mit Klaviatur 392), neun Spalten: acht Potis und Volume, darunter die sechs Zweitfunktionen klein, Freeze und Reset unter Volume; Reglerfarben von Mendelejew nach Aufgabe | Vorgabe des Auftrags; die Farben wie bei Kekulé 0.3.1 |
+| VST3-Kategorie | `Instrument\|Sampler` | Ein Instrument, das auf Samples beruht |
+| Last | Gemessen: 1,8 bis 4,2 % eines Kerns (i7-8700K). Bei 192 kHz mit 64er-Blöcken dauert ein Block mit Vocoder-Hop länger als der Block: Der Hop rechnet alle 512 internen Samples zwei Kanäle auf einmal | Befund, kein Fix in 0.1.0: Das Verteilen des Hops über mehrere Blöcke wäre eine Änderung am Kern |
+| Gemeinsamer Code | Nichts nach `common/`; Adapter, Parameterübergabe, Texteingabe, Fenster und Klaviatur sind Kopien aus Kekulé 0.3.1 und Mendelejew 0.1.4 | Auftrag |
 
 ## Stand des Fahrplans
 

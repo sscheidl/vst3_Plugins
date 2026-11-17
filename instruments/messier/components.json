@@ -1,0 +1,309 @@
+{
+  "schema": 1,
+  "product": {
+    "id": "messier",
+    "name": "Messier",
+    "version": "0.1.0",
+    "vendor": "TAUREON",
+    "format": "VST3",
+    "platform": "Windows x64",
+    "license": "MIT, except the vocoder in core/reference_dsp.* (LGPL-2.1-or-later)"
+  },
+  "components": [
+    {
+      "id": "messier.core",
+      "path": "core/",
+      "layer": 1,
+      "version": "nebulae-on-daisy 0.2.2 via daisy-seed@8226a31",
+      "description": "Hardware-free firmware DSP: phase vocoder (Mincer), grains, windows, limiter, control laws, engine; vendored with the F42 grain level and two patches without effect on the sound; fft_desktop.cpp is this repository's FFT backend for it",
+      "license": "LGPL-2.1-or-later (reference_dsp.*, from Csound pvlock.c and fgens.c); MIT (Qu-Bit Electronix, De-Pattern, Daisy-Seed contributors, TAUREON) for the rest"
+    },
+    {
+      "id": "messier.engine",
+      "path": "engine/",
+      "layer": 2,
+      "version": "0.1.0",
+      "description": "Looper engine: drives neb::Engine through its public interface; file hand-over by the FileBridge; Volume",
+      "interface": "engine/looper_engine.h",
+      "depends_on": [
+        "messier.core"
+      ],
+      "license": "MIT (TAUREON)"
+    },
+    {
+      "id": "messier.adapter",
+      "path": "adapter/",
+      "layer": 3,
+      "version": "0.1.0",
+      "description": "Streaming adapter: host sample rate, 64-sample quanta, event time, latency; from Kekule 0.3.1",
+      "interface": "adapter/stream_adapter.h",
+      "depends_on": [],
+      "license": "MIT (TAUREON)"
+    },
+    {
+      "id": "messier.shell",
+      "path": "source/",
+      "layer": 4,
+      "version": "0.1.0",
+      "description": "VST3 processor, controller, state, editor, WAV reader and file loader",
+      "depends_on": [
+        "messier.engine",
+        "messier.adapter",
+        "vst3sdk",
+        "vstgui"
+      ],
+      "license": "MIT (TAUREON)"
+    },
+    {
+      "id": "messier.reference",
+      "path": "tests/reference/",
+      "test_only": true,
+      "version": "daisy-seed@8226a31 with the F42 line only",
+      "description": "The pinned firmware core for the bit-exact reference comparison; differs from its origin only by the F42 line; not part of the plug-in",
+      "license": "LGPL-2.1-or-later (reference_dsp.*); MIT for the rest"
+    }
+  ],
+  "origins": {
+    "daisy-seed": {
+      "repository": "https://github.com/sscheidl/Daisy-Seed",
+      "commit": "8226a31cf48a25236970dc55b96b4046b24ddffa",
+      "path": "instruments/granular",
+      "last_commit_touching_path": "6da72bafc1fef871d3636529f92e6a82a37031c1",
+      "read_with": "git show <commit>:<path> (the local checkout was on another branch)",
+      "product": "Nebulae on Daisy 0.2.2"
+    },
+    "csound": {
+      "repository": "https://github.com/csound/csound",
+      "commit": "efbcabb4d56e6237e2cabc9949cfadadda946cf9",
+      "path": "Opcodes/pvlock.c, Engine/fgens.c",
+      "note": "as recorded by Daisy-Seed instruments/granular/LICENSES/README.md; taken through Daisy-Seed"
+    },
+    "de-pattern": {
+      "repository": "https://github.com/De-Pattern/Nebulae-Granular_Looper_Pedal",
+      "commit": "073a1ae4f4ce41bda54f8c78819f3b2a3319df4a",
+      "note": "as recorded by Daisy-Seed; taken through Daisy-Seed"
+    },
+    "qu-bit": {
+      "repository": "https://github.com/Qu-Bit-Electronix/QB_Nebulae_V2",
+      "commit": "4be42b5159ae5c63466d84f0a8ab3b2fb4afd5a6",
+      "note": "the original instrument (Csound); its control laws, as recorded by Daisy-Seed"
+    },
+    "vst3sdk": {
+      "repository": "https://github.com/steinbergmedia/vst3sdk",
+      "tag": "v3.8.0_build_66",
+      "commit": "9fad9770f2ae8542ab1a548a68c1ad1ac690abe0",
+      "submodule": "external/vst3sdk"
+    }
+  },
+  "hash_method": "SHA-256 of the file content with CRLF replaced by LF (the content Git stores)",
+  "files": [
+    {
+      "local": "core/reference_dsp.h",
+      "origin": "instruments/granular/src/reference_dsp.h",
+      "relation": "patched",
+      "origin_sha256": "b87a7a52f32007d3ca2e729071861b48f22b1751c75552bb22a344584922f1ad",
+      "origin_git_blob": "68daa59ca930e3acb41b1ba30d5afa6733780790",
+      "local_sha256": "92461441c927a87bf7dd0eecb21e8e8718c708110cedeb45e93cb3e25646539d"
+    },
+    {
+      "local": "core/reference_dsp.cpp",
+      "origin": "instruments/granular/src/reference_dsp.cpp",
+      "relation": "verbatim",
+      "origin_sha256": "4e9649f3633fb5575d7e3044f9f1faf1a1d91b3a3c5e193a9906c90d11828fd4",
+      "origin_git_blob": "7f71c2e55091d4f01929594dff3f87d19bc60aa2",
+      "local_sha256": "4e9649f3633fb5575d7e3044f9f1faf1a1d91b3a3c5e193a9906c90d11828fd4"
+    },
+    {
+      "local": "core/pcm.h",
+      "origin": "instruments/granular/src/pcm.h",
+      "relation": "verbatim",
+      "origin_sha256": "407aee3d397482feea2db05a8a5e4a289ad0896ed1929da3c6325252f7050b18",
+      "origin_git_blob": "4aded2889cf83fa757613719dd5d459dbdbd0592",
+      "local_sha256": "407aee3d397482feea2db05a8a5e4a289ad0896ed1929da3c6325252f7050b18"
+    },
+    {
+      "local": "core/engine.h",
+      "origin": "instruments/granular/src/engine.h",
+      "relation": "patched",
+      "origin_sha256": "7040e65249b7c82e5568c4eaf1f4fcc0e3191190609181524b9d8806a500f96f",
+      "origin_git_blob": "b2fa69508761a6fe2e8b985acc22f702710f2c42",
+      "local_sha256": "1f8b294295461db0d2d02d2b8b250aa34deb7bc19b585bd5b0448df04160aa61"
+    },
+    {
+      "local": "core/engine.cpp",
+      "origin": "instruments/granular/src/engine.cpp",
+      "relation": "verbatim",
+      "origin_sha256": "e7cdd5dda4b1fd70882f3a7963316f67a1a5431c90e4c51bb225c7bbb0c24585",
+      "origin_git_blob": "89a98972b11704af80de63a62523666335e2f37b",
+      "local_sha256": "e7cdd5dda4b1fd70882f3a7963316f67a1a5431c90e4c51bb225c7bbb0c24585"
+    },
+    {
+      "local": "core/control.h",
+      "origin": "instruments/granular/src/control.h",
+      "relation": "verbatim",
+      "origin_sha256": "5816253fa538e99add1b5e753a27cb2923b1cc0763cf69f91ee19493e9ecc199",
+      "origin_git_blob": "329273c558ab15194f219af07c32a32f2e8a127b",
+      "local_sha256": "5816253fa538e99add1b5e753a27cb2923b1cc0763cf69f91ee19493e9ecc199"
+    },
+    {
+      "local": "core/control.cpp",
+      "origin": "instruments/granular/src/control.cpp",
+      "relation": "verbatim",
+      "origin_sha256": "b0be30459741d1b846873e9d4428a0c8387c94b05d27f0f7edd2a74a411cb8da",
+      "origin_git_blob": "75dd52f435a71b0c41de796dd65927c396370e69",
+      "local_sha256": "b0be30459741d1b846873e9d4428a0c8387c94b05d27f0f7edd2a74a411cb8da"
+    },
+    {
+      "local": "core/fft.h",
+      "origin": "instruments/granular/src/fft.h",
+      "relation": "verbatim",
+      "origin_sha256": "1fff5a1d3667af6bb9312d3311a7c95d552827bbd7894a316e3cdd4c272f9a02",
+      "origin_git_blob": "04f169e5785f8bb16e6a265268ee438cf56d187c",
+      "local_sha256": "1fff5a1d3667af6bb9312d3311a7c95d552827bbd7894a316e3cdd4c272f9a02"
+    },
+    {
+      "local": "core/profile.h",
+      "origin": "instruments/granular/src/profile.h",
+      "relation": "verbatim",
+      "origin_sha256": "4a45d8e88e61a988686f15f5280e65f54bb9bdda5698266c7d7e5637dafa3edc",
+      "origin_git_blob": "8051072c9aa6bc9b237cda374e6f59841373ecab",
+      "local_sha256": "4a45d8e88e61a988686f15f5280e65f54bb9bdda5698266c7d7e5637dafa3edc"
+    },
+    {
+      "local": "core/wav.h",
+      "origin": "instruments/granular/src/wav.h",
+      "relation": "patched",
+      "origin_sha256": "551f54e0d996395d4c0c063e0066e0d1ea63cc0fa0ddac0b3ddd19cc73818a17",
+      "origin_git_blob": "4a21f5ab5343255a61580ba9a92fb2d164670f55",
+      "local_sha256": "59e2490f2e49de32db7ffbc60b7d393ee8f899532d4b641834fffbe85efaa709"
+    },
+    {
+      "local": "tests/reference/reference_dsp.h",
+      "origin": "instruments/granular/src/reference_dsp.h",
+      "relation": "patched",
+      "origin_sha256": "b87a7a52f32007d3ca2e729071861b48f22b1751c75552bb22a344584922f1ad",
+      "origin_git_blob": "68daa59ca930e3acb41b1ba30d5afa6733780790",
+      "local_sha256": "92461441c927a87bf7dd0eecb21e8e8718c708110cedeb45e93cb3e25646539d"
+    },
+    {
+      "local": "tests/reference/reference_dsp.cpp",
+      "origin": "instruments/granular/src/reference_dsp.cpp",
+      "relation": "verbatim",
+      "origin_sha256": "4e9649f3633fb5575d7e3044f9f1faf1a1d91b3a3c5e193a9906c90d11828fd4",
+      "origin_git_blob": "7f71c2e55091d4f01929594dff3f87d19bc60aa2",
+      "local_sha256": "4e9649f3633fb5575d7e3044f9f1faf1a1d91b3a3c5e193a9906c90d11828fd4"
+    },
+    {
+      "local": "tests/reference/pcm.h",
+      "origin": "instruments/granular/src/pcm.h",
+      "relation": "verbatim",
+      "origin_sha256": "407aee3d397482feea2db05a8a5e4a289ad0896ed1929da3c6325252f7050b18",
+      "origin_git_blob": "4aded2889cf83fa757613719dd5d459dbdbd0592",
+      "local_sha256": "407aee3d397482feea2db05a8a5e4a289ad0896ed1929da3c6325252f7050b18"
+    },
+    {
+      "local": "tests/reference/engine.h",
+      "origin": "instruments/granular/src/engine.h",
+      "relation": "verbatim",
+      "origin_sha256": "7040e65249b7c82e5568c4eaf1f4fcc0e3191190609181524b9d8806a500f96f",
+      "origin_git_blob": "b2fa69508761a6fe2e8b985acc22f702710f2c42",
+      "local_sha256": "7040e65249b7c82e5568c4eaf1f4fcc0e3191190609181524b9d8806a500f96f"
+    },
+    {
+      "local": "tests/reference/engine.cpp",
+      "origin": "instruments/granular/src/engine.cpp",
+      "relation": "verbatim",
+      "origin_sha256": "e7cdd5dda4b1fd70882f3a7963316f67a1a5431c90e4c51bb225c7bbb0c24585",
+      "origin_git_blob": "89a98972b11704af80de63a62523666335e2f37b",
+      "local_sha256": "e7cdd5dda4b1fd70882f3a7963316f67a1a5431c90e4c51bb225c7bbb0c24585"
+    },
+    {
+      "local": "tests/reference/control.h",
+      "origin": "instruments/granular/src/control.h",
+      "relation": "verbatim",
+      "origin_sha256": "5816253fa538e99add1b5e753a27cb2923b1cc0763cf69f91ee19493e9ecc199",
+      "origin_git_blob": "329273c558ab15194f219af07c32a32f2e8a127b",
+      "local_sha256": "5816253fa538e99add1b5e753a27cb2923b1cc0763cf69f91ee19493e9ecc199"
+    },
+    {
+      "local": "tests/reference/control.cpp",
+      "origin": "instruments/granular/src/control.cpp",
+      "relation": "verbatim",
+      "origin_sha256": "b0be30459741d1b846873e9d4428a0c8387c94b05d27f0f7edd2a74a411cb8da",
+      "origin_git_blob": "75dd52f435a71b0c41de796dd65927c396370e69",
+      "local_sha256": "b0be30459741d1b846873e9d4428a0c8387c94b05d27f0f7edd2a74a411cb8da"
+    },
+    {
+      "local": "tests/reference/fft.h",
+      "origin": "instruments/granular/src/fft.h",
+      "relation": "verbatim",
+      "origin_sha256": "1fff5a1d3667af6bb9312d3311a7c95d552827bbd7894a316e3cdd4c272f9a02",
+      "origin_git_blob": "04f169e5785f8bb16e6a265268ee438cf56d187c",
+      "local_sha256": "1fff5a1d3667af6bb9312d3311a7c95d552827bbd7894a316e3cdd4c272f9a02"
+    },
+    {
+      "local": "tests/reference/profile.h",
+      "origin": "instruments/granular/src/profile.h",
+      "relation": "verbatim",
+      "origin_sha256": "4a45d8e88e61a988686f15f5280e65f54bb9bdda5698266c7d7e5637dafa3edc",
+      "origin_git_blob": "8051072c9aa6bc9b237cda374e6f59841373ecab",
+      "local_sha256": "4a45d8e88e61a988686f15f5280e65f54bb9bdda5698266c7d7e5637dafa3edc"
+    },
+    {
+      "local": "tests/reference/wav.h",
+      "origin": "instruments/granular/src/wav.h",
+      "relation": "verbatim",
+      "origin_sha256": "551f54e0d996395d4c0c063e0066e0d1ea63cc0fa0ddac0b3ddd19cc73818a17",
+      "origin_git_blob": "4a21f5ab5343255a61580ba9a92fb2d164670f55",
+      "local_sha256": "551f54e0d996395d4c0c063e0066e0d1ea63cc0fa0ddac0b3ddd19cc73818a17"
+    },
+    {
+      "local": "tests/core/test_vocoder.cpp",
+      "origin": "instruments/granular/tests/test_vocoder.cpp",
+      "relation": "verbatim",
+      "origin_sha256": "39a31d2e90ceea91db207d39f7198ac43240511396158e548e9a63704c966f14",
+      "origin_git_blob": "ef3c69be4b4ffe904ff4150f2b86c1b921555b84",
+      "local_sha256": "39a31d2e90ceea91db207d39f7198ac43240511396158e548e9a63704c966f14"
+    },
+    {
+      "local": "licenses/Qu-Bit-MIT.txt",
+      "origin": "instruments/granular/LICENSES/Qu-Bit-MIT.txt",
+      "relation": "verbatim",
+      "origin_sha256": "566a434368030405531a87e0d51c7cc16db2ecaf45201fce9c3f568e846ce40d",
+      "origin_git_blob": "262208a3f36b8c7a3277a8817bbb43dae440bf15",
+      "local_sha256": "566a434368030405531a87e0d51c7cc16db2ecaf45201fce9c3f568e846ce40d"
+    },
+    {
+      "local": "licenses/De-Pattern-MIT.txt",
+      "origin": "instruments/granular/LICENSES/De-Pattern-MIT.txt",
+      "relation": "verbatim",
+      "origin_sha256": "d5465a6f5238cc3b94a290f1790da69b3dc6a7561ab0459ee3ce574d75c8f3b2",
+      "origin_git_blob": "849bd3a7f184eff01545347b5251e436631ac04e",
+      "local_sha256": "d5465a6f5238cc3b94a290f1790da69b3dc6a7561ab0459ee3ce574d75c8f3b2"
+    },
+    {
+      "local": "licenses/Csound-LGPL-2.1.txt",
+      "origin": "instruments/granular/LICENSES/Csound-LGPL-2.1.txt",
+      "relation": "verbatim",
+      "origin_sha256": "277175daefabde6cff3f6dd8ad7a21a2a346b29d3a7d3762367e4354da2ed77d",
+      "origin_git_blob": "0c9df428b494d7c816f602b91672c71c35c31caa",
+      "local_sha256": "277175daefabde6cff3f6dd8ad7a21a2a346b29d3a7d3762367e4354da2ed77d"
+    },
+    {
+      "local": "licenses/Csound-FGENS-NOTICE.txt",
+      "origin": "instruments/granular/LICENSES/Csound-FGENS-NOTICE.txt",
+      "relation": "verbatim",
+      "origin_sha256": "b03cd94990b445fc32d1990d9cd74410b70ec291bb85af89cc331fe707cd03ec",
+      "origin_git_blob": "59f309c312402dbb3150abf051ba296c58184c50",
+      "local_sha256": "b03cd94990b445fc32d1990d9cd74410b70ec291bb85af89cc331fe707cd03ec"
+    },
+    {
+      "local": "licenses/Project-MIT.txt",
+      "origin": "instruments/granular/LICENSES/Project-MIT.txt",
+      "relation": "verbatim",
+      "origin_sha256": "d9a670cb7669bab6c5aeea3a3d64cf50ae69b5d74ad74469746203a1a799c0b4",
+      "origin_git_blob": "d74de99900205bb83171459a46b7802d0bcb8d96",
+      "local_sha256": "d9a670cb7669bab6c5aeea3a3d64cf50ae69b5d74ad74469746203a1a799c0b4"
+    }
+  ]
+}
