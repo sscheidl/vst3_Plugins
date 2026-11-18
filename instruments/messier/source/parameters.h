@@ -260,9 +260,24 @@ constexpr const char* kAttrRequest = "request";
 constexpr const char* kAttrState = "state";
 constexpr const char* kAttrSerial = "serial";
 constexpr const char* kAttrUserLoads = "userLoads";
+// Since 0.1.5 (MS-R17): a number that tells one processor instance from another, so
+// that a controller connected to a new processor counts that processor's loads from
+// its own start. Never 0.
+constexpr const char* kAttrProcessor = "processor";
 // Controller -> processor (since 0.1.2, MS-R08): the window's RESET button was pressed.
 // A message, not an edit of parameter 121: the host may merge a press and a release
 // of one parameter at one position, and the window may close before the next block.
 constexpr const char* kResetMessageId = "TaureonMessierReset";
+// Controller -> processor (since 0.1.4), while a window is open, kDisplayInterval
+// apart: send what the window shows. Attribute kAttrHaveWave: the sequence number of
+// the waveform overview the controller holds, 0 for none. Processor -> controller:
+// kAttrFrame, the bytes of an EngineDisplay (looper_engine.h), and, when the file
+// the core reads has another overview than the one the controller holds, kAttrWave,
+// the bytes of its WaveOverview (wave_overview.h).
+constexpr const char* kDisplayRequestId = "TaureonMessierDisplayRequest";
+constexpr const char* kDisplayMessageId = "TaureonMessierDisplay";
+constexpr const char* kAttrHaveWave = "haveWave";
+constexpr const char* kAttrFrame = "frame";
+constexpr const char* kAttrWave = "wave";
 
 } // namespace messier

@@ -42,6 +42,7 @@ static SoundState SoundFor(WavError error) {
         case WavError::kInvalid: return SoundState::kInvalid;
         case WavError::kTooLarge: return SoundState::kTooLarge;
         case WavError::kReadError: return SoundState::kReadError;
+        case WavError::kOutOfMemory: return SoundState::kReadError; // never a project's sound (MS-R16)
     }
     return SoundState::kInvalid;
 }
@@ -122,6 +123,7 @@ std::unique_ptr<FileData> FileLoader::LoadProject(const std::string& path,
     WavResult result;
     if(!path.empty())
         result = ReadWavFile(path, max_pcm_bytes_);
+    std::shared_ptr<WaveOverview> overview = result.file ? MakeOverview(*result.file) : nullptr;
     const std::lock_guard<std::mutex> lock(mutex_);
     ++status_.serial;
     // MS-R14: the new texts first, then the file object; the status changes only once
@@ -138,6 +140,10 @@ std::unique_ptr<FileData> FileLoader::LoadProject(const std::string& path,
             info = DescribeFile(*result.file, result.source_bits, result.source_float);
             sound = SoundState::kReady;
             file = std::move(result.file);
+        } else if(result.error == WavError::kOutOfMemory) {
+            // MS-R16: the file may be fine; there was no memory to decode it. Not a
+            // silent project with this path: refused as a whole, like any other
+            // failure for want of memory (below).
         } else {
             // The project names this file: keep its path, play nothing.
             info = std::string(WavErrorText(result.error)) + ": " + result.detail;
@@ -164,16 +170,38 @@ std::unique_ptr<FileData> FileLoader::LoadProject(const std::string& path,
     }
     if(file) {
         file->project = project;
-        file->sequence = ++sequence_;
+        NumberLocked(*file, file->frames ? std::move(overview) : nullptr);
     }
     RefillSpareLocked();
     return file;
 }
 
-void FileLoader::Finish(std::uint64_t ticket, const std::string& path, WavResult result) noexcept {
+void FileLoader::NumberLocked(FileData& file, std::shared_ptr<WaveOverview> overview) noexcept {
+    file.sequence = ++sequence_;
+    // The overview goes with the file's number, so the window can tell which file
+    // it belongs to (EngineDisplay::sequence). Without one the oldest kept one stays.
+    if(!overview)
+        return;
+    overview->sequence = file.sequence;
+    overviews_[next_overview_] = std::move(overview);
+    next_overview_ = (next_overview_ + 1) % kKeptOverviews;
+}
+
+std::shared_ptr<const WaveOverview> FileLoader::Overview(std::uint64_t sequence) const noexcept {
+    if(sequence == 0)
+        return nullptr;
+    const std::lock_guard<std::mutex> lock(mutex_);
+    for(const auto& overview : overviews_)
+        if(overview && overview->sequence == sequence)
+            return overview;
+    return nullptr;
+}
+
+void FileLoader::Finish(std::uint64_t ticket, const std::string& path, WavResult result,
+                        std::shared_ptr<WaveOverview> overview) noexcept {
     const std::lock_guard<std::mutex> lock(mutex_);
     try {
-        FinishUnchecked(ticket, path, result);
+        FinishUnchecked(ticket, path, result, overview);
     } catch(...) {
         // No memory left to describe the outcome (MS-R01): the request fails, the
         // sound stays.
@@ -184,7 +212,8 @@ void FileLoader::Finish(std::uint64_t ticket, const std::string& path, WavResult
     RefillSpareLocked();
 }
 
-void FileLoader::FinishUnchecked(std::uint64_t ticket, const std::string& path, WavResult& result) {
+void FileLoader::FinishUnchecked(std::uint64_t ticket, const std::string& path, WavResult& result,
+                                 std::shared_ptr<WaveOverview>& overview) {
     // A request from the window gives way to any newer request or project load.
     if(ticket != ticket_)
         return;
@@ -195,7 +224,7 @@ void FileLoader::FinishUnchecked(std::uint64_t ticket, const std::string& path, 
         status_.info = std::move(info);
         status_.sound = SoundState::kReady;
         status_.request_state = RequestState::kNone;
-        result.file->sequence = ++sequence_;
+        NumberLocked(*result.file, std::move(overview));
         exchange_.Offer(std::move(result.file));
         ++status_.user_loads;
         user_loads_.store(status_.user_loads, std::memory_order_release);
@@ -226,7 +255,11 @@ void FileLoader::Run() {
             has_wanted_ = false;
             busy_ = true;
             lock.unlock();
-            Finish(ticket, path, ReadWavFile(path, max_pcm_bytes_));
+            WavResult result = ReadWavFile(path, max_pcm_bytes_);
+            // The overview off the lock and off the audio thread, from the very buffer
+            // the engine will play.
+            std::shared_ptr<WaveOverview> overview = result.file ? MakeOverview(*result.file) : nullptr;
+            Finish(ticket, path, std::move(result), std::move(overview));
         } catch(...) {
             if(!lock.owns_lock())
                 lock.lock();

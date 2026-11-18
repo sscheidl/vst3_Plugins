@@ -291,6 +291,55 @@ void TestQueues() {
                 "a full control queue keeps the latest value; no allocation\n");
 }
 
+// Messier MS-R19: Prepare() at a new rate while memory runs out, at each of its
+// allocations in turn: false, no exception, and the adapter exactly as it was (rate,
+// latency, buffers, waiting events). Then it works. Release builds only: the Debug
+// standard library allocates container proxies even in noexcept moves.
+void TestPrepareWithoutMemory() {
+#if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
+    CounterEngine engine;
+    StreamAdapter adapter(engine);
+    CHECK(adapter.Prepare(48000.0));
+    EngineEvent control;
+    control.type = EngineEvent::kControl;
+    control.index = 5;
+    CHECK(adapter.AddEvent(1000, control));
+    const std::size_t bytes = adapter.AllocatedBytes();
+    int failures = 0;
+    bool through = false;
+    for(long long after = 0; after < 1000 && !through; ++after) {
+        g_failed_allocations = 0;
+        g_fail_after = after;
+        g_fail_armed = true;
+        bool prepared = false;
+        try {
+            prepared = adapter.Prepare(44100.0);
+        } catch(...) {
+            g_fail_armed = false;
+            std::printf("FAIL Prepare let an exception out after %lld allocations\n", after);
+            std::exit(1);
+        }
+        g_fail_armed = false;
+        through = g_failed_allocations == 0;
+        if(!through) {
+            ++failures;
+            CHECK(!prepared);
+            CHECK(adapter.HostRate() == 48000.0 && adapter.LatencySamples() == 0 && !adapter.Resampling());
+            CHECK(adapter.AllocatedBytes() == bytes);
+            CHECK(adapter.PendingEvents() == 1 && adapter.ControlWaiting(5));
+        } else {
+            CHECK(prepared && adapter.HostRate() == 44100.0 && adapter.LatencySamples() > 0);
+            CHECK(adapter.PendingEvents() == 0);
+        }
+    }
+    CHECK(through && failures > 0);
+    std::printf("prepare without memory: failed at each of its %d allocations in turn, without an "
+                "exception, the adapter as it was each time\n", failures);
+#else
+    std::printf("prepare without memory: Release builds only (Debug STL proxies)\n");
+#endif
+}
+
 } // namespace
 
 int main() {
@@ -300,6 +349,7 @@ int main() {
     TestLatency();
     TestLongRun();
     TestQueues();
+    TestPrepareWithoutMemory();
     std::printf("PASS messier.adapter\n");
     return 0;
 }

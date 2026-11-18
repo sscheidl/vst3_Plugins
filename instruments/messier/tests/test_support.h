@@ -33,6 +33,10 @@ inline thread_local std::uint64_t t_allocations = 0;
 inline thread_local bool g_fail_armed = false;
 inline thread_local long long g_fail_after = 0;
 inline thread_local std::uint64_t g_failed_allocations = 0;
+// While g_fail_size_to is not 0, the allocations of the calling thread from
+// g_fail_size_from to g_fail_size_to bytes throw (Messier MS-R16: one particular
+// buffer; std::vector adds a few bytes of alignment to large blocks).
+inline thread_local std::size_t g_fail_size_from = 0, g_fail_size_to = 0;
 
 struct AllocationProbe {
     std::uint64_t start = t_allocations;
@@ -125,7 +129,9 @@ struct Lcg {
 #ifdef TEST_SUPPORT_COUNT_ALLOCATIONS
 void* operator new(std::size_t size) {
     ++test_support::t_allocations;
-    if(test_support::g_fail_armed && test_support::g_fail_after-- <= 0) {
+    if((test_support::g_fail_armed && test_support::g_fail_after-- <= 0)
+       || (test_support::g_fail_size_to != 0 && size >= test_support::g_fail_size_from
+           && size <= test_support::g_fail_size_to)) {
         ++test_support::g_failed_allocations;
         throw std::bad_alloc();
     }

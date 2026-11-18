@@ -66,6 +66,7 @@ const char* WavErrorText(WavError error) {
         case WavError::kInvalid: return "not a valid WAV file";
         case WavError::kTooLarge: return "too large";
         case WavError::kReadError: return "could not be read";
+        case WavError::kOutOfMemory: return "out of memory";
     }
     return "";
 }
@@ -73,9 +74,10 @@ const char* WavErrorText(WavError error) {
 namespace {
 
 // MS-R01: an allocation that fails while reading becomes a result, never an
-// exception that leaves the loader. Building the result allocates nothing.
+// exception that leaves the loader. Building the result allocates nothing. Its own
+// code, not kTooLarge (MS-R16): the file may be fine, there was no memory for it.
 WavResult OutOfMemory() noexcept {
-    return Fail(WavError::kTooLarge, "out of memory");
+    return Fail(WavError::kOutOfMemory, "while decoding");
 }
 
 WavResult DecodeUnchecked(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes) {
@@ -162,7 +164,7 @@ WavResult DecodeUnchecked(std::istream& in, std::uint64_t size, std::uint64_t ma
     const std::size_t samples = static_cast<std::size_t>(frames * channels);
     file->pcm.reset(new(std::nothrow) std::int16_t[samples]);
     if(!file->pcm)
-        return Fail(WavError::kTooLarge, "not enough memory");
+        return Fail(WavError::kOutOfMemory, "for the audio data");
     file->frames = static_cast<std::uint32_t>(frames);
     file->rate = rate;
     file->channels = channels;
@@ -215,6 +217,8 @@ WavResult ReadUnchecked(const std::string& utf8_path, std::uint64_t max_pcm_byte
     try {
         path = std::filesystem::path(
             std::u8string(reinterpret_cast<const char8_t*>(utf8_path.data()), utf8_path.size()));
+    } catch(const std::bad_alloc&) {
+        return OutOfMemory(); // MS-R16: no memory for the path is no missing file
     } catch(...) {
         return Fail(WavError::kMissing, "not a usable path");
     }

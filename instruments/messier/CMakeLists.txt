@@ -10,7 +10,7 @@
 #
 # Its own version; moduleinfo.json takes it from here. Keep it equal to
 # FULL_VERSION_STR in source/version.h and to components.json.
-project(Messier VERSION 0.1.3 LANGUAGES CXX)
+project(Messier VERSION 0.1.5 LANGUAGES CXX)
 
 # The SDK compiles everything with /fp:fast. The DSP, the adapter and their tests
 # use /fp:precise: the bit-exact comparison with the reference needs IEEE semantics.
@@ -65,11 +65,15 @@ add_library(messier_shell STATIC
     source/controller.cpp
     source/controller.h
     source/editor.cpp
+    source/display_data.cpp
+    source/display_data.h
     source/editor.h
     source/engine_bridge.h
     source/file_loader.cpp
     source/file_loader.h
     source/latest_value.h
+    source/map_view.cpp
+    source/map_view.h
     source/parameter_state.h
     source/parameters.h
     source/plugin_ids.h
@@ -83,6 +87,8 @@ add_library(messier_shell STATIC
     source/view_layout.h
     source/wav_reader.cpp
     source/wav_reader.h
+    source/wave_overview.cpp
+    source/wave_overview.h
     source/widgets.cpp
     source/widgets.h)
 target_include_directories(messier_shell PUBLIC source)

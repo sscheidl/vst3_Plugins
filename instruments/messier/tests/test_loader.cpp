@@ -1,7 +1,9 @@
 // Tests of the file loader: the WAV reader (every accepted format and its
 // conversion, damaged, cut and unsupported files, the size limit, missing files,
 // a path outside ASCII), the loader's worker and status, the newest request
-// winning, and the exchange that hands files to the audio thread and back.
+// winning, and the exchange that hands files to the audio thread and back; the
+// waveform overview (0.1.4) of exactly the buffer the engine plays, under the
+// file's number.
 // Writes its files into a fresh folder under the system's temporary directory and
 // removes it at the end.
 #include "test_support.h"
@@ -9,6 +11,7 @@
 #include "file_loader.h"
 #include "wav_reader.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <new>
@@ -33,10 +36,15 @@ static std::atomic<std::size_t> g_fail_from{0};
 // While not 0, allocations of exactly this size fail too (the empty file object).
 static std::atomic<std::size_t> g_fail_size{0};
 static std::atomic<std::uint64_t> g_failed{0};
+// While g_fail_band_high is not 0, allocations from g_fail_band_low to it fail too
+// (the waveform overview with its shared_ptr control block).
+static std::atomic<std::size_t> g_fail_band_low{0}, g_fail_band_high{0};
 
 void* operator new(std::size_t size) {
     const std::size_t from = g_fail_from.load(std::memory_order_relaxed);
-    if((from != 0 && size >= from) || (size != 0 && size == g_fail_size.load(std::memory_order_relaxed))) {
+    const std::size_t band_high = g_fail_band_high.load(std::memory_order_relaxed);
+    if((from != 0 && size >= from) || (size != 0 && size == g_fail_size.load(std::memory_order_relaxed))
+       || (band_high != 0 && size >= g_fail_band_low.load(std::memory_order_relaxed) && size <= band_high)) {
         g_failed.fetch_add(1, std::memory_order_relaxed);
         throw std::bad_alloc();
     }
@@ -398,6 +406,102 @@ void TestLoader() {
 }
 
 
+// The overview, computed here from the buffer the engine gets: per column the
+// lowest and highest sample over all channels.
+bool SameOverview(const WaveOverview& w, const FileData& f) {
+    const std::uint32_t columns = std::min<std::uint32_t>(f.frames, WaveOverview::kMaxColumns);
+    if(w.frames != f.frames || w.columns != columns || w.sequence != f.sequence)
+        return false;
+    for(std::uint32_t c = 0; c < columns; ++c) {
+        int low = 99999, high = -99999;
+        const std::uint64_t first = std::uint64_t(c) * f.frames / columns;
+        const std::uint64_t last = std::uint64_t(c + 1) * f.frames / columns;
+        if(last <= first)
+            return false;
+        for(std::uint64_t i = first * f.channels; i < last * f.channels; ++i) {
+            low = std::min<int>(low, f.pcm[i]);
+            high = std::max<int>(high, f.pcm[i]);
+        }
+        if(w.low[c] != low || w.high[c] != high)
+            return false;
+    }
+    return true;
+}
+
+void TestOverview() {
+    // 5000 stereo frames, the channels different: 2048 columns of 2 or 3 frames.
+    std::vector<std::int16_t> samples(5000 * 2);
+    for(std::size_t i = 0; i < 5000; ++i) {
+        samples[2 * i] = static_cast<std::int16_t>(std::lround(20000 * std::sin(i * 0.013)));
+        samples[2 * i + 1] = static_cast<std::int16_t>((i * 37) % 4001 - 2000);
+    }
+    const std::string long_file = Write("overview.wav", Riff({FmtChunk({}), DataChunk(Pcm16(samples))}));
+    // 441 mono frames at 44.1 kHz: one column per frame.
+    std::vector<std::int16_t> mono(441);
+    for(std::size_t i = 0; i < mono.size(); ++i)
+        mono[i] = static_cast<std::int16_t>(i * 70 - 15000);
+    Format f;
+    f.rate = 44100;
+    f.channels = 1;
+    const std::string short_file = Write("short.wav", Riff({FmtChunk(f), DataChunk(Pcm16(mono))}));
+
+    FileExchange exchange;
+    FileLoader loader(exchange, 1u << 20);
+    CHECK(loader.Overview(0) == nullptr);
+    loader.Request(long_file);
+    CHECK(WaitFor([&] { return loader.Idle(); }));
+    std::unique_ptr<FileData> a(exchange.Take());
+    CHECK(a && a->frames == 5000);
+    std::shared_ptr<const WaveOverview> wa = loader.Overview(a->sequence);
+    CHECK(wa && wa->columns == WaveOverview::kMaxColumns && SameOverview(*wa, *a));
+    std::unique_ptr<FileData> b = loader.LoadProject(short_file, 1);
+    std::shared_ptr<const WaveOverview> wb = b ? loader.Overview(b->sequence) : nullptr;
+    CHECK(wb && wb->columns == 441 && SameOverview(*wb, *b));
+    CHECK(loader.Overview(a->sequence) == wa); // still kept
+    // A project without a file, or with one that is missing: no overview.
+    std::unique_ptr<FileData> none = loader.LoadProject("", 2);
+    std::unique_ptr<FileData> gone = loader.LoadProject((g_dir / "gone-too.wav").string(), 3);
+    CHECK(none && gone && !loader.Overview(none->sequence) && !loader.Overview(gone->sequence));
+    // The newest kKeptOverviews files keep theirs; an overview the window still holds
+    // stays valid however many follow.
+    std::uint64_t newest = 0;
+    for(std::size_t i = 0; i < FileLoader::kKeptOverviews; ++i) {
+        std::unique_ptr<FileData> next = loader.LoadProject(short_file, 10 + i);
+        CHECK(next && loader.Overview(next->sequence));
+        newest = next->sequence;
+    }
+    CHECK(!loader.Overview(a->sequence) && !loader.Overview(b->sequence) && loader.Overview(newest));
+    CHECK(SameOverview(*wa, *a));
+    // No memory for the overview (8 KB) but for the file: the file plays, without one.
+    g_fail_band_low = sizeof(WaveOverview);
+    g_fail_band_high = sizeof(WaveOverview) + 256;
+    const std::uint64_t failed_before = g_failed;
+    std::unique_ptr<FileData> lean = loader.LoadProject(short_file, 20);
+    g_fail_band_high = 0;
+    CHECK(g_failed > failed_before);
+    CHECK(lean && lean->frames == 441 && !loader.Overview(lean->sequence));
+    CHECK(loader.Status().sound == SoundState::kReady);
+    // What an overview costs the loader (printed, not checked): ten minutes of stereo
+    // at 48 kHz.
+    {
+        FileData big;
+        big.frames = 10 * 60 * 48000;
+        big.channels = 2;
+        big.pcm.reset(new std::int16_t[std::size_t(big.frames) * 2]);
+        for(std::size_t i = 0; i < std::size_t(big.frames) * 2; ++i)
+            big.pcm[i] = static_cast<std::int16_t>((i * 2654435761u) >> 16);
+        const auto t0 = std::chrono::steady_clock::now();
+        std::shared_ptr<WaveOverview> w = MakeOverview(big);
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        CHECK(w && w->columns == WaveOverview::kMaxColumns);
+        std::printf("overview: ten minutes of stereo in %.1f ms, %zu bytes\n", ms, sizeof(WaveOverview));
+    }
+    std::printf("overview: 2048 columns or one per frame, lowest and highest sample of exactly the "
+                "buffer the engine gets, under the file's number; none for no file, a missing file "
+                "or when memory is short; the newest %zu kept\n",
+                FileLoader::kKeptOverviews);
+}
+
 // MS-R01: allocations that fail while loading, in the worker thread and in the
 // thread that loads a project, become a failure result; the process lives on, the
 // playing file stays for a request from the window, a project falls silent.
@@ -439,6 +543,31 @@ void TestOutOfMemory() {
         CHECK(status.request_state == RequestState::kFailed && !status.detail.empty());
         CHECK(status.path == good && status.sound == SoundState::kReady && !exchange.Pending());
         }
+    // MS-R16: only the decoding of a valid project file fails for want of memory (its
+    // conversion buffer, or its PCM array): the project is refused as a whole, not
+    // taken over silent with its path. The reader says so with its own code.
+    // (std::vector adds a few bytes of alignment to a block of 1 MiB: a narrow band.)
+    for(const std::size_t size : {std::size_t(1) << 20, std::size_t(4800) * 2 * 2}) {
+        const FileStatus playing_before = loader.Status();
+        const std::uint64_t failed_before = g_failed.load();
+        g_fail_band_low = size;
+        g_fail_band_high = size + 64;
+        const WavResult read = ReadWavFile(other);
+        std::unique_ptr<FileData> decoded = loader.LoadProject(other, 2);
+        g_fail_band_high = 0;
+        CHECK(g_failed.load() >= failed_before + 2);
+        CHECK(read.error == WavError::kOutOfMemory && !read.file);
+        CHECK(!decoded);
+        const FileStatus after = loader.Status();
+        CHECK(after.path == playing_before.path && after.sound == playing_before.sound
+              && after.info == playing_before.info);
+        CHECK(after.request_state == RequestState::kFailed && after.detail == "out of memory");
+        std::printf("  project file, decoding without memory (%zu bytes refused): refused as a "
+                    "whole, path '%s' kept\n", size, FileName(after.path).c_str());
+    }
+    // A file beyond the limit stays kTooLarge, and a project with it falls silent with
+    // its path as before.
+    CHECK(ReadWavFile(other, 1000).error == WavError::kTooLarge);
     // A project loaded with almost no memory: silent, from the spare empty file.
     // A project loaded with almost no memory is refused as a whole (MS-R14): no file
     // object comes back, and the status and its path, which getState() saves, stay
@@ -507,6 +636,7 @@ int main() {
     TestFormats();
     TestRefused();
     TestLoader();
+    TestOverview();
     TestOutOfMemory();
     fs::remove_all(g_dir);
     std::printf("PASS messier.loader\n");

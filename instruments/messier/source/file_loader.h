@@ -20,6 +20,7 @@
 #include "looper_engine.h"
 #include "spsc_queue.h"
 #include "wav_reader.h"
+#include "wave_overview.h"
 
 #include <atomic>
 #include <chrono>
@@ -111,7 +112,8 @@ class FileLoader {
     // stays silent and keeps the path. An empty path is no file. Does not offer the
     // file: the processor hands it to the audio thread together with the project's
     // values (MS-R07). Overtakes every request from the window still running. Null
-    // only if not even an empty file can be made. Never throws.
+    // if not even an empty file can be made, or if memory ran out while decoding the
+    // file (MS-R16): then the project is refused and the status stays. Never throws.
     std::unique_ptr<FileData> LoadProject(const std::string& utf8_path, std::uint64_t project) noexcept;
 
     // Files from the window that became the sound so far (FileStatus::user_loads),
@@ -120,6 +122,11 @@ class FileLoader {
 
     FileStatus Status() const;
     std::string SoundPath() const;
+    // The waveform overview of the finished file with this sequence number, or null
+    // (no such file kept, an empty file, or no memory was left for the overview).
+    // The newest kKeptOverviews files keep theirs. Never throws; not the audio thread.
+    static constexpr std::size_t kKeptOverviews = 4;
+    std::shared_ptr<const WaveOverview> Overview(std::uint64_t sequence) const noexcept;
     // For tests: true once no request is waiting or being read.
     bool Idle() const;
     // For tests: whether the spare empty file is there.
@@ -133,8 +140,12 @@ class FileLoader {
     void Run();
     // Offers a window request's result if the request is still the newest. Takes the
     // mutex; never throws.
-    void Finish(std::uint64_t ticket, const std::string& path, WavResult result) noexcept;
-    void FinishUnchecked(std::uint64_t ticket, const std::string& path, WavResult& result);
+    void Finish(std::uint64_t ticket, const std::string& path, WavResult result,
+                std::shared_ptr<WaveOverview> overview) noexcept;
+    void FinishUnchecked(std::uint64_t ticket, const std::string& path, WavResult& result,
+                         std::shared_ptr<WaveOverview>& overview);
+    // Numbers the file and keeps its overview. Only with mutex_ held; never throws.
+    void NumberLocked(FileData& file, std::shared_ptr<WaveOverview> overview) noexcept;
     // An empty file; the spare one if memory has run out. Only with mutex_ held,
     // like every use of spare_empty_ (MS-R10).
     std::unique_ptr<FileData> TakeEmptyLocked(bool out_of_memory) noexcept;
@@ -153,6 +164,8 @@ class FileLoader {
     // An empty file, kept ready so that a project can fall silent even when no memory
     // is left; refilled after every result.
     std::unique_ptr<FileData> spare_empty_;
+    std::shared_ptr<const WaveOverview> overviews_[kKeptOverviews];
+    std::size_t next_overview_ = 0;
     std::thread worker_;
 };
 

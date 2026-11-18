@@ -1,6 +1,8 @@
 #pragma once
 
+#include "looper_engine.h"
 #include "view_layout.h"
+#include "wave_overview.h"
 
 #include "pluginterfaces/gui/iplugviewcontentscalesupport.h"
 #include "public.sdk/source/vst/vstguieditor.h"
@@ -24,12 +26,18 @@ namespace messier {
 
 struct FileStatus;
 class KeyboardView;
+class MapView;
 class ToggleButton;
+
+// The window's timer: how often it asks for the display (and, while a file loads,
+// for the file status). About 33 times a second.
+constexpr std::chrono::milliseconds kDisplayInterval{30};
 
 // Window size at zoom 1 on a display without scaling: title, file line, the
 // primary and secondary knobs, and below them the keyboard when it is shown.
 constexpr double kEditorWidth = 700;
-constexpr double kEditorTopHeight = 306;
+constexpr double kEditorMapHeight = 130; // the map of the sample (0.1.4)
+constexpr double kEditorTopHeight = 306 + kEditorMapHeight;
 constexpr double kKeyboardSectionHeight = 86;
 // Limits of the window zoom the user can choose by resizing.
 constexpr double kMinEditorZoom = 0.5;
@@ -121,7 +129,8 @@ struct EditorCallbacks {
     std::function<void(int note)> release;
     // The user chose a file to load (UTF-8 path).
     std::function<void(const std::string& path)> load;
-    // The window's timer: time to ask the processor how loading goes.
+    // The window's timer (kDisplayInterval): time to ask the processor for the
+    // display and how loading goes.
     std::function<void()> poll;
     // The RESET button was pressed.
     std::function<void()> reset;
@@ -165,6 +174,12 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     void ChooseFile();
     // Called by the controller with what the processor reports about the sample.
     void ShowFileStatus(const FileStatus& status) noexcept;
+    // Called by the controller with the newest display and the overview of its file
+    // (null if the controller has none). Kept while the window is closed, drawn
+    // while it is open.
+    void ShowDisplay(const EngineDisplay& display, std::shared_ptr<const WaveOverview> wave) noexcept;
+    // The map while the window is open, else nullptr. For tests.
+    const MapView* Map() const { return map_view_; }
     // What the window shows; empty while it is closed. For tests.
     std::string ShownFileName() const;
     std::string ShownFileInfo() const;
@@ -229,6 +244,9 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     ToggleButton* freeze_button_ = nullptr;
     VSTGUI::CTextLabel* file_name_ = nullptr;
     VSTGUI::CTextLabel* file_info_ = nullptr;
+    MapView* map_view_ = nullptr;
+    EngineDisplay shown_display_{};             // the newest display, also while closed
+    std::shared_ptr<const WaveOverview> shown_wave_;
     std::string file_name_text_, file_info_text_, file_tooltip_;
     bool file_warning_ = false;
     bool dialog_open_ = false;

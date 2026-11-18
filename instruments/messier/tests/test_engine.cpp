@@ -9,7 +9,10 @@
 //   * two instances do not disturb each other, also in two threads;
 //   * a file swap while playing: no click above the fade, no allocation;
 //   * Volume behind the core, exact at 100 %;
-//   * the display laws in parameters.h against the core's functions.
+//   * the display laws in parameters.h against the core's functions;
+//   * the window's display (0.1.4): reading it changes nothing in the sound, it
+//     shows the loop as the core applies it, the playhead inside it, the sounding
+//     grains, and the file the core reads, also through a swap.
 #define TEST_SUPPORT_COUNT_ALLOCATIONS
 #include "test_support.h"
 
@@ -21,6 +24,7 @@
 #include <xmmintrin.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -493,6 +497,132 @@ void TestVolume() {
                 "unchanged, steps glide in 5 ms\n");
 }
 
+std::vector<float> RenderWithDisplay(LooperEngine& engine, const Score& score, std::int64_t quanta,
+                                     std::uint64_t& checked, std::uint64_t& allocations) {
+    std::vector<float> out(static_cast<std::size_t>(quanta) * kQ * 2);
+    static const float silence[kQ] = {};
+    std::size_t next = 0;
+    for(std::int64_t q = 0; q < quanta; ++q) {
+        for(; next < score.size() && score[next].quantum == q; ++next)
+            ApplyToPlugin(engine, score[next], nullptr);
+        engine.Render(silence, silence, out.data() + q * kQ, out.data() + (quanta + q) * kQ);
+        EngineDisplay d;
+        {
+            const AllocationProbe probe;
+            engine.Display(d);
+            allocations += probe.Count();
+        }
+        const double frames = d.frames;
+        CHECK(d.frames == engine.CurrentFile()->frames && d.sequence == engine.CurrentFile()->sequence);
+        CHECK(d.loop_start >= 0 && d.loop_start < frames && d.loop_length >= 1
+              && d.loop_start + d.loop_length <= frames + 1);
+        CHECK(d.playhead >= d.loop_start && d.playhead < d.loop_start + d.loop_length);
+        CHECK(d.spray >= 0 && d.spray <= frames && d.grain_count <= EngineDisplay::kMaxGrains);
+        CHECK(d.frozen == (engine.Frozen() ? 1 : 0) && d.swapping == 0);
+        for(std::uint32_t i = 0; i < d.grain_count; ++i) {
+            const GrainDot& g = d.grains[i];
+            CHECK(g.position >= 0 && g.position <= frames && g.pan >= 0 && g.pan <= 1
+                  && g.phase >= 0 && g.phase <= 1);
+        }
+        ++checked;
+    }
+    return out;
+}
+
+void TestDisplay() {
+    const FlushDenormals flush;
+    const FileImage a = MakeImage(3 * 48000, 48000, 2, 51), b = MakeImage(48000, 44100, 1, 52);
+    auto file_a = ToFile(a), file_b = ToFile(b);
+    file_a->sequence = 7;
+    file_b->sequence = 8;
+
+    // Reading the display after every quantum leaves the sound bit for bit as it is,
+    // with every control moving, notes, Freeze and Reset (the display only reads).
+    const std::int64_t quanta = 1500;
+    const Score score = MakeScore(quanta, 53);
+    LooperEngine plain, shown;
+    plain.Reset(file_a.get(), StartSettings());
+    shown.Reset(file_a.get(), StartSettings());
+    std::uint64_t checked = 0, allocations = 0;
+    const std::vector<float> without = RenderPlugin(plain, score, quanta, nullptr);
+    const std::vector<float> with = RenderWithDisplay(shown, score, quanta, checked, allocations);
+    CHECK(without == with);
+    CHECK(plain.Position() == shown.Position() && plain.Resets() == shown.Resets());
+    CHECK(allocations == 0);
+
+    // The loop as the core applies START and SIZE, the playhead where the core is.
+    EngineSettings settings = StartSettings();
+    settings.control[static_cast<unsigned>(Control::Start)] = 0.25f;
+    settings.control[static_cast<unsigned>(Control::Size)] = 0.6f;
+    settings.control[static_cast<unsigned>(Control::Speed)] = 0.5f;
+    settings.control[static_cast<unsigned>(Control::PanRandom)] = 0.0f;
+    settings.control[static_cast<unsigned>(Control::Displacement)] = 0.0f;
+    settings.control[static_cast<unsigned>(Control::Spray)] = 0.5f;
+    LooperEngine engine;
+    engine.Reset(file_a.get(), settings);
+    static const float silence[kQ] = {};
+    float l[kQ], r[kQ];
+    std::uint32_t most_grains = 0;
+    bool pans_hard = true;
+    EngineDisplay d;
+    for(int q = 0; q < 750; ++q) {
+        engine.Render(silence, silence, l, r);
+        engine.Display(d);
+        most_grains = std::max(most_grains, d.grain_count);
+        for(std::uint32_t i = 0; i < d.grain_count; ++i)
+            pans_hard = pans_hard && (d.grains[i].pan == 0.0f || d.grains[i].pan == 1.0f);
+    }
+    const double frames = a.frames;
+    const double start = std::min(double(0.25f) * frames, frames - 1);
+    const double length = std::max(1.0, double(0.6f * 0.6f) * (frames - start));
+    CHECK(d.loop_start == start && d.loop_length == length);
+    double position = std::fmod(engine.Position(), length);
+    CHECK(d.playhead == start + position);
+    CHECK(std::fabs(d.spray - 0.25 * frames) < 1e-3 * frames); // the secondary, smoothed
+    // Grains sound, and without PAN RND the core puts them hard left and right.
+    CHECK(most_grains > 0 && pans_hard);
+
+    // Through a swap: the old file while it fades out, then the new one.
+    engine.SwapFile(file_b.get());
+    engine.Display(d);
+    CHECK(d.sequence == 7 && d.swapping == 1);
+    bool saw_new = false;
+    for(int q = 0; q < 20; ++q) {
+        engine.Render(silence, silence, l, r);
+        engine.Display(d);
+        if(d.sequence == 8) {
+            saw_new = true;
+            CHECK(d.frames == b.frames && d.swapping == 0 && d.playhead < b.frames);
+        } else {
+            CHECK(!saw_new && d.sequence == 7 && d.frames == a.frames);
+        }
+    }
+    CHECK(saw_new);
+    // What one read costs the audio thread (printed, not checked: timing on a shared
+    // machine). With many grains: DENSITY high.
+    engine.SetControl(Control::Density, 0.9f);
+    for(int q = 0; q < 200; ++q)
+        engine.Render(silence, silence, l, r);
+    const auto t0 = std::chrono::steady_clock::now();
+    std::uint32_t sink = 0;
+    constexpr int kReads = 100000;
+    for(int i = 0; i < kReads; ++i) {
+        engine.Display(d);
+        sink += d.grain_count;
+    }
+    const double ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count() / kReads;
+    std::printf("display: one read %.0f ns with %u grains, %zu bytes (%u summed)\n", ns, d.grain_count, sizeof(EngineDisplay), sink % 7);
+    // No file: nothing to show.
+    engine.Reset(nullptr, settings);
+    engine.Render(silence, silence, l, r);
+    engine.Display(d);
+    CHECK(d.frames == 0 && d.sequence == 0 && d.grain_count == 0);
+    std::printf("display: read after each of %llu quanta, the sound bit-identical, no allocation; "
+                "loop and playhead as the core applies them; up to %u grains, hard left and right "
+                "without PAN RND; the old file until the swap, then the new one\n",
+                static_cast<unsigned long long>(checked), most_grains);
+}
+
 void TestLaws() {
     int checked = 0;
     for(int i = 0; i <= 10000; ++i) {
@@ -526,6 +656,7 @@ int main() {
     TestLaws();
     TestVolume();
     TestSwap();
+    TestDisplay();
     TestTwoInstances();
     TestAgainstFirmware();
     std::printf("PASS messier.engine\n");

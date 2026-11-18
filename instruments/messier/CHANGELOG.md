@@ -1,5 +1,40 @@
 # Changes
 
+## 0.1.5 (2026-11-18)
+
+The four findings of Codex' check of 0.1.3 (`docs/CODEX_REVIEW_0.1.3.md`), fixed; details
+in `docs/CODEX_REVIEW_0.1.3_UMSETZUNG.md`. The sound is unchanged.
+
+* MS-R16: the WAV reader reports a want of memory with its own code (`kOutOfMemory`), no
+  longer as "too large"; a project whose valid file cannot be decoded for want of memory
+  is refused as a whole instead of being taken over silent with its path.
+* MS-R17: the status names the processor it comes from; a controller connected to a new
+  processor counts that processor's loads from its own zero (also from parameter 199
+  alone, before any status), and lets go of the old processor's waveform. The status
+  carries the full count, not only 16 bits of it.
+* MS-R18: a RESET press survives a process call without samples and an activation, also
+  when the adapter has already put it on a step not yet rendered.
+* MS-R19: the factory's create functions, `initialize`, `setupProcessing` and the rate
+  change in `setActive` let no exception out; without memory they answer `kOutOfMemory`,
+  and the streaming adapter (0.1.1) stays exactly as it was.
+
+## 0.1.4 (2026-11-18)
+
+The data path of the window (work order section 8), before its Atlas/Orion design;
+details in `docs/BUILD_REPORT_0.1.4.md`. The sound is unchanged.
+
+* The engine reports what the nebula map shows: the file the core reads, the loop as
+  the core applies START and SIZE, the playhead, the spray range and the sounding grains
+  (read position, panorama, phase). Core patch P4: three read-only accessors.
+* The loader makes a waveform overview (2048 columns of lowest and highest sample) from
+  the buffer the engine plays, off the audio thread, tagged with the file's number; the
+  window shows only the overview of the file the core reads, also through a swap.
+* While a window is open it asks about 33 times a second; the audio thread publishes
+  only then, without locks or allocation. Without a window nothing is drawn or
+  published.
+* A provisional map strip between the file line and the knobs shows it; the window is
+  130 pixels taller (700 x 436, 522 with the keyboard).
+
 ## 0.1.3 (2026-11-18)
 
 The five findings of Codex' check of 0.1.2 (`docs/CODEX_REVIEW_0.1.2.md`), fixed; details

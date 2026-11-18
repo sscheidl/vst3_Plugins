@@ -90,6 +90,28 @@ tresult PLUGIN_API Controller::initialize(FUnknown* context) {
     return kResultOk;
 }
 
+tresult PLUGIN_API Controller::connect(IConnectionPoint* other) {
+    const tresult result = EditController::connect(other);
+    if(result != kResultOk)
+        return result;
+    // MS-R17: the processor at the other end may be a new one, whose sequence numbers
+    // and load count start anew. Its first status names it.
+    peer_unconfirmed_ = true;
+    counted_from_parameter_ = false;
+    // Parameter 199 as a new processor starts it, so that its first value is a change
+    // even when it equals the old processor's last one. Nothing is counted here.
+    EditController::setParamNormalized(kParamSampleChanges, 0.0);
+    ForgetDisplay();
+    RequestFileStatus();
+    return kResultOk;
+}
+
+void Controller::ForgetDisplay() noexcept {
+    display_ = EngineDisplay{};
+    wave_ = nullptr;
+    ShowDisplay();
+}
+
 void Controller::AddParameters() {
     const struct {
         const TChar* title;
@@ -170,7 +192,7 @@ tresult PLUGIN_API Controller::setParamNormalized(ParamID tag, ParamValue value)
     // sound. The count in the value tells the host the project changed, whether or
     // not a status reply follows; the status then says which file it is.
     if(tag == kParamSampleChanges && getParamNormalized(tag) != before) {
-        CountUserLoads(SampleChangesCount(getParamNormalized(tag)));
+        CountFromParameter(SampleChangesCount(getParamNormalized(tag)));
         RequestFileStatus();
     }
     return result;
@@ -299,20 +321,64 @@ bool Controller::SendSimple(const char* id) noexcept {
     }
 }
 
+bool Controller::RequestDisplay() noexcept {
+    try {
+        IPtr<IMessage> message = owned(allocateMessage());
+        if(!message || !message->getAttributes())
+            return false;
+        message->setMessageID(kDisplayRequestId);
+        // The overview the controller holds, so the processor sends one only when the
+        // file changed.
+        message->getAttributes()->setInt(kAttrHaveWave,
+                                         wave_ ? static_cast<int64>(wave_->sequence) : 0);
+        return sendMessage(message) == kResultOk;
+    } catch(...) {
+        return false;
+    }
+}
+
+tresult Controller::ReadDisplay(IMessage* message) noexcept {
+    IAttributeList* attributes = message->getAttributes();
+    if(!attributes)
+        return kInvalidArgument;
+    const void* data = nullptr;
+    uint32 size = 0;
+    EngineDisplay display;
+    if(attributes->getBinary(kAttrFrame, data, size) != kResultOk
+       || !ReadDisplayBytes(data, size, display))
+        return kInvalidArgument;
+    display_ = display;
+    if(attributes->getBinary(kAttrWave, data, size) == kResultOk)
+        if(std::shared_ptr<const WaveOverview> wave = ReadOverviewBytes(data, size, display_))
+            wave_ = std::move(wave);
+    ShowDisplay();
+    return kResultOk;
+}
+
+void Controller::ShowDisplay() noexcept {
+    for(const OpenEditor& open : editors_)
+        open.editor->ShowDisplay(display_, ShownWave());
+}
+
 tresult PLUGIN_API Controller::notify(IMessage* message) {
+    if(message && message->getMessageID()
+       && std::strcmp(message->getMessageID(), kDisplayMessageId) == 0)
+        return ReadDisplay(message);
     if(!message || !message->getMessageID()
        || std::strcmp(message->getMessageID(), kStatusMessageId) != 0)
         return EditController::notify(message);
     try {
         IAttributeList* attributes = message->getAttributes();
         FileStatus status;
-        int64 code = 0, serial = 0, user_loads = 0;
+        int64 code = 0, serial = 0, user_loads = 0, processor = 0;
         if(!attributes || !GetText(attributes, kAttrPath, status.path)
            || !GetText(attributes, kAttrInfo, status.info) || !GetText(attributes, kAttrRequest, status.request)
            || !GetText(attributes, kAttrDetail, status.detail)
            || attributes->getInt(kAttrState, code) != kResultOk
            || attributes->getInt(kAttrSerial, serial) != kResultOk
-           || attributes->getInt(kAttrUserLoads, user_loads) != kResultOk)
+           || attributes->getInt(kAttrUserLoads, user_loads) != kResultOk
+           || attributes->getInt(kAttrProcessor, processor) != kResultOk || processor == 0
+           || user_loads < 0 || user_loads > 0xFFFFFFFFll)
             return kInvalidArgument;
         status.SetCode(static_cast<int>(code));
         status.serial = static_cast<std::uint32_t>(serial);
@@ -323,7 +389,7 @@ tresult PLUGIN_API Controller::notify(IMessage* message) {
         // leave the count alone.
         const std::uint32_t loads = status.user_loads;
         file_ = std::move(status);
-        CountUserLoads(loads & kSampleChangesMask);
+        CountFromStatus(static_cast<std::uint64_t>(processor), loads);
         ShowFile();
         return kResultOk;
     } catch(...) {
@@ -331,15 +397,58 @@ tresult PLUGIN_API Controller::notify(IMessage* message) {
     }
 }
 
-void Controller::CountUserLoads(std::uint32_t count) noexcept {
-    // MS-R12: one setDirty for each file from the window since the last count seen,
-    // whichever way the count came: parameter 199 or a status reply. Both carry it
-    // modulo 65536; a step backwards (a processor started anew) counts nothing.
+void Controller::CountFromParameter(std::uint32_t count) noexcept {
+    // MS-R12: parameter 199 alone marks the project, whether or not a status follows.
+    // It carries the count modulo 65536; a step forward of less than half of that is
+    // new loads (more than 32766 loads between two values the host passes on cannot
+    // happen at the pace files load).
     const std::uint32_t added = (count - user_loads_counted_) & kSampleChangesMask;
-    if(added == 0 || added >= kSampleChangesMask / 2)
+    if(added == 0)
         return;
-    user_loads_counted_ = count & kSampleChangesMask;
-    for(std::uint32_t i = 0; i < added; ++i)
+    if(added < kSampleChangesMask / 2) {
+        user_loads_counted_ += added;
+        MarkChanged(added);
+        return;
+    }
+    // A step back. On a connection that a status has confirmed, an old value: nothing.
+    // Right after a connect, before the new processor's first status, it is the count
+    // of a processor started anew (MS-R17): its loads, counted from its own zero; the
+    // status that follows names it and finds them counted.
+    if(!peer_unconfirmed_)
+        return;
+    counted_for_ = 0;
+    counted_from_parameter_ = true;
+    user_loads_counted_ = count;
+    MarkChanged(count);
+}
+
+void Controller::CountFromStatus(std::uint64_t processor, std::uint32_t count) noexcept {
+    // MS-R17: the count belongs to one processor. A processor not counted so far is
+    // counted from its own zero, unless parameter 199 has just done that (a step back
+    // after a connect). Counting a load twice only marks a project that has changed
+    // anyway; missing one could lose it.
+    peer_unconfirmed_ = false;
+    if(processor != counted_for_) {
+        if(!counted_from_parameter_)
+            user_loads_counted_ = 0;
+        if(counted_for_ != 0)
+            ForgetDisplay(); // another processor: its sequence numbers are its own
+        counted_for_ = processor;
+    }
+    counted_from_parameter_ = false;
+    // The full count: no limit on how many loads one status reports. A step back is
+    // an old reply.
+    if(count <= user_loads_counted_)
+        return;
+    const std::uint32_t added = count - user_loads_counted_;
+    user_loads_counted_ = count;
+    MarkChanged(added);
+}
+
+void Controller::MarkChanged(std::uint32_t loads) noexcept {
+    // One setDirty per load, as hosts may count them; a host needs only one to know.
+    constexpr std::uint32_t kMostCalls = 64;
+    for(std::uint32_t i = 0; i < std::min(loads, kMostCalls); ++i)
         setDirty(true);
 }
 
@@ -370,13 +479,16 @@ Editor* Controller::MakeEditor() {
     callbacks.release = [this](int note) { ReleaseNote(note); };
     callbacks.load = [this](const std::string& path) { LoadFile(path); };
     callbacks.reset = [this] { PressReset(); };
-    // While a file is being read, the window asks how it goes, ten times a second.
+    // While a file is being read, the window asks how it goes on every timer tick.
+    // On every tick it asks for what it shows (since 0.1.4).
     callbacks.poll = [this] {
         if(file_.request_state == RequestState::kLoading || file_.serial == 0)
             RequestFileStatus();
+        RequestDisplay();
     };
     auto* editor = new Editor(this, editor_, std::move(callbacks));
     editor->ShowFileStatus(file_); // never throws (MS-R15)
+    editor->ShowDisplay(display_, ShownWave()); // never throws
     return editor;
 }
 

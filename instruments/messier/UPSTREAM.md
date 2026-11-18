@@ -46,7 +46,7 @@ Only the hardware-free part of the firmware:
 | `core/reference_dsp.h` | `src/reference_dsp.h` | patched: F42 (P3 below) |
 | `core/reference_dsp.cpp` | `src/reference_dsp.cpp` | verbatim |
 | `core/pcm.h` | `src/pcm.h` | verbatim |
-| `core/engine.h` | `src/engine.h` | patched: P1 |
+| `core/engine.h` | `src/engine.h` | patched: P1, P4 |
 | `core/engine.cpp` | `src/engine.cpp` | verbatim |
 | `core/control.h`, `core/control.cpp` | `src/control.h`, `src/control.cpp` | verbatim |
 | `core/fft.h` | `src/fft.h` | verbatim: the interface of the vocoder's FFT |
@@ -133,6 +133,14 @@ compensated stagger, a work-around for the Cortex-M7 that delays the vocoder lay
 Global state: the core has none that can be written, apart from `profile::block`, which
 exists only with `NEBULAE_PROFILE=1`. The random generator is a member of `Engine`;
 the windows and the vocoder's work memory are members too.
+
+**P4, `engine.h`: read-only views for the window (0.1.4).** Three added `const` members,
+`DisplayGrains(channel)`, `DisplaySmoothed(i)` and `DisplaySecondary(i)`, which return
+the grain pool and the smoothed primary and secondary controls. The window's display
+(`LooperEngine::Display`) reads them after a quantum; they change no value. No effect
+on the sound: the bit-exact reference test runs the unpatched engine, and the engine
+test reads the display after every quantum and compares the output bit for bit with a
+run without.
 
 ## The pinned reference (`tests/reference/`)
 

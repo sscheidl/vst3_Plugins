@@ -23,7 +23,10 @@ namespace messier {
 // 256 MiB of PCM16: about 23 minutes of stereo at 48 kHz.
 constexpr std::uint64_t kMaxPcmBytes = 256ull * 1024 * 1024;
 
-enum class WavError : int { kNone = 0, kMissing, kInvalid, kTooLarge, kReadError };
+// kOutOfMemory (since 0.1.5, MS-R16): a valid file that could not be decoded for
+// want of memory, apart from kTooLarge, a file beyond the limit. A project load
+// refuses the project on it instead of falling silent.
+enum class WavError : int { kNone = 0, kMissing, kInvalid, kTooLarge, kReadError, kOutOfMemory };
 
 struct WavResult {
     WavError error = WavError::kNone;
@@ -54,7 +57,7 @@ void SetDetail(WavResult& result, const char* text) noexcept;
 std::int16_t FloatTo16(float value);
 
 // Decodes a WAV of `size` bytes from `in`.
-// Never throws: a failed allocation is the result kTooLarge, "out of memory" (MS-R01).
+// Never throws: a failed allocation is the result kOutOfMemory (MS-R01, MS-R16).
 WavResult DecodeWav(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes = kMaxPcmBytes) noexcept;
 
 // Opens and decodes the file at a UTF-8 path.

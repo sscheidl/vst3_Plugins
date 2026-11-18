@@ -74,6 +74,11 @@ class Engine : public Sink {
     // reads, instead of the one buffer given to Init. Only while the file is detached
     // (gate set and acknowledged), as the firmware writes its buffer only then.
     void SetFileBuffer(int16_t* file) {file_=file;}
+    // Messier patch P4 (UPSTREAM.md): read-only views for the window's display. They
+    // read what RenderGrains and the playhead already hold and change nothing.
+    const Grain* DisplayGrains(unsigned channel) const {return grains_[channel];}
+    float DisplaySmoothed(unsigned i) const {return smoothed_[i];}
+    float DisplaySecondary(unsigned i) const {return alt_[i];}
   private:
     // What the smoothing and the parameter laws follow.
     float ControlTarget(unsigned i) const {

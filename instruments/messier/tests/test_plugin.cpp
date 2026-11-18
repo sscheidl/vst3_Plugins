@@ -9,8 +9,10 @@
 #include "test_support.h"
 
 #include "controller.h"
+#include "display_data.h"
 #include "editor.h"
 #include "parameters.h"
+#include "plugin_ids.h"
 #include "processor.h"
 #include "reference_api.h"
 #include "state_io.h"
@@ -861,12 +863,12 @@ void TestViewLayout() {
     CHECK(white == kKeyboardWhiteKeys && black == 10);
     CHECK(ClampKeyboardTranspose(-36) == -24 && ClampKeyboardTranspose(13) == 12);
     const auto same = [](EditorSize a, EditorSize b) { return a.width == b.width && a.height == b.height; };
-    CHECK(same(EditorSizeFor(1.0, false), {700, 306}) && same(EditorSizeFor(1.0, true), {700, 392}));
+    CHECK(same(EditorSizeFor(1.0, false), {700, 436}) && same(EditorSizeFor(1.0, true), {700, 522}));
     using Clock = DragConstraint::Clock;
     Clock::time_point now{};
     DragConstraint drag;
     now += std::chrono::milliseconds(10);
-    CHECK(same(drag.Apply({1050, 306}, {700, 306}, 1.0, false, now), {1050, 459}));
+    CHECK(same(drag.Apply({1050, 436}, {700, 436}, 1.0, false, now), {1050, 654}));
     for(const bool keyboard : {false, true})
         for(int w = 200; w <= 1600; w += 7)
             for(int h = 80; h <= 900; h += 31) {
@@ -880,7 +882,7 @@ void TestViewLayout() {
                 const EditorSize size = EditorSizeFor(scale * zoom, keyboard);
                 CHECK(std::fabs(EditorZoomForSize(size.width, size.height, scale, keyboard) - zoom) < 0.005);
             }
-    std::printf("layout: 25 keys where they are drawn; window 700 x 306 (392 with keys), aspect "
+    std::printf("layout: 25 keys where they are drawn; window 700 x 436 (522 with keys), aspect "
                 "ratio and zoom limits kept\n");
 }
 
@@ -1027,6 +1029,38 @@ void TestResetButtonThroughHost() {
     const std::uint32_t after_restart = resets(); // a fresh engine counts from 0
     block();
     CHECK(resets() == after_restart + 1);
+    auto reactivate = [&] {
+        host.processor->setProcessing(false);
+        CHECK(host.processor->setActive(false) == kResultOk);
+        CHECK(host.processor->setActive(true) == kResultOk);
+        host.processor->setProcessing(true);
+    };
+    // MS-R18: a press, a call with no samples, then an activation: it acts after it.
+    editor->PressReset();
+    host.Process(0);
+    reactivate();
+    const std::uint32_t after_empty = resets();
+    block();
+    CHECK(resets() == after_empty + 1);
+    // An automated press that the adapter has put on a quantum not rendered yet (a
+    // one-sample block in the middle of a quantum), then an activation: it acts too.
+    host.Process(1);
+    {
+        int32 point = 0;
+        handler.changes.addParameterData(kParamReset, point)->addPoint(0, 1.0, point);
+    }
+    host.Process(1);
+    handler.changes.clearQueue();
+    CHECK(host.processor->Adapter().ControlWaiting(static_cast<int>(kResetControl)));
+    reactivate();
+    const std::uint32_t after_waiting = resets();
+    block();
+    CHECK(resets() == after_waiting + 1);
+    {
+        int32 point = 0; // the button let go again, as a host's automation would
+        handler.changes.addParameterData(kParamReset, point)->addPoint(0, 0.0, point);
+        block();
+    }
     // Two presses in two host blocks of one sample each: each acts, unless both fall
     // into one 64-sample quantum the engine has not rendered yet; then they are one
     // restart from START (the same sound; documented). Never none.
@@ -1051,7 +1085,9 @@ void TestResetButtonThroughHost() {
     CHECK(controller->terminate() == kResultOk);
     CHECK(host.allocations == 0);
     std::printf("reset button: every press from the window reaches the processor, also when the "
-                "window closes at once and three in a row; automation of parameter 121 still acts\n");
+                "window closes at once, three in a row, and across an activation after a call with "
+                "no samples or with the press still waiting in the adapter; automation of "
+                "parameter 121 still acts\n");
 }
 
 // MS-R07: audio blocks between the moment the project's file is handed over and the
@@ -1184,6 +1220,254 @@ void TestFileChangeMarksProject() {
                 "and a project do not\n");
 }
 
+// Parameter 199 from the processor's output, as a host passes it to the controller.
+void PassSampleChanges(PluginHost& host, Controller& controller) {
+    ParameterChanges& out = host.OutChanges();
+    for(int32 i = 0; i < out.getParameterCount(); ++i) {
+        IParamValueQueue* queue = out.getParameterData(i);
+        int32 offset = 0;
+        ParamValue value = 0.0;
+        if(queue && queue->getParameterId() == kParamSampleChanges
+           && queue->getPoint(queue->getPointCount() - 1, offset, value) == kResultOk)
+            controller.setParamNormalized(kParamSampleChanges, value);
+    }
+}
+
+// MS-R17: a host that keeps the controller and gives it a new processor. The new
+// processor's loads mark the project from its first one on, with and without a
+// status reply, and the display of the old processor's files is let go.
+void TestNewProcessorSameController() {
+    IPtr<HostApplication> app = owned(new HostApplication());
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(app) == kResultOk);
+    CoalescingHandler handler;
+    CHECK(controller->setComponentHandler(&handler) == kResultOk);
+    auto* controller_point = static_cast<IConnectionPoint*>(controller.get());
+    int expected = 0;
+    for(int round = 0; round < 3; ++round) {
+        // Rounds 0 and 1 connect both ways; in round 2 the processor's way back is
+        // never there, so no status arrives: parameter 199 alone.
+        const bool replies = round < 2;
+        PluginHost host({});
+        auto* processor_point = static_cast<IConnectionPoint*>(host.processor.get());
+        if(replies)
+            CHECK(processor_point->connect(controller_point) == kResultOk);
+        CHECK(controller_point->connect(processor_point) == kResultOk);
+        CHECK(!controller->Wave() && controller->Display().frames == 0);
+        auto block = [&] {
+            host.Process(256);
+            PassSampleChanges(host, *controller);
+        };
+        // One load in round 0, so that the new processor's first value of parameter 199
+        // in round 1 equals the last one the controller holds.
+        for(int load = 0; load < (round == 0 ? 1 : 2); ++load) {
+            CHECK(controller->LoadFile(load ? g_path_mono : g_path));
+            CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
+            block();
+            block();
+            ++expected;
+            if(handler.dirty != expected)
+                std::printf("FAIL round %d, load %d: %d setDirty, %d expected\n", round, load,
+                            handler.dirty, expected);
+            CHECK(handler.dirty == expected);
+        }
+        if(round == 0) {
+            // The display of this processor's file, for the next round to let go.
+            CHECK(controller->RequestDisplay());
+            block();
+            CHECK(controller->RequestDisplay());
+            CHECK(controller->Wave() && controller->Display().frames != 0);
+        }
+        // Status replies and repeated values count nothing more.
+        CHECK(controller->RequestFileStatus());
+        block();
+        CHECK(handler.dirty == expected);
+        if(replies)
+            CHECK(processor_point->disconnect(controller_point) == kResultOk);
+        CHECK(controller_point->disconnect(processor_point) == kResultOk);
+    }
+    CHECK(controller->terminate() == kResultOk);
+    std::printf("new processor, same controller: each of its loads marks the project from the "
+                "first on, with and without status replies; the old display is let go\n");
+}
+
+// MS-R16: a valid project file whose decoding runs out of memory. setState refuses
+// the project: the old one plays on and is what getState saves.
+void TestProjectWithoutMemory() {
+#if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
+    PluginHost host({});
+    CHECK(LoadState(*host.processor, MakeState(StartValues(), g_path)) == kResultOk);
+    host.Run(256, 64);
+    const std::uint32_t frames = host.processor->Engine().CurrentFile()->frames;
+    CHECK(frames != 0);
+    const std::uint64_t failed_before = test_support::g_failed_allocations;
+    // The reader's conversion buffer: 1 MiB and its alignment.
+    test_support::g_fail_size_from = std::size_t(1) << 20;
+    test_support::g_fail_size_to = (std::size_t(1) << 20) + 64;
+    const tresult refused = LoadState(*host.processor, MakeState(DefaultValues(), g_path_mono));
+    test_support::g_fail_size_to = 0;
+    CHECK(test_support::g_failed_allocations > failed_before);
+    CHECK(refused == kOutOfMemory);
+    host.Run(256, 64);
+    CHECK(host.processor->Engine().CurrentFile()->frames == frames);
+    CHECK(host.processor->Loader().SoundPath() == g_path);
+    MemoryStream stream;
+    CHECK(host.processor->getState(&stream) == kResultOk);
+    stream.seek(0, IBStream::kIBSeekSet, nullptr);
+    SavedState saved;
+    CHECK(ReadSavedState(&stream, saved) && saved.path == g_path);
+    // With memory the same project loads.
+    CHECK(LoadState(*host.processor, MakeState(DefaultValues(), g_path_mono)) == kResultOk);
+    host.Run(256, 64);
+    CHECK(host.processor->Loader().SoundPath() == g_path_mono);
+    std::printf("project without memory to decode its file: refused, the old project plays on "
+                "and is saved\n");
+#else
+    std::printf("project without memory: Release builds only (Debug STL proxies)\n");
+#endif
+}
+
+// The window's display (0.1.4), from the engine through the processor and the
+// controller to the window: nothing is published until a window asks, the reply
+// shows the file the core reads with the overview of that very file, the overview
+// travels once per file, and the sound is bit for bit the same with requests on
+// every block. Damaged display messages are refused.
+void TestDisplayPath() {
+    const HostScore score = Performance(48000.0, 3 * 48000, 61);
+    PluginHost quiet({}, score), watched({}, score);
+    CHECK(LoadState(*quiet.processor, MakeState(StartValues(), g_path)) == kResultOk);
+    CHECK(LoadState(*watched.processor, MakeState(StartValues(), g_path)) == kResultOk);
+    IPtr<HostApplication> app = owned(new HostApplication());
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(app) == kResultOk);
+    auto* processor_point = static_cast<IConnectionPoint*>(watched.processor.get());
+    auto* controller_point = static_cast<IConnectionPoint*>(controller.get());
+    CHECK(processor_point->connect(controller_point) == kResultOk);
+    CHECK(controller_point->connect(processor_point) == kResultOk);
+
+    // Blocks before any request publish nothing: the first reply is empty.
+    watched.Run(4800, 256);
+    quiet.Run(4800, 256);
+    CHECK(controller->RequestDisplay());
+    CHECK(controller->Display().frames == 0 && controller->Wave() == nullptr);
+    // From now on a request after every block, as an open window's timer would.
+    const WaveOverview* first_wave = nullptr;
+    int with_wave = 0, requests = 0;
+    std::uint64_t most_grains = 0;
+    VaryingBlocks blocks;
+    while(watched.position < 3 * 48000) {
+        const int n = blocks();
+        watched.Process(n);
+        quiet.Process(n);
+        CHECK(controller->RequestDisplay());
+        ++requests;
+        const EngineDisplay& d = controller->Display();
+        CHECK(d.frames == g_image.frames && d.sequence != 0);
+        CHECK(d.playhead >= d.loop_start && d.playhead < d.loop_start + d.loop_length);
+        most_grains = std::max<std::uint64_t>(most_grains, d.grain_count);
+        const WaveOverview* wave = controller->Wave();
+        CHECK(wave && wave->sequence == d.sequence && wave->frames == d.frames
+              && wave->columns == WaveOverview::kMaxColumns);
+        if(!first_wave)
+            first_wave = wave;
+        with_wave += wave == first_wave ? 1 : 0;
+    }
+    // The overview came once and stayed the same object: sent only with a new file.
+    CHECK(with_wave == requests);
+    // The overview is that of the file's samples: the loudest column is as loud as
+    // the file's loudest sample.
+    int peak = 0, file_peak = 0;
+    for(std::uint32_t c = 0; c < first_wave->columns; ++c)
+        peak = std::max({peak, -int(first_wave->low[c]), int(first_wave->high[c])});
+    for(const std::int16_t x : g_image.pcm)
+        file_peak = std::max(file_peak, std::abs(int(x)));
+    CHECK(peak == file_peak);
+    // Watching changes nothing in the sound and costs the audio thread no allocation.
+    CHECK(quiet.Stereo() == watched.Stereo());
+    CHECK(watched.allocations == 0 && most_grains > 0);
+
+    // A file from the window: after the swap the display shows the new file with its
+    // own overview; before it, the old one.
+    const std::uint64_t old_sequence = controller->Display().sequence;
+    CHECK(controller->LoadFile(g_path_mono));
+    CHECK(WaitFor([&] { return watched.processor->Loader().Idle(); }));
+    bool saw_new = false;
+    for(int i = 0; i < 40 && !saw_new; ++i) {
+        watched.Process(64);
+        CHECK(controller->RequestDisplay());
+        const EngineDisplay& d = controller->Display();
+        if(d.sequence != old_sequence) {
+            saw_new = true;
+            CHECK(d.sequence > old_sequence && d.frames == g_image_mono.frames);
+            CHECK(controller->Wave() && controller->Wave()->frames == g_image_mono.frames);
+        } else {
+            CHECK(d.frames == g_image.frames && controller->Wave() == first_wave);
+        }
+    }
+    CHECK(saw_new);
+    // A window opened later starts from what the controller holds.
+    IPtr<IPlugView> view = owned(controller->createView(ViewType::kEditor));
+    CHECK(view);
+    CHECK(processor_point->disconnect(controller_point) == kResultOk);
+    CHECK(controller_point->disconnect(processor_point) == kResultOk);
+    view = nullptr;
+    CHECK(controller->terminate() == kResultOk);
+
+    // Damaged messages: refused, the controller keeps what it had.
+    EngineDisplay good;
+    good.sequence = 5;
+    good.frames = 1000;
+    good.loop_start = 100;
+    good.loop_length = 500;
+    good.playhead = 200;
+    good.grain_count = 1;
+    good.grains[0] = {300.0f, 0.5f, 0.25f};
+    EngineDisplay read;
+    CHECK(ReadDisplayBytes(&good, sizeof good, read) && read.grain_count == 1);
+    auto refused = [&](auto damage) {
+        EngineDisplay bad = good;
+        damage(bad);
+        return !ReadDisplayBytes(&bad, sizeof bad, read);
+    };
+    CHECK(!ReadDisplayBytes(&good, sizeof good - 1, read) && !ReadDisplayBytes(nullptr, sizeof good, read));
+    CHECK(refused([](EngineDisplay& d) { d.grain_count = EngineDisplay::kMaxGrains + 1; }));
+    CHECK(refused([](EngineDisplay& d) { d.playhead = std::nan(""); }));
+    CHECK(refused([](EngineDisplay& d) { d.playhead = 1e9; }));
+    CHECK(refused([](EngineDisplay& d) { d.frozen = 2; }));
+    CHECK(refused([](EngineDisplay& d) { d.grains[0].pan = 1.5f; }));
+    CHECK(refused([](EngineDisplay& d) { d.sequence = 0; }));
+    CHECK(refused([](EngineDisplay& d) { d.frames = 0; })); // no file, yet a sequence
+    // A long file (above 2^24 frames): positions as floats round to just beyond the
+    // last frame, and are taken.
+    EngineDisplay long_file = good;
+    long_file.frames = 50000003;
+    long_file.loop_length = 50000003;
+    long_file.spray = static_cast<float>(50000003.0);                 // 50000004
+    long_file.grains[0].position = static_cast<float>(50000002.9);   // 50000004
+    CHECK(double(long_file.grains[0].position) > long_file.frames);
+    CHECK(ReadDisplayBytes(&long_file, sizeof long_file, read));
+    auto wave = std::make_unique<WaveOverview>();
+    wave->sequence = 5;
+    wave->frames = 1000;
+    wave->columns = 1000;
+    CHECK(ReadOverviewBytes(wave.get(), sizeof(WaveOverview), good) != nullptr);
+    wave->sequence = 6;
+    CHECK(!ReadOverviewBytes(wave.get(), sizeof(WaveOverview), good)); // another file's
+    wave->sequence = 5;
+    wave->columns = 1001;
+    CHECK(!ReadOverviewBytes(wave.get(), sizeof(WaveOverview), good));
+    wave->columns = 1000;
+    wave->low[3] = 10;
+    wave->high[3] = 9;
+    CHECK(!ReadOverviewBytes(wave.get(), sizeof(WaveOverview), good));
+    CHECK(!ReadOverviewBytes(wave.get(), sizeof(WaveOverview) - 2, good));
+    std::printf("display path: nothing published before a window asks; %d replies show the file the "
+                "core reads with its own overview, sent once; up to %llu grains; the sound "
+                "bit-identical with and without, no allocation in process; the new file after "
+                "the swap; damaged messages refused\n",
+                requests, static_cast<unsigned long long>(most_grains));
+}
+
 // MS-R01, MS-R06: no host call lets an exception out. Every allocation the call
 // makes in this thread fails in turn, the first, the second, and so on, until the call
 // gets through. Release builds only: in Debug builds the standard library allocates a
@@ -1217,9 +1501,32 @@ void TestNoExceptionLeavesHostCalls() {
     status->getAttributes()->setInt(kAttrState, 1);
     status->getAttributes()->setInt(kAttrSerial, 7);
     status->getAttributes()->setInt(kAttrUserLoads, 0);
+    status->getAttributes()->setInt(kAttrProcessor, 12345);
     IPtr<IMessage> load = owned(new HostMessage());
     load->setMessageID(kLoadMessageId);
     load->getAttributes()->setBinary(kAttrPath, g_path.data(), static_cast<uint32>(g_path.size()));
+    // The display (0.1.4): a request that the processor answers with a frame and the
+    // overview of the file playing (the controller claims to hold none), and a reply
+    // as the controller receives it.
+    CHECK(LoadState(*host.processor, project) == kResultOk);
+    host.Run(256, 256);
+    IPtr<IMessage> display_request = owned(new HostMessage());
+    display_request->setMessageID(kDisplayRequestId);
+    display_request->getAttributes()->setInt(kAttrHaveWave, 0);
+    CHECK(host.processor->notify(display_request) == kResultOk);
+    host.Run(256, 256);
+    EngineDisplay frame;
+    frame.sequence = 999;
+    frame.frames = 1000;
+    frame.loop_length = 1000;
+    auto wave = std::make_unique<WaveOverview>();
+    wave->sequence = 999;
+    wave->frames = 1000;
+    wave->columns = 1000;
+    IPtr<IMessage> display_reply = owned(new HostMessage());
+    display_reply->setMessageID(kDisplayMessageId);
+    display_reply->getAttributes()->setBinary(kAttrFrame, &frame, sizeof frame);
+    display_reply->getAttributes()->setBinary(kAttrWave, wave.get(), sizeof(WaveOverview));
     const std::vector<Call> calls = {
         {"controller setComponentState", [&] {
              MemoryStream stream;
@@ -1263,11 +1570,56 @@ void TestNoExceptionLeavesHostCalls() {
              IPtr<IPlugView> made = owned(controller->createView(ViewType::kEditor));
              return made ? kResultOk : kResultFalse;
          }},
+        {"processor notify (display request)", [&] { return host.processor->notify(display_request); }},
+        {"controller notify (display)", [&] { return controller->notify(display_reply); }},
+        // MS-R19: what the factory calls, and the processor's life cycle: initialize,
+        // an activation at another rate than the adapter's (44.1 kHz, the SDK's default
+        // setup, against the 48 kHz of initialize), setupProcessing to 96 kHz.
+        {"factory: processor, initialize, setActive, setupProcessing", [&] {
+             FUnknown* made = CreateProcessorInstance(nullptr);
+             if(!made)
+                 return static_cast<tresult>(kOutOfMemory);
+             IPtr<Processor> made_processor = owned(static_cast<Processor*>(static_cast<IAudioProcessor*>(made)));
+             tresult result = made_processor->initialize(app);
+             if(result == kResultOk) {
+                 result = made_processor->setActive(true);
+                 if(result == kResultOk) {
+                     CHECK(made_processor->Adapter().HostRate() == 44100.0);
+                     made_processor->setActive(false);
+                     ProcessSetup setup{kRealtime, kSample32, 512, 96000.0};
+                     result = made_processor->setupProcessing(setup);
+                     if(result == kResultOk) {
+                         CHECK(made_processor->Adapter().HostRate() == 96000.0);
+                         result = made_processor->setActive(true);
+                         made_processor->setActive(false);
+                     } else {
+                         CHECK(made_processor->Adapter().HostRate() == 44100.0); // as it was
+                     }
+                 } else {
+                     CHECK(made_processor->Adapter().HostRate() == 48000.0); // as it was
+                 }
+                 made_processor->terminate();
+             }
+             return result;
+         }},
+        {"factory: controller, initialize", [&] {
+             FUnknown* made = CreateControllerInstance(nullptr);
+             if(!made)
+                 return static_cast<tresult>(kOutOfMemory);
+             IPtr<Controller> made_controller = owned(static_cast<Controller*>(static_cast<IEditController*>(made)));
+             const tresult result = made_controller->initialize(app);
+             made_controller->terminate();
+             return result;
+         }},
+        {"controller connect", [&] {
+             controller_point->disconnect(processor_point);
+             return controller_point->connect(processor_point);
+         }},
     };
     for(const Call& call : calls) {
         int failures = 0;
         bool through = false;
-        for(long long after = 0; after < 400 && !through; ++after) {
+        for(long long after = 0; after < 2000 && !through; ++after) {
             test_support::g_failed_allocations = 0;
             test_support::g_fail_after = after;
             test_support::g_fail_armed = true;
@@ -1297,8 +1649,8 @@ void TestNoExceptionLeavesHostCalls() {
     CHECK(processor_point->disconnect(controller_point) == kResultOk);
     CHECK(controller_point->disconnect(processor_point) == kResultOk);
     CHECK(controller->terminate() == kResultOk);
-    std::printf("host calls: no exception leaves them, whichever allocation fails (nine calls, "
-                "parameter texts and the window included)\n");
+    std::printf("host calls: no exception leaves them, whichever allocation fails (fourteen calls, "
+                "parameter texts, the window, the display, the factory and the life cycle included)\n");
 #else
     std::printf("host calls under failing allocations: Release builds only (Debug STL proxies)\n");
 #endif
@@ -1326,7 +1678,10 @@ int main() {
     TestResetButtonThroughHost();
     TestProjectHandoverGap();
     TestFileChangeMarksProject();
+    TestDisplayPath();
     TestNoExceptionLeavesHostCalls();
+    TestNewProcessorSameController();
+    TestProjectWithoutMemory();
     TestActivation();
     TestTwoInstances();
     TestSampleRates();

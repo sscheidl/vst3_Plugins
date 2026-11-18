@@ -40,7 +40,7 @@
 
 namespace messier {
 
-constexpr const char* kAdapterVersion = "0.1.0";
+constexpr const char* kAdapterVersion = "0.1.1";
 
 struct EngineEvent {
     enum Type : std::uint8_t { kNoteOn, kNoteOff, kAllNotesOff, kControl, kPitchBend };
@@ -74,9 +74,11 @@ class StreamAdapter {
     explicit StreamAdapter(QuantumEngine& engine) : engine_(engine) {}
 
     // Sets the host rate and allocates everything Process() needs, then
-    // resets. False for a rate outside kMinHostRate..kMaxHostRate; the
-    // adapter then keeps its previous rate. Not for the audio thread.
-    bool Prepare(double host_rate);
+    // resets. False for a rate outside kMinHostRate..kMaxHostRate, and (since
+    // 0.1.1, Messier MS-R19) when memory runs out; either way the adapter stays
+    // exactly as it was, rate, buffers and waiting events. Never throws. Not for
+    // the audio thread.
+    bool Prepare(double host_rate) noexcept;
 
     // Time back to zero: no waiting events, empty buffers, filter history
     // cleared. Does not touch the engine. Does not allocate or lock.
@@ -112,6 +114,11 @@ class StreamAdapter {
     std::uint64_t HostPosition() const { return host_pos_; }
     std::int64_t RenderedSamples() const { return rendered_; }
     int PendingEvents() const;
+    // Whether a point of control `index` waits for its quantum (Messier MS-R18: a
+    // RESET press that a Reset() would otherwise drop).
+    bool ControlWaiting(int index) const {
+        return index >= 0 && index < kControlKinds && controls_[static_cast<std::size_t>(index)].count > 0;
+    }
     std::uint64_t DroppedNotes() const { return dropped_notes_; }
     std::uint64_t DroppedControlPoints() const { return dropped_control_points_; }
     std::size_t AllocatedBytes() const;

@@ -37,9 +37,24 @@ void SetText(IAttributeList* attributes, const char* id, const std::string& text
     attributes->setBinary(id, text.data(), static_cast<uint32>(text.size()));
 }
 
+// A number for this processor instance (MS-R17): different for every instance of
+// this process, and, by the time and the address mixed in, most likely different
+// from those of another process. Never 0.
+std::uint64_t MakeInstanceId(const void* address) noexcept {
+    static std::atomic<std::uint64_t> made{0};
+    std::uint64_t x = static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count())
+                      ^ (made.fetch_add(1, std::memory_order_relaxed) << 40)
+                      ^ static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(address));
+    // splitmix64's finaliser
+    x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
+    x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
+    x ^= x >> 31;
+    return x ? x : 1;
+}
+
 } // namespace
 
-Processor::Processor() {
+Processor::Processor() : instance_id_(MakeInstanceId(this)) {
     setControllerClass(kControllerUID);
 }
 
@@ -61,13 +76,23 @@ tresult PLUGIN_API Processor::initialize(FUnknown* context) {
     const tresult result = AudioEffect::initialize(context);
     if(result != kResultOk)
         return result;
-    // The sidechain of 0.2.0, inactive by default, read by nothing in 0.1.0.
-    addAudioInput(STR16("Sidechain"), SpeakerArr::kStereo, kAux, 0);
-    addAudioOutput(STR16("Stereo Out"), SpeakerArr::kStereo);
-    addEventInput(STR16("MIDI In"), 16);
-    // The screen keyboard's notes, for the host to record or pass on.
-    addEventOutput(STR16("MIDI Out"), 1);
-    adapter_.Prepare(StreamAdapter::kInternalRate);
+    // MS-R19: the buses are allocated; without memory the call fails, the buses made
+    // so far are let go, and nothing leaves it as an exception.
+    try {
+        // The sidechain of 0.2.0, inactive by default, read by nothing in 0.1.0.
+        addAudioInput(STR16("Sidechain"), SpeakerArr::kStereo, kAux, 0);
+        addAudioOutput(STR16("Stereo Out"), SpeakerArr::kStereo);
+        addEventInput(STR16("MIDI In"), 16);
+        // The screen keyboard's notes, for the host to record or pass on.
+        addEventOutput(STR16("MIDI Out"), 1);
+    } catch(...) {
+        removeAllBusses();
+        return kOutOfMemory;
+    }
+    if(!adapter_.Prepare(StreamAdapter::kInternalRate)) {
+        removeAllBusses();
+        return kOutOfMemory;
+    }
     Restart(state_.Current(), nullptr);
     return kResultOk;
 }
@@ -96,11 +121,16 @@ tresult PLUGIN_API Processor::setupProcessing(ProcessSetup& setup) {
     RateRatio ratio;
     if(!MakeRateRatio(setup.sampleRate, ratio))
         return kResultFalse;
+    const ProcessSetup before = processSetup;
     const tresult result = AudioEffect::setupProcessing(setup);
     if(result != kResultOk)
         return result;
-    if(!adapter_.Prepare(setup.sampleRate))
-        return kResultFalse;
+    // The rate is valid, so a failure is memory (MS-R19). The adapter is then as it
+    // was, and so is the setup: nothing half changed.
+    if(!adapter_.Prepare(setup.sampleRate)) {
+        processSetup = before;
+        return kOutOfMemory;
+    }
     latency_.store(static_cast<uint32>(adapter_.LatencySamples()));
     return kResultOk;
 }
@@ -197,9 +227,14 @@ FileData* Processor::TakeWindowFile() {
 }
 
 void Processor::Restart(const ParameterState::Values& values, const FileData* incoming) {
+    // MS-R18: a RESET press the adapter has put on a quantum not yet rendered would
+    // be dropped by its Reset(); it acts in the first quantum of the new start.
+    const bool reset_waiting = adapter_.ControlWaiting(static_cast<int>(kResetControl));
     adapter_.Reset();
     engine_.Reset(incoming ? incoming : engine_.NextFile(), SettingsFrom(values));
     reset_pressed_ = false;
+    if(reset_waiting)
+        adapter_.AddEvent(0, ResetEvent());
     RetireReleased();
 }
 
@@ -208,8 +243,14 @@ tresult PLUGIN_API Processor::setActive(TBool state) {
     while(keyboard_notes_.Pop(stale)) {}
     if(state) {
         const double rate = processSetup.sampleRate;
-        if(rate > 0.0 && rate != adapter_.HostRate() && adapter_.Prepare(rate))
+        if(rate > 0.0 && rate != adapter_.HostRate()) {
+            // MS-R19: without memory for the new rate the processor does not become
+            // active; the adapter stays as it was.
+            RateRatio ratio;
+            if(MakeRateRatio(rate, ratio) && !adapter_.Prepare(rate))
+                return kOutOfMemory;
             latency_.store(static_cast<uint32>(adapter_.LatencySamples()));
+        }
         // Not the audio thread: files waiting for the retire queue can be freed here,
         // so that a loaded project and its file are always taken together.
         for(std::size_t i = 0; i < backlog_count_; ++i)
@@ -462,16 +503,17 @@ tresult PLUGIN_API Processor::process(ProcessData& data) {
     if(!TakeHandovers(true))
         if(FileData* file = TakeWindowFile())
             engine_.SwapFile(file);
+    const int32 num_samples = std::max<int32>(data.numSamples, 0);
     // The window's RESET presses (MS-R08). Presses that reach one block act once:
-    // the same restart from START.
-    if(reset_presses_.exchange(0, std::memory_order_acq_rel) > 0) {
+    // the same restart from START. A call without samples leaves them waiting
+    // (MS-R18): it renders nothing, and an activation after it would drop them.
+    if(num_samples > 0 && reset_presses_.exchange(0, std::memory_order_acq_rel) > 0) {
         const auto pressed = Clock::time_point(Clock::duration(last_reset_press_.load()));
         if(Clock::now() - pressed <= kKeyboardNoteLifetime)
             adapter_.AddEvent(0, ResetEvent());
     }
     ReportSampleChanges(data.outputParameterChanges);
 
-    const int32 num_samples = std::max<int32>(data.numSamples, 0);
     if(data.inputParameterChanges)
         ReadParameterChanges(*data.inputParameterChanges, num_samples);
     if(num_samples > 0)
@@ -481,6 +523,14 @@ tresult PLUGIN_API Processor::process(ProcessData& data) {
     if(num_samples > 0)
         Render(data);
     RetireReleased();
+    // The window's display: only when asked, a copy of a few hundred bytes. Reads the
+    // engine and changes nothing in it.
+    if(display_wanted_.load(std::memory_order_relaxed)
+       && display_wanted_.exchange(false, std::memory_order_acq_rel)) {
+        EngineDisplay display;
+        engine_.Display(display);
+        display_.Publish(display);
+    }
     return kResultOk;
 }
 
@@ -553,6 +603,40 @@ void Processor::SendFileStatusUnchecked() {
     attributes->setInt(kAttrState, status.Code());
     attributes->setInt(kAttrSerial, status.serial);
     attributes->setInt(kAttrUserLoads, status.user_loads);
+    attributes->setInt(kAttrProcessor, static_cast<int64>(instance_id_));
+    sendMessage(message);
+}
+
+void Processor::SendDisplay(IMessage* request) noexcept {
+    try {
+        SendDisplayUnchecked(request);
+    } catch(...) {
+        // No memory for the reply: the window asks again on its next tick.
+    }
+}
+
+void Processor::SendDisplayUnchecked(IMessage* request) {
+    display_wanted_.store(true, std::memory_order_release);
+    EngineDisplay newest;
+    if(display_.Take(newest))
+        last_display_ = newest;
+    int64 have_wave = 0;
+    if(IAttributeList* asked = request->getAttributes())
+        asked->getInt(kAttrHaveWave, have_wave);
+    IPtr<IMessage> message = owned(allocateMessage());
+    if(!message || !message->getAttributes())
+        return;
+    message->setMessageID(kDisplayMessageId);
+    IAttributeList* attributes = message->getAttributes();
+    attributes->setBinary(kAttrFrame, &last_display_, sizeof(EngineDisplay));
+    // The overview of the very file the core reads, if the controller lacks it. One
+    // that is no longer kept (or never made) is not sent: the window shows none.
+    std::shared_ptr<const WaveOverview> overview;
+    if(last_display_.sequence != 0
+       && static_cast<std::uint64_t>(have_wave) != last_display_.sequence)
+        overview = loader_.Overview(last_display_.sequence);
+    if(overview)
+        attributes->setBinary(kAttrWave, overview.get(), sizeof(WaveOverview));
     sendMessage(message);
 }
 
@@ -577,6 +661,10 @@ tresult PLUGIN_API Processor::notify(IMessage* message) {
     }
     if(std::strcmp(id, kStatusRequestId) == 0) {
         SendFileStatus();
+        return kResultOk;
+    }
+    if(std::strcmp(id, kDisplayRequestId) == 0) {
+        SendDisplay(message);
         return kResultOk;
     }
     if(std::strcmp(id, kResetMessageId) == 0) {

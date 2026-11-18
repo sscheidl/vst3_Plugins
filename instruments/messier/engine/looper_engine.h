@@ -21,7 +21,7 @@
 
 namespace messier {
 
-constexpr const char* kEngineVersion = "0.1.2";
+constexpr const char* kEngineVersion = "0.1.4";
 
 // A sample file in the core's format: interleaved PCM16, mono or stereo, at the
 // file's own rate (the core converts the rate when it reads). Immutable once handed
@@ -51,6 +51,30 @@ enum class Control : unsigned {
 };
 constexpr unsigned kPrimaryCount = 8;
 constexpr unsigned kControlCount = 17;
+
+// What the window shows of the engine (since 0.1.4): read after a quantum from the
+// state the core already holds, without changing it. Positions are in frames of the
+// file the core reads, at the file's own rate. The positions are floats: above 2^24
+// frames they may round to slightly beyond the file's length.
+struct GrainDot {
+    float position = 0; // read position
+    float pan = 0;      // 0 left .. 1 right, as the core spreads it
+    float phase = 0;    // of the grain's window, 0 at its start .. 1 at its end
+};
+struct EngineDisplay {
+    static constexpr unsigned kMaxGrains = 20; // both grain channels of the core
+    std::uint64_t sequence = 0; // FileData::sequence of the file the core reads, 0 for none
+    std::uint32_t frames = 0;   // its length; 0: no file, nothing else is meaningful
+    std::uint32_t grain_count = 0;
+    double loop_start = 0, loop_length = 0; // START and SIZE as the core applies them
+    double playhead = 0;                    // inside [loop_start, loop_start + loop_length)
+    float spray = 0;   // grains start up to this many frames either side of the playhead
+    // Flags as bytes, 0 or 1: the struct travels to the controller as bytes.
+    std::uint8_t frozen = 0;
+    std::uint8_t swapping = 0; // a new file waits for the old one to fade out
+    std::uint8_t unused[2] = {}; // no padding: every byte that travels is set
+    GrainDot grains[kMaxGrains]{}; // the sounding grains, first grain_count
+};
 
 // What a restart begins with.
 struct EngineSettings {
@@ -106,6 +130,9 @@ class LooperEngine {
 
     // One quantum. The inputs are the sidechain, for 0.2.0; 0.1.0 passes silence.
     void Render(const float* in_left, const float* in_right, float* left, float* right);
+
+    // The display state after the last quantum. Reads only; does not allocate or lock.
+    void Display(EngineDisplay& display) const;
 
     // For tests and diagnostics.
     double Position() const;            // playhead inside the loop, in file frames

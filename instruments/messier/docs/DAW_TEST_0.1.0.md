@@ -11,9 +11,10 @@ None yet (2026-11-17).
 ## Before starting
 
 * Not before Codex has released a build for the DAW test (0.1.0 was not released;
-  0.1.1 to 0.1.3 fix the findings of three reviews; Codex' next check is open). The window is provisional
+  0.1.1 to 0.1.3 and 0.1.5 fix the findings of four reviews; 0.1.4 adds the window's data
+  path and a provisional map; Codex' next check is open). The window is provisional
   (see the README); judge its handling, not its final look.
-* Install: copy `Messier.vst3` from `out/messier-0.1.3/` into
+* Install: copy `Messier.vst3` from `out/messier-0.1.5/` into
   `C:\Program Files\Common Files\VST3\` (administrator rights). Studio One may need a
   rescan of its plug-ins.
 * Have a few WAV files ready: a 16-bit stereo loop at 48 kHz, a 24-bit file, a 32-bit
@@ -94,6 +95,19 @@ None yet (2026-11-17).
 - [ ] Texts fit their places at 100 % and on a scaled display (long file names are cut
       off, the full path is the tooltip).
 - [ ] The amber colour of error lines is readable.
+
+The map strip (0.1.4, provisional: judge whether it shows the right things, not its look):
+
+- [ ] With a file loaded, the waveform appears under the map; with no file, "no sample".
+- [ ] START and SIZE move the shaded loop; the white playhead runs inside it and jumps
+      back to its start at the end; SPEED changes its pace and direction; FREEZE stops it.
+- [ ] SPRAY widens the band around the playhead; the grain dots appear within it.
+- [ ] Grain dots appear while grains sound: without PAN RND at the very top and bottom
+      (hard left and right), with PAN RND spread between; DENSITY changes how many.
+- [ ] Loading another file: the old waveform stays until the new file is heard, then
+      the new one appears; a failed load leaves the old waveform.
+- [ ] The map moves smoothly enough at 100 % and 200 % zoom; the host's CPU meter does
+      not rise noticeably with the window open compared with it closed.
 
 ## 7. Listening
 

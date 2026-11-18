@@ -3,7 +3,7 @@
   "product": {
     "id": "messier",
     "name": "Messier",
-    "version": "0.1.3",
+    "version": "0.1.5",
     "vendor": "TAUREON",
     "format": "VST3",
     "platform": "Windows x64",
@@ -22,7 +22,7 @@
       "id": "messier.engine",
       "path": "engine/",
       "layer": 2,
-      "version": "0.1.2",
+      "version": "0.1.4",
       "description": "Looper engine: drives neb::Engine through its public interface; file hand-over by the FileBridge; Volume",
       "interface": "engine/looper_engine.h",
       "depends_on": [
@@ -34,7 +34,7 @@
       "id": "messier.adapter",
       "path": "adapter/",
       "layer": 3,
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "Streaming adapter: host sample rate, 64-sample quanta, event time, latency; from Kekule 0.3.1",
       "interface": "adapter/stream_adapter.h",
       "depends_on": [],
@@ -44,7 +44,7 @@
       "id": "messier.shell",
       "path": "source/",
       "layer": 4,
-      "version": "0.1.3",
+      "version": "0.1.5",
       "description": "VST3 processor, controller, state, editor, WAV reader and file loader",
       "depends_on": [
         "messier.engine",
@@ -127,7 +127,7 @@
       "relation": "patched",
       "origin_sha256": "7040e65249b7c82e5568c4eaf1f4fcc0e3191190609181524b9d8806a500f96f",
       "origin_git_blob": "b2fa69508761a6fe2e8b985acc22f702710f2c42",
-      "local_sha256": "1f8b294295461db0d2d02d2b8b250aa34deb7bc19b585bd5b0448df04160aa61"
+      "local_sha256": "238018f90fe53161d43f0a35091ae1c1d0d786c7160d6c7af985a9f668b84868"
     },
     {
       "local": "core/engine.cpp",

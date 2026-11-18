@@ -9,25 +9,31 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 0.1.3, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 0.1.5, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.1.2:** builds, passes Steinberg's validator, tested automatically (bit for
+**Status 0.1.5:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
 check of 0.1.1 five more ([check](docs/CODEX_REVIEW_0.1.1.md),
 [fixes](docs/CODEX_REVIEW_0.1.1_UMSETZUNG.md)), its check of 0.1.2 another five
 ([check](docs/CODEX_REVIEW_0.1.2.md), [fixes](docs/CODEX_REVIEW_0.1.2_UMSETZUNG.md)); 0.1.3
+fixes them. 0.1.4 adds the data path of the window and a provisional map
+([report](docs/BUILD_REPORT_0.1.4.md)). Codex' check of 0.1.3 found four more
+([check](docs/CODEX_REVIEW_0.1.3.md), [fixes](docs/CODEX_REVIEW_0.1.3_UMSETZUNG.md)); 0.1.5
 fixes them, Codex' next check is open. Not tried in a DAW, not listened to. The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
 
 **The window is provisional.** The build order's window (section 8: an Atlas nebula map
 with the waveform, loop bounds, playhead, spray and the real grains, Orion as the visual
 theme, a broad Blend slider above seven knobs) is not built yet; it follows once its
-layout and colours are settled. Until then the window is the plain knob layout described
+layout and colours are settled. Its data path is there since 0.1.4: a plain strip above
+the knobs shows the loop, the spray range, the playhead, the sounding grains (across
+their read position, down their panorama) and the waveform of the file the engine plays.
+Until the design is settled the window is that strip and the plain knob layout described
 below.
 
 Only the file source in 0.1.0. Live recording, overdub, circular recording, the dry
@@ -117,7 +123,10 @@ keeps the path (saving the project again keeps it too) and the window shows the 
 with "File not found". Move a file back to its path, or load it again, to hear it.
 The project's values and its file always reach the engine together: if the file cannot be
 taken over at once, the whole project waits a few milliseconds and the previous sound
-plays on, never the new values with the old file.
+plays on, never the new values with the old file. If memory runs out while a project is
+loaded, also while its file is decoded, the host is told so and the project is refused as
+a whole: the previous project plays on and is what the host saves; only a file that is
+missing or no usable WAV makes a project silent with its path kept.
 
 Memory: a loaded file takes its size as PCM16 (a 3-minute stereo file at 48 kHz: 33 MB).
 During a swap the old and the new file exist at the same time, briefly also a third
@@ -205,18 +214,19 @@ ctest --preset windows-vs2026-x64-release -R messier
 | Test | What it checks |
 | --- | --- |
 | `messier.vocoder` | the firmware's own vocoder test, unchanged, against this repository's FFT backend |
-| `messier.engine` | the engine layer bit for bit against the separately compiled firmware core; the grain level 0.90; two instances; file swaps; Volume; the display laws |
-| `messier.adapter` | block sizes, event timing at five rates, latency, no drift over two minutes, queue limits, no allocation |
-| `messier.loader` | WAV formats and conversion, damaged and cut files, size limit, missing files, a non-ASCII path, the loader thread |
-| `messier.plugin` | the VST3 plug-in against the firmware core at 48 kHz, block sizes and 32/64 bit, rates, state, missing samples, loading while playing, two instances, keyboard, messages, parameter texts, MIDI mapping, buses |
+| `messier.engine` | the engine layer bit for bit against the separately compiled firmware core; the grain level 0.90; two instances; file swaps; Volume; the display laws; the window's display data, which leaves the sound bit-identical |
+| `messier.adapter` | block sizes, event timing at five rates, latency, no drift over two minutes, queue limits, no allocation; a new rate without memory leaves the adapter as it was |
+| `messier.loader` | WAV formats and conversion, damaged and cut files, size limit, missing files, a non-ASCII path, the loader thread, the waveform overview |
+| `messier.plugin` | the VST3 plug-in against the firmware core at 48 kHz, block sizes and 32/64 bit, rates, state, missing samples, loading while playing, two instances, keyboard, messages, parameter texts, MIDI mapping, buses, the window's display path (0.1.4), a new processor at the same controller, a project without memory to decode its file |
 | `messier.provenance` | the copies are what [components.json](components.json) says; the reference differs by the F42 line only |
 
 `bench_messier` (built with the tests, run by hand) measures the load; the numbers are
 in the build report.
 
 Failing allocations are tested by fault injection: in Release builds every case (the
-loader below 16 bytes, and every allocation of nine host calls in turn, parameter texts
-and the window's creation included); in Debug builds
+loader below 16 bytes, and every allocation of fourteen host calls in turn, parameter
+texts, the window's creation, the display messages, the factory's create functions and the
+processor's life cycle included); in Debug builds
 the loader's cases from 40 bytes, the spare empty file included. Below that the Debug
 standard library of MSVC ends the process by design (its container proxies), outside the
 plug-in's code; the plug-in ships as a Release build.

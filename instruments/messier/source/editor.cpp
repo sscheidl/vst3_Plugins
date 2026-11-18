@@ -1,6 +1,7 @@
 #include "editor.h"
 
 #include "file_loader.h"
+#include "map_view.h"
 #include "parameters.h"
 #include "version.h"
 #include "widgets.h"
@@ -36,14 +37,17 @@ constexpr int kColumns = 9;
 constexpr CCoord kColumnWidth = (kWidth - 2 * kMargin) / kColumns;
 constexpr CCoord kFileTop = 54;
 constexpr CCoord kInfoTop = 76;
-constexpr CCoord kNameTop = 104;
+// The map of the sample (0.1.4, provisional) between the file line and the knobs.
+constexpr CCoord kMapTop = 102;
+constexpr CCoord kMapBottom = kMapTop + kEditorMapHeight - 8;
+constexpr CCoord kNameTop = 104 + kEditorMapHeight;
 constexpr CCoord kKnobSize = 60;
-constexpr CCoord kKnobTop = 122;
-constexpr CCoord kValueTop = 186;
-constexpr CCoord kSmallNameTop = 214;
+constexpr CCoord kKnobTop = 122 + kEditorMapHeight;
+constexpr CCoord kValueTop = 186 + kEditorMapHeight;
+constexpr CCoord kSmallNameTop = 214 + kEditorMapHeight;
 constexpr CCoord kSmallKnobSize = 40;
-constexpr CCoord kSmallKnobTop = 230;
-constexpr CCoord kSmallValueTop = 272;
+constexpr CCoord kSmallKnobTop = 230 + kEditorMapHeight;
+constexpr CCoord kSmallValueTop = 272 + kEditorMapHeight;
 constexpr CCoord kKeyboardTop = kEditorTopHeight - 4;
 constexpr CCoord kKeyboardBottom = kEditorTopHeight + kKeyboardSectionHeight - 18;
 constexpr CCoord kButtonWidth = 52;
@@ -136,6 +140,7 @@ void Editor::ForgetViews() {
     freeze_button_ = nullptr;
     file_name_ = nullptr;
     file_info_ = nullptr;
+    map_view_ = nullptr;
 }
 
 bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
@@ -176,6 +181,10 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
                            info_font, kDimText, kLeftText);
     frame->addView(file_info_);
     ApplyFileTexts();
+
+    map_view_ = new MapView(CRect(kMargin, kMapTop, kWidth - kMargin, kMapBottom));
+    map_view_->Show(shown_display_, shown_wave_);
+    frame->addView(map_view_);
 
     keyboard_view_ = new KeyboardView(CRect(kMargin + 40, kKeyboardTop, kWidth - kMargin - 40,
                                             kKeyboardBottom),
@@ -261,7 +270,7 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         ForgetViews();
         return false;
     }
-    setIdleRate(100);
+    setIdleRate(static_cast<int32>(kDisplayInterval.count()));
     LayOut(rect.getWidth(), rect.getHeight());
     Resize();
     if(callbacks_.poll)
@@ -507,6 +516,13 @@ void Editor::ChooseFile() {
                 callbacks_.load(path);
     });
     selector->forget();
+}
+
+void Editor::ShowDisplay(const EngineDisplay& display, std::shared_ptr<const WaveOverview> wave) noexcept {
+    shown_display_ = display;
+    shown_wave_ = std::move(wave);
+    if(map_view_)
+        map_view_->Show(shown_display_, shown_wave_);
 }
 
 void Editor::ShowFileStatus(const FileStatus& status) noexcept {

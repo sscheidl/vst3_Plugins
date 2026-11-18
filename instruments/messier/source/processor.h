@@ -2,6 +2,7 @@
 
 #include "engine_bridge.h"
 #include "file_loader.h"
+#include "latest_value.h"
 #include "looper_engine.h"
 #include "parameter_state.h"
 #include "parameters.h"
@@ -39,8 +40,14 @@ class Processor : public Steinberg::Vst::AudioEffect {
     Processor();
     ~Processor() override;
 
-    static Steinberg::FUnknown* createInstance(void*) {
-        return static_cast<Steinberg::Vst::IAudioProcessor*>(new Processor());
+    // Null if the processor cannot be made (MS-R19): the SDK's factory then answers
+    // kNoInterface instead of letting an exception out to the host.
+    static Steinberg::FUnknown* createInstance(void*) noexcept {
+        try {
+            return static_cast<Steinberg::Vst::IAudioProcessor*>(new Processor());
+        } catch(...) {
+            return nullptr;
+        }
     }
 
     Steinberg::tresult PLUGIN_API initialize(Steinberg::FUnknown* context) SMTG_OVERRIDE;
@@ -124,6 +131,9 @@ class Processor : public Steinberg::Vst::AudioEffect {
     // Tells the controller what the loader knows. UI thread. Never throws.
     void SendFileStatus() noexcept;
     void SendFileStatusUnchecked();
+    // Answers a display request (since 0.1.4). UI thread. Never throws.
+    void SendDisplay(Steinberg::Vst::IMessage* request) noexcept;
+    void SendDisplayUnchecked(Steinberg::Vst::IMessage* request);
     Steinberg::tresult SaveState(Steinberg::IBStream* state);
     Steinberg::tresult LoadState(Steinberg::IBStream* state);
 
@@ -146,6 +156,14 @@ class Processor : public Steinberg::Vst::AudioEffect {
     std::atomic<std::uint32_t> reset_presses_{0};
     std::atomic<Clock::rep> last_reset_press_{0};
     std::uint32_t reported_user_loads_ = 0; // audio thread
+    // Tells this instance from others in the status (MS-R17); never 0.
+    const std::uint64_t instance_id_;
+    // The window's display (since 0.1.4). A request sets display_wanted_; the audio
+    // thread then publishes the engine's state once after its next block. Without
+    // requests (no window open) it publishes nothing.
+    std::atomic<bool> display_wanted_{false};
+    LatestValue<EngineDisplay> display_;
+    EngineDisplay last_display_{}; // UI thread: the newest taken
 
     FileExchange exchange_;      // files from the window
     FileExchange project_files_; // project files; their retire queue is unused

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <utility>
 #include <xmmintrin.h>
 
 namespace messier {
@@ -24,37 +25,55 @@ class DenormalsAreZero {
 
 } // namespace
 
-bool StreamAdapter::Prepare(double host_rate) {
+bool StreamAdapter::Prepare(double host_rate) noexcept {
     RateRatio ratio;
     if(!MakeRateRatio(host_rate, ratio))
         return false;
+    // Everything new is made aside first; only when all of it is there does it
+    // replace the old (MS-R19): a failed allocation leaves the adapter as it was.
+    SincKernel kernel;
+    int left = 0, right = 0, latency = 0;
+    std::vector<float> buffer_left, buffer_right;
+    Queue notes;
+    std::array<Queue, kControlQueues> controls;
+    try {
+        if(!ratio.Unity()) {
+            kernel.Design(ratio);
+            left = kernel.Left();
+            right = kernel.Right();
+            // The smallest delay for which no output sample needs a quantum that
+            // an event of a later block could still belong to:
+            // (latency + 1) * num / den >= Right() + 1.
+            const std::uint64_t needed = static_cast<std::uint64_t>(right + 1) * ratio.den;
+            latency = static_cast<int>((needed + ratio.num - 1) / ratio.num) - 1;
+            if(latency < 0)
+                latency = 0;
+        }
+        // Room for the filter's window, one quantum and the samples one output
+        // step can leave behind; twice that, so compacting is rare.
+        const std::uint64_t step = ratio.num / ratio.den + 1;
+        const std::size_t window = static_cast<std::size_t>(left + right + 1);
+        const std::size_t capacity = 2 * (window + kQuantum + static_cast<std::size_t>(step)) + 64;
+        buffer_left.assign(capacity, 0.0f);
+        buffer_right.assign(capacity, 0.0f);
+        notes.Allocate(kNoteCapacity);
+        for(Queue& queue : controls)
+            queue.Allocate(kControlCapacity);
+    } catch(...) {
+        return false;
+    }
+    // From here nothing allocates or throws.
     host_rate_ = host_rate;
     ratio_ = ratio;
-    if(ratio_.Unity()) {
-        left_ = right_ = 0;
-        latency_ = 0;
-    } else {
-        kernel_.Design(ratio_);
-        left_ = kernel_.Left();
-        right_ = kernel_.Right();
-        // The smallest delay for which no output sample needs a quantum that
-        // an event of a later block could still belong to:
-        // (latency + 1) * num / den >= Right() + 1.
-        const std::uint64_t needed = static_cast<std::uint64_t>(right_ + 1) * ratio_.den;
-        latency_ = static_cast<int>((needed + ratio_.num - 1) / ratio_.num) - 1;
-        if(latency_ < 0)
-            latency_ = 0;
-    }
-    // Room for the filter's window, one quantum and the samples one output
-    // step can leave behind; twice that, so compacting is rare.
-    const std::uint64_t step = ratio_.num / ratio_.den + 1;
-    const std::size_t window = static_cast<std::size_t>(left_ + right_ + 1);
-    const std::size_t capacity = 2 * (window + kQuantum + static_cast<std::size_t>(step)) + 64;
-    buffer_left_.assign(capacity, 0.0f);
-    buffer_right_.assign(capacity, 0.0f);
-    notes_.Allocate(kNoteCapacity);
-    for(Queue& queue : controls_)
-        queue.Allocate(kControlCapacity);
+    if(!ratio_.Unity())
+        kernel_ = std::move(kernel); // at 48 kHz the kernel is not used and stays
+    left_ = left;
+    right_ = right;
+    latency_ = latency;
+    buffer_left_.swap(buffer_left);
+    buffer_right_.swap(buffer_right);
+    notes_ = std::move(notes);
+    controls_ = std::move(controls);
     Reset();
     return true;
 }

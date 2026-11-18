@@ -2,6 +2,8 @@
 
 #include "engine.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <new>
 
@@ -10,6 +12,7 @@ namespace messier {
 static_assert(LooperEngine::kQuantum <= static_cast<int>(neb::kBlock));
 static_assert(LooperEngine::kSampleRate == neb::kRate);
 static_assert(neb::FFT_N == 2048, "fft_desktop.cpp is written for 2048 points");
+static_assert(EngineDisplay::kMaxGrains == 2 * neb::MAX_GRAINS);
 
 struct LooperEngine::Impl {
     // The firmware engine lives in this storage and is constructed anew by Reset():
@@ -199,6 +202,52 @@ void LooperEngine::Render(const float* in_left, const float* in_right, float* le
             right[i] *= volume_;
         }
     }
+}
+
+void LooperEngine::Display(EngineDisplay& display) const {
+    const neb::Engine& e = *impl_->engine;
+    display = EngineDisplay{};
+    display.frozen = e.frozen ? 1 : 0;
+    display.swapping = swapping_ ? 1 : 0;
+    // The file the core reads: the current one, also while it fades out for a swap
+    // (current_ changes when the core acknowledges the mute).
+    if(!current_ || current_->frames == 0)
+        return;
+    const double frames = current_->frames;
+    display.sequence = current_->sequence;
+    display.frames = current_->frames;
+    // START and SIZE as Engine::Process applies them to the block just rendered
+    // (core/engine.cpp, the two lines before the playhead loop), from the same
+    // smoothed values.
+    const double start = std::min(double(e.DisplaySmoothed(neb::Start)) * frames, frames - 1);
+    const float size = e.DisplaySmoothed(neb::Size);
+    const double length = std::max(1.0, double(size * size) * (frames - start));
+    display.loop_start = start;
+    display.loop_length = length;
+    // The playhead the next sample starts from, inside the loop as the core wraps it.
+    double position = e.Position();
+    if(position < 0 || position >= length) {
+        position = std::fmod(position, length);
+        if(position < 0)
+            position += length;
+    }
+    display.playhead = start + position;
+    const float spray = e.DisplaySecondary(neb::Start);
+    display.spray = static_cast<float>(std::min(frames, double(spray) * spray * frames));
+    unsigned count = 0;
+    for(unsigned c = 0; c < 2; ++c) {
+        const neb::Grain* grains = e.DisplayGrains(c);
+        for(int i = 0; i < neb::MAX_GRAINS; ++i) {
+            const neb::Grain& g = grains[i];
+            if(!g.active || g.delay != 0) // waiting grains do not sound yet
+                continue;
+            GrainDot& dot = display.grains[count++];
+            dot.position = static_cast<float>(g.position);
+            dot.pan = g.pan;
+            dot.phase = std::min(1.0f, std::max(0.0f, g.envelope));
+        }
+    }
+    display.grain_count = count;
 }
 
 double LooperEngine::Position() const {
