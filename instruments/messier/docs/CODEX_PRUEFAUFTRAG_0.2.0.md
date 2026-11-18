@@ -11,10 +11,11 @@ unverändert.
 
 * Repository `vst3_Plugins`, Branch `messier-gui`, Worktree `.work/messier-gui/wt` im
   Haupt-Checkout `D:\Eigene Dateien\Eigene Dokumente\Playground\vst3_Plugins`.
-* **0.2.0 ist uncommittet** (Stand 2026-11-18) auf `8543254` (0.1.11, gepusht auf
-  `messier-0.1.0`). `git -C .work/messier-gui/wt diff 8543254` und
-  `git -C .work/messier-gui/wt status` zeigen alles Neue (neue Dateien sind untracked).
-  Falls der Nutzer vor deiner Prüfung committet, prüfe diesen Commit und nenne ihn.
+* **Geprüft wird Commit `17a6970`** („Messier 0.2.0: the window of the window study, GUI
+  preset Slate“), gepusht als Branch `origin/messier-gui`, auf `8543254` (0.1.11, auf
+  `messier-0.1.0`). `git -C .work/messier-gui/wt diff 8543254 17a6970` zeigt alles Neue.
+  Ein späterer Commit auf `messier-gui` ändert nur diesen Prüfauftrag; nenne in deinem
+  Ergebnis den Commit, den du geprüft hast.
 * Neu: `source/gui_skin.*`, `source/gui_layout.h`, `source/panel_view.*`,
   `resource/gui/` (26 PNG, unverändert aus deiner Lieferung). Geändert:
   `source/editor.*`, `source/map_view.*` (weitgehend neu), `source/widgets.*`
@@ -23,8 +24,9 @@ unverändert.
   (Abtastrate in der Übersicht), `CMakeLists.txt`, `components.json`; Tests
   `TestGuiPresets` (neu), Anpassungen in `TestViewLayout`, `TestDisplayPath` und im
   Ladertest.
-* Das gestagte Bundle `out/messier-0.2.0/` ist aus genau diesem Stand gebaut
-  (`SOURCE_SHA256SUMS.txt`, `BUILD_INFO.txt`).
+* Das gestagte Bundle `out/messier-0.2.0/` ist aus genau diesem Stand gebaut, noch vor dem
+  Commit (`BUILD_INFO.txt` nennt deshalb `8543254` mit Änderungen; die Quelldateien stehen
+  mit Prüfsummen in `SOURCE_SHA256SUMS.txt`). Dieses Bundle ist beim Nutzer installiert.
 
 ## Prüfpunkte
 
