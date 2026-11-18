@@ -134,6 +134,9 @@ class Processor : public Steinberg::Vst::AudioEffect {
     // Answers a display request (since 0.1.4). UI thread. Never throws.
     void SendDisplay(Steinberg::Vst::IMessage* request) noexcept;
     void SendDisplayUnchecked(Steinberg::Vst::IMessage* request);
+    Steinberg::tresult NotifyUnchecked(Steinberg::Vst::IMessage* message);
+    // StreamAdapter::Prepare that keeps a RESET press waiting in the adapter (MS-R22).
+    bool PrepareAdapter(double rate) noexcept;
     Steinberg::tresult SaveState(Steinberg::IBStream* state);
     Steinberg::tresult LoadState(Steinberg::IBStream* state);
 
@@ -164,6 +167,11 @@ class Processor : public Steinberg::Vst::AudioEffect {
     std::atomic<bool> display_wanted_{false};
     LatestValue<EngineDisplay> display_;
     EngineDisplay last_display_{}; // UI thread: the newest taken
+    // UI thread (MS-R20, MS-R21): the controller's connection generation heard last,
+    // stamped on every status and display reply, and the number of the last display
+    // reply.
+    Steinberg::int64 peer_generation_ = 0;
+    std::uint64_t display_replies_ = 0;
 
     FileExchange exchange_;      // files from the window
     FileExchange project_files_; // project files; their retire queue is unused

@@ -194,6 +194,10 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // Called by the controller when a loaded project brings its own settings.
     void ApplySettings(const EditorSettings& settings);
 
+    // MS-R24: building the window lets no exception out. If it cannot be built, what
+    // was built is let go, open() answers false, and attached() undoes the SDK's
+    // attachment and answers an error instead of an empty window.
+    Steinberg::tresult PLUGIN_API attached(void* parent, Steinberg::FIDString type) SMTG_OVERRIDE;
     bool PLUGIN_API open(void* parent, const VSTGUI::PlatformType& platformType) SMTG_OVERRIDE;
     void PLUGIN_API close() SMTG_OVERRIDE;
     // A knob moved. The begin and the end of a knob edit reach the host
@@ -224,6 +228,19 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     void ShowFileStatusUnchecked(const FileStatus& status);
     // Forgets the views of a closed window.
     void ForgetViews();
+    bool OpenUnchecked(void* parent, const VSTGUI::PlatformType& platformType);
+    // Adds a view to the frame at once, so that the frame owns it (MS-R24); a view the
+    // frame could not take is let go.
+    template <typename View>
+    View* Add(View* view) {
+        try {
+            frame->addView(view);
+        } catch(...) {
+            view->forget();
+            throw;
+        }
+        return view;
+    }
     // Window size in pixels for the current zoom, display scale and keyboard.
     Steinberg::ViewRect ScaledSize() const;
     // The zoom the content is drawn at in a window of this size.

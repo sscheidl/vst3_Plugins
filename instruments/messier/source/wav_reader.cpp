@@ -36,6 +36,30 @@ WavResult Fail(WavError error, const char* detail) noexcept {
     return result;
 }
 
+// MS-R25: while decoding, an exception inside the stream (std::bad_alloc in its
+// buffer, say) is passed on instead of becoming a silent short read: badbit joins the
+// stream's exception mask, and the caller's mask comes back afterwards.
+class RethrowStreamErrors {
+  public:
+    explicit RethrowStreamErrors(std::istream& in) : in_(in), saved_(in.exceptions()) {
+        in_.clear();
+        in_.exceptions(saved_ | std::ios::badbit);
+    }
+    ~RethrowStreamErrors() {
+        try {
+            in_.clear(in_.rdstate() & ~std::ios::badbit);
+            in_.exceptions(saved_);
+        } catch(...) {
+        }
+    }
+    RethrowStreamErrors(const RethrowStreamErrors&) = delete;
+    RethrowStreamErrors& operator=(const RethrowStreamErrors&) = delete;
+
+  private:
+    std::istream& in_;
+    std::ios::iostate saved_;
+};
+
 bool ReadAt(std::istream& in, std::uint64_t offset, void* target, std::size_t count) {
     in.clear();
     in.seekg(static_cast<std::streamoff>(offset));
@@ -81,6 +105,7 @@ WavResult OutOfMemory() noexcept {
 }
 
 WavResult DecodeUnchecked(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes) {
+    const RethrowStreamErrors rethrow(in);
     std::uint8_t header[12];
     if(size < 12 || !ReadAt(in, 0, header, sizeof(header)))
         return Fail(WavError::kInvalid, "too short for a WAV file");
@@ -222,12 +247,25 @@ WavResult ReadUnchecked(const std::string& utf8_path, std::uint64_t max_pcm_byte
     } catch(...) {
         return Fail(WavError::kMissing, "not a usable path");
     }
+    // MS-R25: what the file system reports is told apart: not there, no memory, any
+    // other error (no access, a drive gone).
     std::error_code error;
-    if(!std::filesystem::is_regular_file(path, error))
+    const std::filesystem::file_status status = std::filesystem::status(path, error);
+    if(status.type() == std::filesystem::file_type::not_found)
         return Fail(WavError::kMissing, "file not found");
+    if(error == std::errc::not_enough_memory)
+        return OutOfMemory();
+    if(error)
+        return Fail(WavError::kReadError, "cannot check the file");
+    if(status.type() != std::filesystem::file_type::regular)
+        return Fail(WavError::kMissing, "not a file");
     const std::uintmax_t size = std::filesystem::file_size(path, error);
+    if(error == std::errc::not_enough_memory)
+        return OutOfMemory();
     if(error)
         return Fail(WavError::kReadError, "size unknown");
+    // The standard library gives no reason when a stream cannot be opened; that stays
+    // "cannot open the file" (documented in the README).
     std::ifstream in(path, std::ios::binary);
     if(!in)
         return Fail(WavError::kReadError, "cannot open the file");

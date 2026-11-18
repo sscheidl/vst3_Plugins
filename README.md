@@ -16,7 +16,7 @@ prove and records what was learned.
 | [Toy Piano Classic](instruments/toy-piano-classic/) | Instrument | 0.3.2: builds, validated, tested and code-reviewed; 0.1.0 loads in Studio One, not yet listened to |
 | [Mendelejew](instruments/elements/) | Instrument | 0.1.4: true 48 kHz Elements DSP; octave keyboard controls, Damping reversed as in Kekulé, snowflake Freeze and future-function navigation; high-note investigation without DSP changes; reviewed by Claude, Codex's check of the Damping change open. Earlier build played in the user's DAW |
 | [Kekulé](instruments/torus-classic/) | Instrument | 0.3.1: builds, validated and tested automatically; 4, 8 or 16 voices, octave keys, no Plug-in Nap; released by Codex, not tried in a DAW yet; 0.1.0 loads and plays in Studio One |
-| [Messier](instruments/messier/) | Instrument | 0.1.5: granular looper and phase vocoder on a WAV file, from Nebulae on Daisy 0.2.2; builds, validated, tested automatically, bit-exact against the firmware core; the findings of four Codex reviews fixed, the next check open; the window's data path with a provisional map, the Atlas/Orion window still to come; not tried in a DAW |
+| [Messier](instruments/messier/) | Instrument | 0.1.6: granular looper and phase vocoder on a WAV file, from Nebulae on Daisy 0.2.2; builds, validated, tested automatically, bit-exact against the firmware core; the findings of five Codex reviews fixed, the next check open; the window's data path with a provisional map, the Atlas/Orion window still to come; not tried in a DAW |
 
 ## Layout
 

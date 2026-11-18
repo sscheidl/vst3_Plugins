@@ -9,12 +9,12 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 0.1.5, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 0.1.6, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.1.5:** builds, passes Steinberg's validator, tested automatically (bit for
+**Status 0.1.6:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
@@ -24,7 +24,8 @@ check of 0.1.1 five more ([check](docs/CODEX_REVIEW_0.1.1.md),
 fixes them. 0.1.4 adds the data path of the window and a provisional map
 ([report](docs/BUILD_REPORT_0.1.4.md)). Codex' check of 0.1.3 found four more
 ([check](docs/CODEX_REVIEW_0.1.3.md), [fixes](docs/CODEX_REVIEW_0.1.3_UMSETZUNG.md)); 0.1.5
-fixes them, Codex' next check is open. Not tried in a DAW, not listened to. The [DAW test list](docs/DAW_TEST_0.1.0.md) is
+fixes them. Its check of 0.1.5 six more ([check](docs/CODEX_REVIEW_0.1.5.md),
+[report](docs/BUILD_REPORT_0.1.6.md)); 0.1.6 fixes them, Codex' next check is open. Not tried in a DAW, not listened to. The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
 
 **The window is provisional.** The build order's window (section 8: an Atlas nebula map
@@ -112,9 +113,12 @@ A file is read on a worker thread and checked completely; only the finished file
 to the audio thread, which fades the old one out (5.3 ms), swaps, and fades the new one
 in from Start, as the firmware does. Unlike the firmware, every failure leaves the old
 file playable. The window shows the file's name, format and length, or what went wrong:
-not found, not a valid WAV (with the reason), too large, or out of memory (also then the
-old file plays on). A file chosen in the window marks the project as changed, so that the
-host offers to save it.
+not found, not a valid WAV (with the reason), too large, could not be read, or out of
+memory (also then the old file plays on). When Windows cannot open a file stream, the
+standard library gives no reason; that shows as "could not be read (cannot open the
+file)", also if memory was the cause. A file chosen in the window marks the project as
+changed, so that the host offers to save it: at least one `setDirty` for every change the
+host passes on, one per file up to 64 at a time.
 
 **Projects** store the file's path (UTF-8), not the audio. Opening a project reads the
 file at once, in the thread that loads the project, so that an export straight after
@@ -217,16 +221,17 @@ ctest --preset windows-vs2026-x64-release -R messier
 | `messier.engine` | the engine layer bit for bit against the separately compiled firmware core; the grain level 0.90; two instances; file swaps; Volume; the display laws; the window's display data, which leaves the sound bit-identical |
 | `messier.adapter` | block sizes, event timing at five rates, latency, no drift over two minutes, queue limits, no allocation; a new rate without memory leaves the adapter as it was |
 | `messier.loader` | WAV formats and conversion, damaged and cut files, size limit, missing files, a non-ASCII path, the loader thread, the waveform overview |
-| `messier.plugin` | the VST3 plug-in against the firmware core at 48 kHz, block sizes and 32/64 bit, rates, state, missing samples, loading while playing, two instances, keyboard, messages, parameter texts, MIDI mapping, buses, the window's display path (0.1.4), a new processor at the same controller, a project without memory to decode its file |
+| `messier.plugin` | the VST3 plug-in against the firmware core at 48 kHz, block sizes and 32/64 bit, rates, state, missing samples, loading while playing, two instances, keyboard, messages, parameter texts, MIDI mapping, buses, the window's display path (0.1.4), a new processor at the same controller in every order of connect, parameter 199 and status, late display replies, a project without memory to decode its file |
 | `messier.provenance` | the copies are what [components.json](components.json) says; the reference differs by the F42 line only |
 
 `bench_messier` (built with the tests, run by hand) measures the load; the numbers are
 in the build report.
 
 Failing allocations are tested by fault injection: in Release builds every case (the
-loader below 16 bytes, and every allocation of fourteen host calls in turn, parameter
-texts, the window's creation, the display messages, the factory's create functions and the
-processor's life cycle included); in Debug builds
+loader below 16 bytes, and every allocation of sixteen host calls in turn, parameter
+texts, the window's creation, the display messages, messages whose attribute list the host
+makes on first access, the factory's create functions and the processor's life cycle
+included); in Debug builds
 the loader's cases from 40 bytes, the spare empty file included. Below that the Debug
 standard library of MSVC ends the process by design (its container proxies), outside the
 plug-in's code; the plug-in ships as a Release build.

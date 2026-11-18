@@ -264,6 +264,13 @@ constexpr const char* kAttrUserLoads = "userLoads";
 // that a controller connected to a new processor counts that processor's loads from
 // its own start. Never 0.
 constexpr const char* kAttrProcessor = "processor";
+// Since 0.1.6 (MS-R20, MS-R21): the controller's connection generation. Every message
+// of the controller carries it; the processor stamps its status and display replies
+// with the one it heard last, and the controller takes only replies of its current
+// connection. kAttrReply numbers the display replies of one processor, so that one
+// overtaken by a newer one is not taken.
+constexpr const char* kAttrGeneration = "generation";
+constexpr const char* kAttrReply = "reply";
 // Controller -> processor (since 0.1.2, MS-R08): the window's RESET button was pressed.
 // A message, not an edit of parameter 121: the host may merge a press and a release
 // of one parameter at one position, and the window may close before the next block.

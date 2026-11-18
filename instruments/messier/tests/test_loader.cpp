@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <process.h>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
@@ -502,6 +503,48 @@ void TestOverview() {
                 FileLoader::kKeptOverviews);
 }
 
+// MS-R25: a stream whose buffer throws std::bad_alloc while the audio data is read
+// (as a file stream may when its own memory runs out). The reader reports it as a want
+// of memory, not as a cut file; the caller's stream keeps its own exception mask.
+class ThrowingBuffer : public std::stringbuf {
+  public:
+    ThrowingBuffer(const std::string& bytes, std::streamoff from)
+    : std::stringbuf(bytes, std::ios::in), from_(from) {}
+
+  protected:
+    std::streamsize xsgetn(char* s, std::streamsize n) override {
+        if(seekoff(0, std::ios::cur, std::ios::in) >= from_)
+            throw std::bad_alloc();
+        return std::stringbuf::xsgetn(s, n);
+    }
+
+  private:
+    std::streamoff from_;
+};
+
+void TestStreamErrors() {
+    const Bytes wav = Riff({FmtChunk({}), DataChunk(Pcm16(std::vector<std::int16_t>(4000, 300)))});
+    const std::string bytes(wav.data.begin(), wav.data.end());
+    {
+        ThrowingBuffer buffer(bytes, 44); // the header reads, the audio data throws
+        std::istream in(&buffer);
+        const WavResult result = DecodeWav(in, bytes.size());
+        CHECK(result.error == WavError::kOutOfMemory && !result.file);
+        CHECK(in.exceptions() == std::ios::goodbit);
+    }
+    {
+        ThrowingBuffer buffer(bytes, static_cast<std::streamoff>(bytes.size()) + 1); // never throws
+        std::istream in(&buffer);
+        const WavResult result = DecodeWav(in, bytes.size());
+        CHECK(result.error == WavError::kNone && result.file && result.file->frames == 2000);
+    }
+    // A directory is no file; a missing one is missing.
+    CHECK(ReadWavFile(g_dir.string()).error == WavError::kMissing);
+    CHECK(ReadWavFile((g_dir / "no-such-dir" / "x.wav").string()).error == WavError::kMissing);
+    std::printf("stream errors: std::bad_alloc inside the stream is a want of memory, not a cut "
+                "file; a directory and a missing path are no file\n");
+}
+
 // MS-R01: allocations that fail while loading, in the worker thread and in the
 // thread that loads a project, become a failure result; the process lives on, the
 // playing file stays for a request from the window, a project falls silent.
@@ -638,6 +681,7 @@ int main() {
     TestLoader();
     TestOverview();
     TestOutOfMemory();
+    TestStreamErrors();
     fs::remove_all(g_dir);
     std::printf("PASS messier.loader\n");
     return 0;

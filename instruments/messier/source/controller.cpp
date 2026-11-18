@@ -94,10 +94,15 @@ tresult PLUGIN_API Controller::connect(IConnectionPoint* other) {
     const tresult result = EditController::connect(other);
     if(result != kResultOk)
         return result;
-    // MS-R17: the processor at the other end may be a new one, whose sequence numbers
-    // and load count start anew. Its first status names it.
+    // MS-R17, MS-R20, MS-R21: the processor at the other end may be a new one, whose
+    // sequence numbers and load count start anew. A new generation: replies still on
+    // their way from the old connection are not taken. Its first status names it.
+    ++generation_;
+    last_status_serial_ = 0;
+    last_reply_ = 0;
     peer_unconfirmed_ = true;
-    counted_from_parameter_ = false;
+    marked_since_connect_ = 0;
+    parameter_since_connect_ = false;
     // Parameter 199 as a new processor starts it, so that its first value is a change
     // even when it equals the old processor's last one. Nothing is counted here.
     EditController::setParamNormalized(kParamSampleChanges, 0.0);
@@ -271,13 +276,21 @@ bool Controller::SendKey(int note, int velocity) noexcept {
 bool Controller::SendKeyUnchecked(int note, int velocity) {
     if(note < 0 || note > 127)
         return false;
-    IPtr<IMessage> message = owned(allocateMessage());
-    if(!message || !message->getAttributes())
+    IPtr<IMessage> message = NewMessage(kNoteMessageId);
+    if(!message)
         return false;
-    message->setMessageID(kNoteMessageId);
     message->getAttributes()->setInt(kNoteMessageNote, note);
     message->getAttributes()->setInt(kNoteMessageVelocity, velocity);
     return sendMessage(message) == kResultOk;
+}
+
+IPtr<IMessage> Controller::NewMessage(const char* id) {
+    IPtr<IMessage> message = owned(allocateMessage());
+    if(!message || !message->getAttributes())
+        return nullptr;
+    message->setMessageID(id);
+    message->getAttributes()->setInt(kAttrGeneration, generation_);
+    return message;
 }
 
 bool Controller::LoadFile(const std::string& path) {
@@ -291,10 +304,9 @@ bool Controller::LoadFile(const std::string& path) {
 bool Controller::SendLoad(const std::string& path) {
     if(path.empty() || path.size() > static_cast<std::size_t>(kMaxPathBytes) || !IsValidUtf8(path))
         return false;
-    IPtr<IMessage> message = owned(allocateMessage());
-    if(!message || !message->getAttributes())
+    IPtr<IMessage> message = NewMessage(kLoadMessageId);
+    if(!message)
         return false;
-    message->setMessageID(kLoadMessageId);
     message->getAttributes()->setBinary(kAttrPath, path.data(), static_cast<uint32>(path.size()));
     // The processor answers with its status at once ("loading").
     return sendMessage(message) == kResultOk;
@@ -311,10 +323,9 @@ bool Controller::PressReset() noexcept {
 
 bool Controller::SendSimple(const char* id) noexcept {
     try {
-        IPtr<IMessage> message = owned(allocateMessage());
+        IPtr<IMessage> message = NewMessage(id);
         if(!message)
             return false;
-        message->setMessageID(id);
         return sendMessage(message) == kResultOk;
     } catch(...) {
         return false;
@@ -323,10 +334,9 @@ bool Controller::SendSimple(const char* id) noexcept {
 
 bool Controller::RequestDisplay() noexcept {
     try {
-        IPtr<IMessage> message = owned(allocateMessage());
-        if(!message || !message->getAttributes())
+        IPtr<IMessage> message = NewMessage(kDisplayRequestId);
+        if(!message)
             return false;
-        message->setMessageID(kDisplayRequestId);
         // The overview the controller holds, so the processor sends one only when the
         // file changed.
         message->getAttributes()->setInt(kAttrHaveWave,
@@ -338,19 +348,41 @@ bool Controller::RequestDisplay() noexcept {
 }
 
 tresult Controller::ReadDisplay(IMessage* message) noexcept {
+    // MS-R23: a host may make the attribute list on first access; without memory the
+    // reply is dropped and the last valid display stays.
+    try {
+        return ReadDisplayUnchecked(message);
+    } catch(...) {
+        return kOutOfMemory;
+    }
+}
+
+tresult Controller::ReadDisplayUnchecked(IMessage* message) {
     IAttributeList* attributes = message->getAttributes();
     if(!attributes)
         return kInvalidArgument;
+    int64 generation = 0, reply = 0;
+    if(attributes->getInt(kAttrGeneration, generation) != kResultOk
+       || attributes->getInt(kAttrReply, reply) != kResultOk || reply <= 0)
+        return kInvalidArgument;
+    // MS-R21: a reply of an earlier connection, or one overtaken by a newer reply of
+    // this one, is not taken.
+    if(generation != generation_ || static_cast<std::uint64_t>(reply) <= last_reply_)
+        return kResultFalse;
     const void* data = nullptr;
     uint32 size = 0;
     EngineDisplay display;
     if(attributes->getBinary(kAttrFrame, data, size) != kResultOk
        || !ReadDisplayBytes(data, size, display))
         return kInvalidArgument;
-    display_ = display;
+    std::shared_ptr<const WaveOverview> wave;
     if(attributes->getBinary(kAttrWave, data, size) == kResultOk)
-        if(std::shared_ptr<const WaveOverview> wave = ReadOverviewBytes(data, size, display_))
-            wave_ = std::move(wave);
+        wave = ReadOverviewBytes(data, size, display);
+    // Everything read: taken together.
+    last_reply_ = static_cast<std::uint64_t>(reply);
+    display_ = display;
+    if(wave)
+        wave_ = std::move(wave);
     ShowDisplay();
     return kResultOk;
 }
@@ -380,6 +412,14 @@ tresult PLUGIN_API Controller::notify(IMessage* message) {
            || attributes->getInt(kAttrProcessor, processor) != kResultOk || processor == 0
            || user_loads < 0 || user_loads > 0xFFFFFFFFll)
             return kInvalidArgument;
+        // MS-R20, MS-R21: only a status of the current connection, and not one older
+        // than the newest taken (the loader's serial grows with every change).
+        int64 generation = 0;
+        if(attributes->getInt(kAttrGeneration, generation) != kResultOk)
+            return kInvalidArgument;
+        if(generation != generation_ || static_cast<std::uint32_t>(serial) < last_status_serial_)
+            return kResultFalse;
+        last_status_serial_ = static_cast<std::uint32_t>(serial);
         status.SetCode(static_cast<int>(code));
         status.serial = static_cast<std::uint32_t>(serial);
         status.user_loads = static_cast<std::uint32_t>(user_loads);
@@ -402,40 +442,57 @@ void Controller::CountFromParameter(std::uint32_t count) noexcept {
     // It carries the count modulo 65536; a step forward of less than half of that is
     // new loads (more than 32766 loads between two values the host passes on cannot
     // happen at the pace files load).
-    const std::uint32_t added = (count - user_loads_counted_) & kSampleChangesMask;
-    if(added == 0)
-        return;
-    if(added < kSampleChangesMask / 2) {
-        user_loads_counted_ += added;
+    if(peer_unconfirmed_) {
+        // MS-R20: after a connect, before its first status, the value may be an old or
+        // a new processor's; either way it changed because a file was loaded. Each
+        // change marks: the first as one load, later ones by their step. The status
+        // then adds what is missing.
+        std::uint32_t added = 1;
+        if(parameter_since_connect_) {
+            const std::uint32_t step = (count - last_parameter_) & kSampleChangesMask;
+            if(step == 0)
+                return;
+            if(step < kSampleChangesMask / 2)
+                added = step;
+        }
+        parameter_since_connect_ = true;
+        last_parameter_ = count;
+        marked_since_connect_ += added;
         MarkChanged(added);
         return;
     }
-    // A step back. On a connection that a status has confirmed, an old value: nothing.
-    // Right after a connect, before the new processor's first status, it is the count
-    // of a processor started anew (MS-R17): its loads, counted from its own zero; the
-    // status that follows names it and finds them counted.
-    if(!peer_unconfirmed_)
-        return;
-    counted_for_ = 0;
-    counted_from_parameter_ = true;
-    user_loads_counted_ = count;
-    MarkChanged(count);
+    const std::uint32_t added = (count - user_loads_counted_) & kSampleChangesMask;
+    if(added == 0 || added >= kSampleChangesMask / 2)
+        return; // a step back on a confirmed connection: an old value
+    user_loads_counted_ += added;
+    MarkChanged(added);
 }
 
 void Controller::CountFromStatus(std::uint64_t processor, std::uint32_t count) noexcept {
-    // MS-R17: the count belongs to one processor. A processor not counted so far is
-    // counted from its own zero, unless parameter 199 has just done that (a step back
-    // after a connect). Counting a load twice only marks a project that has changed
-    // anyway; missing one could lose it.
-    peer_unconfirmed_ = false;
-    if(processor != counted_for_) {
-        if(!counted_from_parameter_)
-            user_loads_counted_ = 0;
-        if(counted_for_ != 0)
-            ForgetDisplay(); // another processor: its sequence numbers are its own
+    if(peer_unconfirmed_) {
+        // MS-R17, MS-R20: the first status of a connection names its processor. The
+        // same one as before (a reconnect) has loaded count - user_loads_counted_ files
+        // since; another one all of its count. Those parameter 199 has marked since the
+        // connect are not marked again.
+        const bool same = processor == counted_for_ && counted_for_ != 0;
+        const std::uint32_t base = same ? user_loads_counted_ : 0;
+        const std::uint32_t since = count > base ? count - base : 0;
+        const std::uint32_t missing = since > marked_since_connect_ ? since - marked_since_connect_ : 0;
+        peer_unconfirmed_ = false;
+        marked_since_connect_ = 0;
+        parameter_since_connect_ = false;
         counted_for_ = processor;
+        user_loads_counted_ = count;
+        MarkChanged(missing);
+        return;
     }
-    counted_from_parameter_ = false;
+    if(processor != counted_for_) {
+        // Another processor on the same connection (not seen from a host): counted
+        // from its own zero, its files not those of the old one.
+        counted_for_ = processor;
+        user_loads_counted_ = 0;
+        ForgetDisplay();
+    }
     // The full count: no limit on how many loads one status reports. A step back is
     // an old reply.
     if(count <= user_loads_counted_)
@@ -446,9 +503,7 @@ void Controller::CountFromStatus(std::uint64_t processor, std::uint32_t count) n
 }
 
 void Controller::MarkChanged(std::uint32_t loads) noexcept {
-    // One setDirty per load, as hosts may count them; a host needs only one to know.
-    constexpr std::uint32_t kMostCalls = 64;
-    for(std::uint32_t i = 0; i < std::min(loads, kMostCalls); ++i)
+    for(std::uint32_t i = 0; i < std::min(loads, kMostDirtyCalls); ++i)
         setDirty(true);
 }
 

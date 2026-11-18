@@ -11,10 +11,10 @@ None yet (2026-11-17).
 ## Before starting
 
 * Not before Codex has released a build for the DAW test (0.1.0 was not released;
-  0.1.1 to 0.1.3 and 0.1.5 fix the findings of four reviews; 0.1.4 adds the window's data
-  path and a provisional map; Codex' next check is open). The window is provisional
+  0.1.1 to 0.1.3, 0.1.5 and 0.1.6 fix the findings of five reviews; 0.1.4 adds the
+  window's data path and a provisional map; Codex' next check is open). The window is provisional
   (see the README); judge its handling, not its final look.
-* Install: copy `Messier.vst3` from `out/messier-0.1.5/` into
+* Install: copy `Messier.vst3` from `out/messier-0.1.6/` into
   `C:\Program Files\Common Files\VST3\` (administrator rights). Studio One may need a
   rescan of its plug-ins.
 * Have a few WAV files ready: a 16-bit stereo loop at 48 kHz, a 24-bit file, a 32-bit
@@ -26,7 +26,8 @@ None yet (2026-11-17).
 
 - [ ] Messier appears as an instrument (vendor TAUREON, category Sampler) and loads.
 - [ ] The window opens: title, LOAD..., "No sample", eight knobs and Volume, six small
-      knobs, FREEZE, RESET, the keyboard.
+      knobs, FREEZE, RESET, the keyboard. Closing and opening it again several times
+      works (0.1.6 builds it under a new guard against failing allocations).
 - [ ] LOAD... opens the Windows file dialog, filtered to WAV.
 - [ ] A loaded file plays at once as a loop, without a held note; the file line shows
       its name, rate, channels, bit depth and length.

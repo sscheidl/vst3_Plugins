@@ -89,7 +89,7 @@ tresult PLUGIN_API Processor::initialize(FUnknown* context) {
         removeAllBusses();
         return kOutOfMemory;
     }
-    if(!adapter_.Prepare(StreamAdapter::kInternalRate)) {
+    if(!PrepareAdapter(StreamAdapter::kInternalRate)) {
         removeAllBusses();
         return kOutOfMemory;
     }
@@ -127,7 +127,7 @@ tresult PLUGIN_API Processor::setupProcessing(ProcessSetup& setup) {
         return result;
     // The rate is valid, so a failure is memory (MS-R19). The adapter is then as it
     // was, and so is the setup: nothing half changed.
-    if(!adapter_.Prepare(setup.sampleRate)) {
+    if(!PrepareAdapter(setup.sampleRate)) {
         processSetup = before;
         return kOutOfMemory;
     }
@@ -226,6 +226,18 @@ FileData* Processor::TakeWindowFile() {
     return file;
 }
 
+bool Processor::PrepareAdapter(double rate) noexcept {
+    // MS-R22: a successful Prepare starts the adapter's time and queues anew. A RESET
+    // press it already holds goes on the new start, once; a failed Prepare leaves the
+    // old queues, the press included.
+    const bool reset_waiting = adapter_.ControlWaiting(static_cast<int>(kResetControl));
+    if(!adapter_.Prepare(rate))
+        return false;
+    if(reset_waiting)
+        adapter_.AddEvent(0, ResetEvent());
+    return true;
+}
+
 void Processor::Restart(const ParameterState::Values& values, const FileData* incoming) {
     // MS-R18: a RESET press the adapter has put on a quantum not yet rendered would
     // be dropped by its Reset(); it acts in the first quantum of the new start.
@@ -247,7 +259,7 @@ tresult PLUGIN_API Processor::setActive(TBool state) {
             // MS-R19: without memory for the new rate the processor does not become
             // active; the adapter stays as it was.
             RateRatio ratio;
-            if(MakeRateRatio(rate, ratio) && !adapter_.Prepare(rate))
+            if(MakeRateRatio(rate, ratio) && !PrepareAdapter(rate))
                 return kOutOfMemory;
             latency_.store(static_cast<uint32>(adapter_.LatencySamples()));
         }
@@ -604,6 +616,7 @@ void Processor::SendFileStatusUnchecked() {
     attributes->setInt(kAttrSerial, status.serial);
     attributes->setInt(kAttrUserLoads, status.user_loads);
     attributes->setInt(kAttrProcessor, static_cast<int64>(instance_id_));
+    attributes->setInt(kAttrGeneration, peer_generation_);
     sendMessage(message);
 }
 
@@ -628,6 +641,8 @@ void Processor::SendDisplayUnchecked(IMessage* request) {
         return;
     message->setMessageID(kDisplayMessageId);
     IAttributeList* attributes = message->getAttributes();
+    attributes->setInt(kAttrGeneration, peer_generation_);
+    attributes->setInt(kAttrReply, static_cast<int64>(++display_replies_));
     attributes->setBinary(kAttrFrame, &last_display_, sizeof(EngineDisplay));
     // The overview of the very file the core reads, if the controller lacks it. One
     // that is no longer kept (or never made) is not sent: the window shows none.
@@ -643,7 +658,27 @@ void Processor::SendDisplayUnchecked(IMessage* request) {
 tresult PLUGIN_API Processor::notify(IMessage* message) {
     if(!message || !message->getMessageID())
         return AudioEffect::notify(message);
+    // MS-R23: a host may make a message's attribute list on first access.
+    try {
+        return NotifyUnchecked(message);
+    } catch(...) {
+        return kOutOfMemory;
+    }
+}
+
+tresult Processor::NotifyUnchecked(IMessage* message) {
     const char* id = message->getMessageID();
+    const bool own = std::strcmp(id, kLoadMessageId) == 0 || std::strcmp(id, kStatusRequestId) == 0
+                     || std::strcmp(id, kDisplayRequestId) == 0 || std::strcmp(id, kResetMessageId) == 0
+                     || std::strcmp(id, kNoteMessageId) == 0;
+    if(!own)
+        return AudioEffect::notify(message);
+    // The controller's connection generation, for the replies (MS-R21).
+    if(IAttributeList* attributes = message->getAttributes()) {
+        int64 generation = 0;
+        if(attributes->getInt(kAttrGeneration, generation) == kResultOk)
+            peer_generation_ = generation;
+    }
     if(std::strcmp(id, kLoadMessageId) == 0) {
         std::string path;
         try {

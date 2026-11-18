@@ -1061,6 +1061,30 @@ void TestResetButtonThroughHost() {
         handler.changes.addParameterData(kParamReset, point)->addPoint(0, 0.0, point);
         block();
     }
+    // MS-R22: the same, with a change of sample rate before the activation: the press
+    // waits in the adapter, setupProcessing prepares it for 96 kHz, it still acts once.
+    for(const double rate : {96000.0, 48000.0}) {
+        host.Process(1);
+        {
+            int32 point = 0;
+            handler.changes.addParameterData(kParamReset, point)->addPoint(0, 1.0, point);
+        }
+        host.Process(1);
+        handler.changes.clearQueue();
+        CHECK(host.processor->Adapter().ControlWaiting(static_cast<int>(kResetControl)));
+        host.processor->setProcessing(false);
+        CHECK(host.processor->setActive(false) == kResultOk);
+        host.Setup(rate);
+        CHECK(host.processor->Adapter().HostRate() == rate);
+        CHECK(host.processor->setActive(true) == kResultOk);
+        host.processor->setProcessing(true);
+        const std::uint32_t after_rate = resets();
+        host.Process(1024);
+        CHECK(resets() == after_rate + 1);
+        int32 point = 0;
+        handler.changes.addParameterData(kParamReset, point)->addPoint(0, 0.0, point);
+        block();
+    }
     // Two presses in two host blocks of one sample each: each acts, unless both fall
     // into one 64-sample quantum the engine has not rendered yet; then they are one
     // restart from START (the same sound; documented). Never none.
@@ -1233,9 +1257,11 @@ void PassSampleChanges(PluginHost& host, Controller& controller) {
     }
 }
 
-// MS-R17: a host that keeps the controller and gives it a new processor. The new
-// processor's loads mark the project from its first one on, with and without a
-// status reply, and the display of the old processor's files is let go.
+// MS-R17, MS-R20: a host that keeps the controller and gives it new processors, in
+// every order of connect, parameter 199 and status: the status first; parameter 199
+// first with the status late (and its first value equal to the old processor's last);
+// a reconnect to the same processor; no status at all. Every file from the window
+// marks the project once, none twice; the old processor's display is let go.
 void TestNewProcessorSameController() {
     IPtr<HostApplication> app = owned(new HostApplication());
     IPtr<Controller> controller = owned(new Controller());
@@ -1244,51 +1270,137 @@ void TestNewProcessorSameController() {
     CHECK(controller->setComponentHandler(&handler) == kResultOk);
     auto* controller_point = static_cast<IConnectionPoint*>(controller.get());
     int expected = 0;
-    for(int round = 0; round < 3; ++round) {
-        // Rounds 0 and 1 connect both ways; in round 2 the processor's way back is
-        // never there, so no status arrives: parameter 199 alone.
-        const bool replies = round < 2;
-        PluginHost host({});
-        auto* processor_point = static_cast<IConnectionPoint*>(host.processor.get());
-        if(replies)
-            CHECK(processor_point->connect(controller_point) == kResultOk);
-        CHECK(controller_point->connect(processor_point) == kResultOk);
-        CHECK(!controller->Wave() && controller->Display().frames == 0);
-        auto block = [&] {
+    auto expect = [&](const char* when) {
+        if(handler.dirty != expected)
+            std::printf("FAIL %s: %d setDirty, %d expected\n", when, handler.dirty, expected);
+        CHECK(handler.dirty == expected);
+    };
+    auto load = [&](PluginHost& host, const std::string& path) {
+        CHECK(controller->LoadFile(path));
+        CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
+        for(int i = 0; i < 2; ++i) {
             host.Process(256);
             PassSampleChanges(host, *controller);
-        };
-        // One load in round 0, so that the new processor's first value of parameter 199
-        // in round 1 equals the last one the controller holds.
-        for(int load = 0; load < (round == 0 ? 1 : 2); ++load) {
-            CHECK(controller->LoadFile(load ? g_path_mono : g_path));
-            CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
-            block();
-            block();
-            ++expected;
-            if(handler.dirty != expected)
-                std::printf("FAIL round %d, load %d: %d setDirty, %d expected\n", round, load,
-                            handler.dirty, expected);
-            CHECK(handler.dirty == expected);
         }
-        if(round == 0) {
-            // The display of this processor's file, for the next round to let go.
-            CHECK(controller->RequestDisplay());
-            block();
-            CHECK(controller->RequestDisplay());
-            CHECK(controller->Wave() && controller->Display().frames != 0);
-        }
-        // Status replies and repeated values count nothing more.
+    };
+    {
+        // A: status first. One load, and a waveform in the controller.
+        PluginHost a({});
+        auto* a_point = static_cast<IConnectionPoint*>(a.processor.get());
+        CHECK(a_point->connect(controller_point) == kResultOk);
+        CHECK(controller_point->connect(a_point) == kResultOk);
+        load(a, g_path);
+        ++expected;
+        expect("A, first load");
+        CHECK(controller->RequestDisplay());
+        a.Process(256);
+        CHECK(controller->RequestDisplay());
+        CHECK(controller->Wave() && controller->Display().frames != 0);
+        CHECK(a_point->disconnect(controller_point) == kResultOk);
+        CHECK(controller_point->disconnect(a_point) == kResultOk);
+    }
+    PluginHost b({});
+    auto* b_point = static_cast<IConnectionPoint*>(b.processor.get());
+    {
+        // B: parameter 199 first, the status late (Codex' case in MS-R20). Its first
+        // value, 1, equals A's last.
+        CHECK(controller_point->connect(b_point) == kResultOk); // no way back yet
+        CHECK(!controller->Wave() && controller->Display().frames == 0);
+        load(b, g_path_mono);
+        ++expected;
+        expect("B, first load before its status");
+        load(b, g_path);
+        ++expected;
+        expect("B, second load before its status");
+        CHECK(b_point->connect(controller_point) == kResultOk);
         CHECK(controller->RequestFileStatus());
-        block();
-        CHECK(handler.dirty == expected);
-        if(replies)
-            CHECK(processor_point->disconnect(controller_point) == kResultOk);
-        CHECK(controller_point->disconnect(processor_point) == kResultOk);
+        expect("B, its first status");
+        load(b, g_path_mono);
+        ++expected;
+        expect("B, a load after its status");
+    }
+    {
+        // B again: the controller reconnects to the same processor.
+        CHECK(controller_point->disconnect(b_point) == kResultOk);
+        CHECK(controller_point->connect(b_point) == kResultOk);
+        expect("B, reconnected");
+        load(b, g_path);
+        ++expected;
+        expect("B, a load after the reconnect");
+        CHECK(controller->RequestFileStatus());
+        expect("B, status after the reconnect");
+        CHECK(b_point->disconnect(controller_point) == kResultOk);
+        CHECK(controller_point->disconnect(b_point) == kResultOk);
+    }
+    {
+        // C: never a way back, parameter 199 alone.
+        PluginHost c({});
+        auto* c_point = static_cast<IConnectionPoint*>(c.processor.get());
+        CHECK(controller_point->connect(c_point) == kResultOk);
+        for(int i = 0; i < 2; ++i) {
+            load(c, i ? g_path : g_path_mono);
+            ++expected;
+            expect("C, parameter 199 alone");
+        }
+        CHECK(controller_point->disconnect(c_point) == kResultOk);
     }
     CHECK(controller->terminate() == kResultOk);
-    std::printf("new processor, same controller: each of its loads marks the project from the "
-                "first on, with and without status replies; the old display is let go\n");
+    std::printf("new processor, same controller: each load marks the project once, with the "
+                "status first, late, after a reconnect and never; the old display is let go\n");
+}
+
+// MS-R21: display replies on their way when the connection changes, or overtaken by
+// a newer one, are not taken: the window never keeps another processor's waveform.
+void TestLateDisplayReply() {
+    IPtr<HostApplication> app = owned(new HostApplication());
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(app) == kResultOk);
+    auto* controller_point = static_cast<IConnectionPoint*>(controller.get());
+    PluginHost host({});
+    auto* processor_point = static_cast<IConnectionPoint*>(host.processor.get());
+    CHECK(processor_point->connect(controller_point) == kResultOk);
+    const int64 old_generation = controller->Generation();
+    CHECK(controller_point->connect(processor_point) == kResultOk);
+    CHECK(controller->Generation() != old_generation);
+    CHECK(LoadState(*host.processor, MakeState(StartValues(), g_path)) == kResultOk);
+    host.Run(256, 256);
+    CHECK(controller->RequestDisplay());
+    host.Run(256, 256);
+    CHECK(controller->RequestDisplay());
+    const EngineDisplay current = controller->Display();
+    CHECK(controller->Wave() && current.sequence != 0);
+    const WaveOverview kept = *controller->Wave();
+    // A reply as the old connection would have sent it: the same sequence number and
+    // length, another waveform.
+    auto reply = [&](int64 generation, int64 number) {
+        IPtr<IMessage> message = owned(new HostMessage());
+        message->setMessageID(kDisplayMessageId);
+        message->getAttributes()->setInt(kAttrGeneration, generation);
+        message->getAttributes()->setInt(kAttrReply, number);
+        EngineDisplay frame = current;
+        frame.grain_count = 0;
+        WaveOverview wave = kept;
+        for(std::uint32_t c = 0; c < wave.columns; ++c)
+            wave.low[c] = wave.high[c] = 1111;
+        message->getAttributes()->setBinary(kAttrFrame, &frame, sizeof frame);
+        message->getAttributes()->setBinary(kAttrWave, &wave, sizeof wave);
+        return message;
+    };
+    IPtr<IMessage> late = reply(old_generation, 1000000);
+    CHECK(controller->notify(late) == kResultFalse);
+    IPtr<IMessage> overtaken = reply(controller->Generation(), 1); // older than the replies taken
+    CHECK(controller->notify(overtaken) == kResultFalse);
+    for(int i = 0; i < 5; ++i) {
+        CHECK(controller->RequestDisplay());
+        host.Run(256, 256);
+    }
+    CHECK(controller->Wave() && controller->Wave()->low[0] == kept.low[0]
+          && controller->Wave()->high[0] == kept.high[0]);
+    CHECK(processor_point->disconnect(controller_point) == kResultOk);
+    CHECK(controller_point->disconnect(processor_point) == kResultOk);
+    CHECK(controller->terminate() == kResultOk);
+    std::printf("late display replies: one of an earlier connection and one overtaken by a "
+                "newer reply are not taken; the waveform stays that of the file the core reads\n");
 }
 
 // MS-R16: a valid project file whose decoding runs out of memory. setState refuses
@@ -1502,6 +1614,7 @@ void TestNoExceptionLeavesHostCalls() {
     status->getAttributes()->setInt(kAttrSerial, 7);
     status->getAttributes()->setInt(kAttrUserLoads, 0);
     status->getAttributes()->setInt(kAttrProcessor, 12345);
+    status->getAttributes()->setInt(kAttrGeneration, controller->Generation());
     IPtr<IMessage> load = owned(new HostMessage());
     load->setMessageID(kLoadMessageId);
     load->getAttributes()->setBinary(kAttrPath, g_path.data(), static_cast<uint32>(g_path.size()));
@@ -1525,6 +1638,8 @@ void TestNoExceptionLeavesHostCalls() {
     wave->columns = 1000;
     IPtr<IMessage> display_reply = owned(new HostMessage());
     display_reply->setMessageID(kDisplayMessageId);
+    display_reply->getAttributes()->setInt(kAttrGeneration, controller->Generation());
+    display_reply->getAttributes()->setInt(kAttrReply, 1000000);
     display_reply->getAttributes()->setBinary(kAttrFrame, &frame, sizeof frame);
     display_reply->getAttributes()->setBinary(kAttrWave, wave.get(), sizeof(WaveOverview));
     const std::vector<Call> calls = {
@@ -1572,6 +1687,21 @@ void TestNoExceptionLeavesHostCalls() {
          }},
         {"processor notify (display request)", [&] { return host.processor->notify(display_request); }},
         {"controller notify (display)", [&] { return controller->notify(display_reply); }},
+        // MS-R23: a reply whose attribute list the host makes on first access.
+        {"controller notify (display, attributes made on access)", [&] {
+             test_support::g_fail_armed = false; // the message itself is the host's
+             IPtr<IMessage> bare = owned(new HostMessage());
+             bare->setMessageID(kDisplayMessageId);
+             test_support::g_fail_armed = true;
+             return controller->notify(bare);
+         }},
+        {"processor notify (note, attributes made on access)", [&] {
+             test_support::g_fail_armed = false;
+             IPtr<IMessage> bare = owned(new HostMessage());
+             bare->setMessageID(kNoteMessageId);
+             test_support::g_fail_armed = true;
+             return host.processor->notify(bare);
+         }},
         // MS-R19: what the factory calls, and the processor's life cycle: initialize,
         // an activation at another rate than the adapter's (44.1 kHz, the SDK's default
         // setup, against the 48 kHz of initialize), setupProcessing to 96 kHz.
@@ -1649,7 +1779,7 @@ void TestNoExceptionLeavesHostCalls() {
     CHECK(processor_point->disconnect(controller_point) == kResultOk);
     CHECK(controller_point->disconnect(processor_point) == kResultOk);
     CHECK(controller->terminate() == kResultOk);
-    std::printf("host calls: no exception leaves them, whichever allocation fails (fourteen calls, "
+    std::printf("host calls: no exception leaves them, whichever allocation fails (sixteen calls, "
                 "parameter texts, the window, the display, the factory and the life cycle included)\n");
 #else
     std::printf("host calls under failing allocations: Release builds only (Debug STL proxies)\n");
@@ -1681,6 +1811,7 @@ int main() {
     TestDisplayPath();
     TestNoExceptionLeavesHostCalls();
     TestNewProcessorSameController();
+    TestLateDisplayReply();
     TestProjectWithoutMemory();
     TestActivation();
     TestTwoInstances();

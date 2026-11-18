@@ -68,6 +68,8 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
     // controller has it (else null). For the window and tests.
     const EngineDisplay& Display() const { return display_; }
     const WaveOverview* Wave() const { return ShownWave().get(); }
+    // The connection generation (MS-R21); it grows with every connect. For tests.
+    Steinberg::int64 Generation() const { return generation_; }
 
     // The host asks for a parameter's text, or the value of a typed text; guarded
     // (MS-R11).
@@ -111,13 +113,22 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
     void ShowFile() noexcept;
     Steinberg::tresult ReadDisplay(Steinberg::Vst::IMessage* message) noexcept;
     void ShowDisplay() noexcept;
-    // wave_ if it belongs to the file display_ shows, else null.
+    Steinberg::tresult ReadDisplayUnchecked(Steinberg::Vst::IMessage* message);
+    // wave_ if it belongs to the file display_ shows, else null. Both come from the
+    // current connection only (MS-R21).
     std::shared_ptr<const WaveOverview> ShownWave() const noexcept {
-        return wave_ && display_.frames != 0 && wave_->sequence == display_.sequence ? wave_ : nullptr;
+        return wave_ && display_.frames != 0 && wave_->sequence == display_.sequence
+                       && wave_->frames == display_.frames
+                   ? wave_
+                   : nullptr;
     }
-    // MS-R04, MS-R12, MS-R17: one setDirty for each file from the window that became
-    // the sound, counted from parameter 199 (the count modulo 65536) and from the
-    // status (the full count and the processor it belongs to).
+    // A message with the current generation attached; null without memory.
+    Steinberg::IPtr<Steinberg::Vst::IMessage> NewMessage(const char* id);
+    // MS-R04, MS-R12, MS-R17, MS-R20: setDirty for the files from the window that
+    // became the sound, counted from parameter 199 (the count modulo 65536) and from
+    // the status (the full count and the processor it belongs to). The contract: at
+    // least one call for every change the host passes on, one per file up to
+    // kMostDirtyCalls for one report; a host needs one to know.
     void CountFromParameter(std::uint32_t count) noexcept;
     void CountFromStatus(std::uint64_t processor, std::uint32_t count) noexcept;
     void MarkChanged(std::uint32_t loads) noexcept;
@@ -127,16 +138,23 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
     std::vector<OpenEditor> editors_;
     EditorSettings editor_;
     FileStatus file_;
-    // The loads of processor counted_for_ (0: not named by a status yet) that have
-    // been counted.
+    // The loads of processor counted_for_ (0: none named yet) that have been counted.
     std::uint32_t user_loads_counted_ = 0;
     std::uint64_t counted_for_ = 0;
-    // Set by connect() until the next status: a step back of parameter 199 then
-    // comes from a new processor, not from an old value.
-    bool peer_unconfirmed_ = false;
-    // Set when such a step back has counted the new processor's loads from its zero,
-    // until its first status names it.
-    bool counted_from_parameter_ = false;
+    // From connect() until the first status of that connection (MS-R20): which
+    // processor sends parameter 199 is not known. Every change then marks the project,
+    // and marked_since_connect_ says how many loads that stood for, so that the status
+    // adds only what is missing.
+    bool peer_unconfirmed_ = true;
+    std::uint32_t marked_since_connect_ = 0;
+    bool parameter_since_connect_ = false;
+    std::uint32_t last_parameter_ = 0;
+    // The connection generation (MS-R21) and, within it, the newest status serial and
+    // display reply taken.
+    Steinberg::int64 generation_ = 1;
+    std::uint32_t last_status_serial_ = 0;
+    std::uint64_t last_reply_ = 0;
+    static constexpr std::uint32_t kMostDirtyCalls = 64;
     EngineDisplay display_{};
     std::shared_ptr<const WaveOverview> wave_; // may belong to an older file than display_
 };

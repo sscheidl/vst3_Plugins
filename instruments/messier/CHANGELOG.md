@@ -1,5 +1,26 @@
 # Changes
 
+## 0.1.6 (2026-11-18)
+
+The six findings of Codex' check of 0.1.5 (`docs/CODEX_REVIEW_0.1.5.md`), fixed; details
+in `docs/BUILD_REPORT_0.1.6.md`. The sound is unchanged.
+
+* MS-R20: after a connect, before the first status, every change of parameter 199 marks
+  the project; the status then adds only what is missing, for a new processor as for a
+  reconnect to the same one. One `setDirty` per file, at most 64 for one report: the
+  contract is at least one for every change.
+* MS-R21: every message of the controller carries its connection generation, which the
+  processor stamps on its replies; status and display replies of an earlier connection,
+  or overtaken by newer ones, are not taken. The cached waveform must match the file's
+  number and length.
+* MS-R22: a RESET press waiting in the adapter survives a change of sample rate.
+* MS-R23: receiving a message lets no exception out, also when the host makes the
+  attribute list on first access.
+* MS-R24: building the window lets no exception out: what was built is let go, and the
+  host gets an error instead of an empty window.
+* MS-R25: the WAV reader tells a missing file from a file-system error and a want of
+  memory, also inside the stream.
+
 ## 0.1.5 (2026-11-18)
 
 The four findings of Codex' check of 0.1.3 (`docs/CODEX_REVIEW_0.1.3.md`), fixed; details

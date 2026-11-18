@@ -99,13 +99,18 @@ constexpr KnobSpec kKnobs[Editor::kKnobCount] = {
 CTextLabel* MakeLabel(const CRect& size, const char* text, CFontRef font, CColor color,
                       CHoriTxtAlign align) {
     auto* label = new CTextLabel(size, text);
-    label->setFont(font);
-    label->setFontColor(color);
-    label->setBackColor(kTransparentCColor);
-    label->setFrameColor(kTransparentCColor);
-    label->setStyle(CParamDisplay::kNoFrame);
-    label->setHoriAlign(align);
-    label->setMouseEnabled(false);
+    try {
+        label->setFont(font);
+        label->setFontColor(color);
+        label->setBackColor(kTransparentCColor);
+        label->setFrameColor(kTransparentCColor);
+        label->setStyle(CParamDisplay::kNoFrame);
+        label->setHoriAlign(align);
+        label->setMouseEnabled(false);
+    } catch(...) {
+        label->forget(); // MS-R24: not yet the frame's
+        throw;
+    }
     return label;
 }
 
@@ -143,7 +148,35 @@ void Editor::ForgetViews() {
     map_view_ = nullptr;
 }
 
+tresult PLUGIN_API Editor::attached(void* parent, FIDString type) {
+    tresult result = kResultFalse;
+    try {
+        result = VSTGUIEditor::attached(parent, type);
+    } catch(...) {
+        result = kOutOfMemory;
+    }
+    if(result == kResultOk && frame)
+        return kResultOk;
+    // open() failed (the SDK attaches anyway) or something after it threw: nothing
+    // half built stays, and the controller forgets this window again (the SDK's
+    // removed(): the timer stopped, close(), the editor detached).
+    try {
+        VSTGUIEditor::removed();
+    } catch(...) {
+    }
+    return result == kResultOk ? kResultFalse : result;
+}
+
 bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
+    try {
+        return OpenUnchecked(parent, platformType);
+    } catch(...) {
+        close(); // the frame and the views it owns; views not yet in it were let go
+        return false;
+    }
+}
+
+bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     frame = new CFrame(CRect(0, 0, kWidth, EditorBaseHeight(settings_.keyboard)), this);
     frame->setBackgroundColor(kBackground);
     frame->enableTooltips(true);
@@ -158,35 +191,28 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
     const auto file_font = makeOwned<CFontDesc>("Segoe UI", 13, kBoldFace);
     const auto info_font = makeOwned<CFontDesc>("Segoe UI", 11);
 
-    frame->addView(MakeLabel(CRect(kMargin, 14, 200, 42), stringPluginName, title_font, kText,
-                             kLeftText));
+    Add(MakeLabel(CRect(kMargin, 14, 200, 42), stringPluginName, title_font, kText, kLeftText));
     const CCoord button_left = kWidth - kMargin - kButtonWidth;
-    frame->addView(MakeLabel(CRect(kWidth / 2, 18, button_left - 12, 40),
-                             stringCompanyName "  " FULL_VERSION_STR, name_font, kDimText,
-                             kRightText));
-    keyboard_button_ = new ToggleButton(CRect(button_left, 18, kWidth - kMargin, 40), "KEYS",
-                                        settings_.keyboard,
-                                        [this](bool on) { SetKeyboardVisible(on); });
-    frame->addView(keyboard_button_);
+    Add(MakeLabel(CRect(kWidth / 2, 18, button_left - 12, 40),
+                  stringCompanyName "  " FULL_VERSION_STR, name_font, kDimText, kRightText));
+    keyboard_button_ = Add(new ToggleButton(CRect(button_left, 18, kWidth - kMargin, 40), "KEYS",
+                                            settings_.keyboard,
+                                            [this](bool on) { SetKeyboardVisible(on); }));
 
     // The sample: LOAD, its name, its format or what went wrong.
-    auto* load = new ToggleButton(CRect(kMargin, kFileTop, kMargin + 72, kFileTop + 22), "LOAD...",
-                                  false, [this](bool) { ChooseFile(); }, ToggleButton::Style::Action);
+    auto* load = Add(new ToggleButton(CRect(kMargin, kFileTop, kMargin + 72, kFileTop + 22), "LOAD...",
+                                      false, [this](bool) { ChooseFile(); }, ToggleButton::Style::Action));
     load->setTooltipText("Load a WAV file: 16 or 24 bit PCM or 32 bit float, mono or stereo");
-    frame->addView(load);
-    file_name_ = MakeLabel(CRect(kMargin + 84, kFileTop, kWidth - kMargin, kFileTop + 22), "",
-                           file_font, kText, kLeftText);
-    frame->addView(file_name_);
-    file_info_ = MakeLabel(CRect(kMargin + 84, kInfoTop, kWidth - kMargin, kInfoTop + 18), "",
-                           info_font, kDimText, kLeftText);
-    frame->addView(file_info_);
+    file_name_ = Add(MakeLabel(CRect(kMargin + 84, kFileTop, kWidth - kMargin, kFileTop + 22), "",
+                               file_font, kText, kLeftText));
+    file_info_ = Add(MakeLabel(CRect(kMargin + 84, kInfoTop, kWidth - kMargin, kInfoTop + 18), "",
+                               info_font, kDimText, kLeftText));
     ApplyFileTexts();
 
-    map_view_ = new MapView(CRect(kMargin, kMapTop, kWidth - kMargin, kMapBottom));
+    map_view_ = Add(new MapView(CRect(kMargin, kMapTop, kWidth - kMargin, kMapBottom)));
     map_view_->Show(shown_display_, shown_wave_);
-    frame->addView(map_view_);
 
-    keyboard_view_ = new KeyboardView(CRect(kMargin + 40, kKeyboardTop, kWidth - kMargin - 40,
+    keyboard_view_ = Add(new KeyboardView(CRect(kMargin + 40, kKeyboardTop, kWidth - kMargin - 40,
                                             kKeyboardBottom),
                                       [this](int note) {
                                           if(callbacks_.strike)
@@ -195,24 +221,21 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
                                       [this](int note) {
                                           if(callbacks_.release)
                                               callbacks_.release(note);
-                                      });
+                                      }));
     keyboard_view_->SetTranspose(settings_.transpose);
     keyboard_view_->setVisible(settings_.keyboard);
-    frame->addView(keyboard_view_);
-    octave_down_ = new ToggleButton(CRect(kMargin, kKeyboardTop + 22, kMargin + 32,
+    octave_down_ = Add(new ToggleButton(CRect(kMargin, kKeyboardTop + 22, kMargin + 32,
                                           kKeyboardTop + 46),
                                     "<<", false,
                                     [this](bool) { SetKeyboardTranspose(settings_.transpose - 12); },
-                                    ToggleButton::Style::Action);
-    octave_up_ = new ToggleButton(CRect(kWidth - kMargin - 32, kKeyboardTop + 22, kWidth - kMargin,
+                                    ToggleButton::Style::Action));
+    octave_up_ = Add(new ToggleButton(CRect(kWidth - kMargin - 32, kKeyboardTop + 22, kWidth - kMargin,
                                         kKeyboardTop + 46),
                                   ">>", false,
                                   [this](bool) { SetKeyboardTranspose(settings_.transpose + 12); },
-                                  ToggleButton::Style::Action);
+                                  ToggleButton::Style::Action));
     octave_down_->setTooltipText("Keyboard down one octave (lowest: C2 to C4)");
     octave_up_->setTooltipText("Keyboard up one octave (highest: C6 to C8)");
-    frame->addView(octave_down_);
-    frame->addView(octave_up_);
 
     for(std::size_t i = 0; i < knobs_.size(); ++i) {
         const KnobSpec& spec = kKnobs[i];
@@ -223,13 +246,13 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         const CCoord value_top = spec.small ? kSmallValueTop : kValueTop;
         const CCoord knob_left = left + (kColumnWidth - size) / 2;
 
-        frame->addView(MakeLabel(CRect(left, name_top, left + kColumnWidth, name_top + 16), spec.name,
-                                 spec.small ? small_name_font : name_font, kDimText, kCenterText));
+        Add(MakeLabel(CRect(left, name_top, left + kColumnWidth, name_top + 16), spec.name,
+                      spec.small ? small_name_font : name_font, kDimText, kCenterText));
         int32_t style = CKnob::kCoronaOutline | CKnob::kCoronaDrawing;
         if(spec.bipolar)
             style |= CKnob::kCoronaFromCenter;
-        auto* knob = new CKnob(CRect(knob_left, top, knob_left + size, top + size), this,
-                               static_cast<int32_t>(spec.id), nullptr, nullptr, CPoint(0, 0), style);
+        auto* knob = Add(new CKnob(CRect(knob_left, top, knob_left + size, top + size), this,
+                                   static_cast<int32_t>(spec.id), nullptr, nullptr, CPoint(0, 0), style));
         knob->setCoronaColor(spec.ring);
         knob->setColorShadowHandle(kTrack);
         knob->setColorHandle(kText);
@@ -238,10 +261,8 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
         knob->setInsetValue(spec.small ? 10 : 15);
         knob->setDefaultValue(static_cast<float>(kDefaults[static_cast<std::size_t>(Index(spec.id))]));
         knob->setWheelInc(0.01f);
-        frame->addView(knob);
-        auto* value = MakeLabel(CRect(left, value_top, left + kColumnWidth, value_top + 18), "",
-                                spec.small ? small_value_font : value_font, kText, kCenterText);
-        frame->addView(value);
+        auto* value = Add(MakeLabel(CRect(left, value_top, left + kColumnWidth, value_top + 18), "",
+                                    spec.small ? small_value_font : value_font, kText, kCenterText));
         knobs_[i] = {spec.id, knob, value};
         const ParamValue normalized = controller ? controller->getParamNormalized(spec.id) : 0.0;
         knob->setValue(static_cast<float>(normalized));
@@ -252,17 +273,15 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
     const CCoord column = kMargin + 8 * kColumnWidth;
     const CCoord button_inset = (kColumnWidth - 60) / 2;
     const bool frozen = controller && IsOn(controller->getParamNormalized(kParamFreeze));
-    freeze_button_ = new ToggleButton(CRect(column + button_inset, kSmallKnobTop - 6,
-                                            column + button_inset + 60, kSmallKnobTop + 16),
-                                      "FREEZE", frozen, [this](bool on) { SetFreeze(on); });
+    freeze_button_ = Add(new ToggleButton(CRect(column + button_inset, kSmallKnobTop - 6,
+                                                column + button_inset + 60, kSmallKnobTop + 16),
+                                          "FREEZE", frozen, [this](bool on) { SetFreeze(on); }));
     freeze_button_->setTooltipText("Freeze: the playhead stands still; grains and the vocoder go on");
-    frame->addView(freeze_button_);
-    auto* reset = new ToggleButton(CRect(column + button_inset, kSmallKnobTop + 26,
-                                         column + button_inset + 60, kSmallKnobTop + 48),
-                                   "RESET", false, [this](bool) { PressReset(); },
-                                   ToggleButton::Style::Action);
+    auto* reset = Add(new ToggleButton(CRect(column + button_inset, kSmallKnobTop + 26,
+                                             column + button_inset + 60, kSmallKnobTop + 48),
+                                       "RESET", false, [this](bool) { PressReset(); },
+                                       ToggleButton::Style::Action));
     reset->setTooltipText("Reset: playback back to START");
-    frame->addView(reset);
 
     if(!frame->open(parent, platformType)) {
         frame->forget();
