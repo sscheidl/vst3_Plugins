@@ -34,7 +34,7 @@ const GuiPresetInfo kPresets[kGuiPresetCount] = {
       Rgba(255, 255, 255, 0.07), Rgba(175, 190, 215, 0.07), Rgba(175, 190, 215, 0.28),
       Rgba(220, 226, 236, 0.75), Rgb(104, 82, 156), Rgb(56, 68, 128), Rgb(255, 238, 210),
       Rgb(255, 214, 170), Rgb(242, 230, 214), Rgba(205, 215, 240, 0.06), Rgba(205, 215, 240, 0.07),
-      Rgba(220, 226, 236, 0.35), Rgb(242, 220, 188), Rgb(140, 146, 150), Rgba(0, 0, 0, 0.6),
+      Rgba(220, 226, 236, 0.35), Rgb(242, 220, 188), Rgb(140, 146, 150), Rgb(176, 188, 222), Rgba(0, 0, 0, 0.6),
       Rgba(220, 214, 200, 0.6), Rgb(18, 20, 21), Rgb(220, 214, 202), Rgb(236, 172, 64), false}},
     {"Silver", "silver", false,
      {Rgb(176, 178, 177), Rgb(150, 154, 153), Rgb(11, 15, 26), Rgb(28, 31, 33), Rgb(75, 79, 81),
@@ -42,7 +42,7 @@ const GuiPresetInfo kPresets[kGuiPresetCount] = {
       Rgba(255, 255, 255, 0.55), Rgba(175, 190, 215, 0.07), Rgba(175, 190, 215, 0.28),
       Rgba(220, 226, 236, 0.75), Rgb(104, 82, 156), Rgb(56, 68, 128), Rgb(255, 238, 210),
       Rgb(255, 214, 170), Rgb(242, 230, 214), Rgba(205, 215, 240, 0.06), Rgba(205, 215, 240, 0.07),
-      Rgba(220, 226, 236, 0.35), Rgb(250, 236, 214), Rgb(92, 96, 98), Rgba(0, 0, 0, 0.35),
+      Rgba(220, 226, 236, 0.35), Rgb(250, 236, 214), Rgb(92, 96, 98), Rgb(176, 188, 222), Rgba(0, 0, 0, 0.35),
       Rgba(30, 34, 36, 0.6), Rgb(18, 20, 21), Rgb(28, 31, 33), Rgb(176, 96, 20), false}},
     {"Copper", "copper", false,
      {Rgb(56, 40, 34), Rgb(88, 58, 44), Rgb(15, 9, 9), Rgb(228, 199, 173), Rgb(158, 126, 105),
@@ -50,7 +50,7 @@ const GuiPresetInfo kPresets[kGuiPresetCount] = {
       Rgba(255, 255, 255, 0.07), Rgba(220, 150, 120, 0.07), Rgba(220, 150, 120, 0.24),
       Rgba(236, 210, 190, 0.75), Rgb(138, 52, 66), Rgb(96, 42, 66), Rgb(255, 196, 140),
       Rgb(244, 146, 86), Rgb(241, 124, 62), Rgba(240, 150, 110, 0.06), Rgba(240, 150, 110, 0.07),
-      Rgba(236, 210, 190, 0.35), Rgb(244, 178, 128), Rgb(130, 96, 80), Rgba(0, 0, 0, 0.6),
+      Rgba(236, 210, 190, 0.35), Rgb(244, 178, 128), Rgb(130, 96, 80), Rgb(226, 170, 150), Rgba(0, 0, 0, 0.6),
       Rgba(228, 199, 173, 0.55), Rgb(18, 12, 10), Rgb(228, 199, 173), Rgb(236, 172, 64), false}},
     {"Photo plate", "plate", false,
      {Rgb(58, 52, 42), Rgb(64, 96, 79), Rgb(205, 209, 202), Rgb(226, 217, 198), Rgb(164, 154, 134),
@@ -58,7 +58,7 @@ const GuiPresetInfo kPresets[kGuiPresetCount] = {
       Rgba(255, 255, 255, 0.07), Rgba(25, 28, 26, 0.12), Rgba(25, 28, 26, 0.42), Rgba(20, 22, 21, 0.75),
       Rgb(120, 116, 108), Rgb(150, 142, 128), Rgb(20, 22, 21), Rgb(30, 32, 31), Rgb(29, 32, 31),
       Rgba(20, 22, 21, 0.04), Rgba(20, 22, 21, 0.08), Rgba(20, 22, 21, 0.45), Rgb(232, 222, 200),
-      Rgb(130, 124, 110), Rgba(0, 0, 0, 0.6), Rgba(226, 217, 198, 0.6), Rgb(20, 17, 12), Rgb(226, 217, 198),
+      Rgb(130, 124, 110), Rgb(40, 44, 42), Rgba(0, 0, 0, 0.6), Rgba(226, 217, 198, 0.6), Rgb(20, 17, 12), Rgb(226, 217, 198),
       Rgb(236, 172, 64), true}},
 };
 
@@ -197,13 +197,15 @@ CFontRef Skin::FontOf(int kind, double size) const {
     for(const Font& font : fonts_)
         if(font.kind == kind && font.size == size)
             return font.font;
-    // System fonts of Windows: Palatino Linotype for the engraved capitals and the
-    // italic file name, Consolas for values (the study's web fonts are not in the
-    // bundle). Never dropped while the skin lives, so a font handed out stays valid.
+    // System fonts of Windows: Palatino Linotype for the brand, the version and the
+    // italic file name, Bahnschrift for the controls' texts (0.2.1), Consolas for values
+    // (the study's web fonts are not in the bundle). Never dropped while the skin lives,
+    // so a font handed out stays valid.
     Font font{kind, size, nullptr};
     switch(kind) {
         case 0: font.font = makeOwned<CFontDesc>("Palatino Linotype", size, kBoldFace); break;
         case 1: font.font = makeOwned<CFontDesc>("Palatino Linotype", size, kItalicFace); break;
+        case 3: font.font = makeOwned<CFontDesc>("Bahnschrift", size, kBoldFace); break;
         default: font.font = makeOwned<CFontDesc>("Consolas", size); break;
     }
     fonts_.push_back(font);
@@ -212,6 +214,10 @@ CFontRef Skin::FontOf(int kind, double size) const {
 
 CFontRef Skin::Caps(double size) const {
     return FontOf(0, size);
+}
+
+CFontRef Skin::Sans(double size) const {
+    return FontOf(3, size);
 }
 
 CFontRef Skin::Italic(double size) const {

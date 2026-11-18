@@ -82,45 +82,56 @@ void PanelView::DrawUnchecked(CDrawContext* context) {
     if(keyboard_)
         DrawRule(context, c, CPoint(x0, all.top + L::kKeyboardRule), CPoint(x1, all.top + L::kKeyboardRule));
 
-    // The header: brand, an accent stroke, the subtitle; the maker and version.
-    const CFontRef brand_font = skin.Caps(30);
-    const CCoord brand_width = TrackedWidth(context, "MESSIER", 9, brand_font);
-    const CCoord brand_left = all.left + 40;
-    DrawTracked(context, "MESSIER", CRect(brand_left, all.top + 5, brand_left + brand_width + 4, all.top + 41),
-                kLeftText, 9, brand_font, c.text, &c);
-    const CCoord stroke = brand_left + brand_width + 14;
-    context->setFillColor(c.accent);
-    context->drawRect(CRect(stroke, all.top + 12, stroke + 2, all.top + 36), kDrawFilled);
-    DrawTracked(context, "granular looper & phase vocoder",
-                CRect(stroke + 14, all.top + 10, all.left + L::kVersionRight - 120, all.top + 36), kLeftText, 0.8,
-                skin.Italic(16.5), c.text, &c);
-    DrawTracked(context, stringCompanyName " " FULL_VERSION_STR,
-                CRect(all.left + L::kVersionRight - 160, all.top + 14, all.left + L::kVersionRight, all.top + 36),
-                kRightText, 1.6, skin.Caps(12), c.text, &c);
+    // The header: brand, an accent stroke, the subtitle; the maker and version. Only when
+    // the header is redrawn (the texts cost more than the plate's frame).
+    CRect header;
+    context->getClipRect(header);
+    if(header.top < all.top + L::kHeaderRule) {
+        const CFontRef brand_font = skin.Caps(30);
+        const CCoord brand_width = TrackedWidth(context, "MESSIER", 9, brand_font);
+        const CCoord brand_left = all.left + 40;
+        DrawTracked(context, "MESSIER", CRect(brand_left, all.top + 5, brand_left + brand_width + 4, all.top + 41),
+                    kLeftText, 9, brand_font, c.text, &c);
+        const CCoord stroke = brand_left + brand_width + 14;
+        context->setFillColor(c.accent);
+        context->drawRect(CRect(stroke, all.top + 12, stroke + 2, all.top + 36), kDrawFilled);
+        DrawTracked(context, "granular looper & phase vocoder",
+                    CRect(stroke + 14, all.top + 10, all.left + L::kVersionRight - 120, all.top + 36), kLeftText, 0.8,
+                    skin.Italic(16.5), c.text, &c);
+        DrawTracked(context, stringCompanyName " " FULL_VERSION_STR,
+                    CRect(all.left + L::kVersionRight - 160, all.top + 14, all.left + L::kVersionRight, all.top + 36),
+                    kRightText, 1.6, skin.Caps(12), c.text, &c);
+    }
 
     // The file line's accent stroke between LOAD... and the name.
     context->setFillColor(c.accent);
     context->drawRect(CRect(all.left + 122, all.top + L::kLoadTop, all.left + 124, all.top + L::kLoadBottom),
                       kDrawFilled);
 
+    // The knobs' names in the controls' sans serif (0.2.1, the user's wish). Only those
+    // the redrawn area touches: the plate is drawn about 40 times a second.
+    CRect clip;
+    context->getClipRect(clip);
     for(const Label& label : labels_) {
         const CRect box = CRect(label.box).offset(all.left, all.top);
+        if(!CRect(box).extend(4, 4).rectOverlap(clip))
+            continue;
         switch(label.kind) {
             case LabelKind::kKnob:
-                DrawTracked(context, label.text, box, kCenterText, 1.8, skin.Caps(13.5), c.text, &c);
+                DrawTracked(context, label.text, box, kCenterText, 1.3, skin.Sans(13), c.text, &c);
                 break;
             case LabelKind::kSmallKnob:
-                DrawTracked(context, label.text, box, kCenterText, 1.4, skin.Caps(12), c.text, &c);
+                DrawTracked(context, label.text, box, kCenterText, 1.0, skin.Sans(11.5), c.text, &c);
                 break;
             case LabelKind::kReserved: {
                 const std::size_t split = label.text.find('\n');
                 const CCoord half = box.getHeight() / 2;
                 DrawTracked(context, label.text.substr(0, split), CRect(box.left, box.top, box.right, box.top + half),
-                            kCenterText, 1.2, skin.Caps(10.5), c.dim, &c);
+                            kCenterText, 0.9, skin.Sans(10.5), c.dim, &c);
                 if(split != std::string::npos)
                     DrawTracked(context, label.text.substr(split + 1),
-                                CRect(box.left, box.top + half, box.right, box.bottom), kCenterText, 1.2,
-                                skin.Caps(10.5), c.dim, &c);
+                                CRect(box.left, box.top + half, box.right, box.bottom), kCenterText, 0.9,
+                                skin.Sans(10.5), c.dim, &c);
                 break;
             }
         }

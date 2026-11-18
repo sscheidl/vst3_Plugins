@@ -1,5 +1,33 @@
 # Changes
 
+## 0.2.1 (2026-11-18)
+
+From the user's first look at 0.2.0 in Studio One and Codex' check of 0.2.0
+(`docs/CODEX_REVIEW_0.2.0.md`); details in `docs/BUILD_REPORT_0.2.1.md`. The sound is
+unchanged.
+
+* The values under the knobs follow the knob at once. Before, they waited for the
+  window's timer, which Studio One holds back while a knob is dragged.
+* The plate stays fluid: between two displays playhead and grains move on at their
+  measured speeds, the plate is drawn about 40 times a second, and edits from the window
+  or the host keep it going when the timer is held back.
+* The loop follows START and SIZE at once (drawn from the parameters, not from the next
+  display).
+* Trial: the waveform lies on the glass, behind the grains, in a cool tint; the plate is
+  taller for it (the strip below is gone).
+* The nebula moves visibly but slowly (periods of 45 to 90 s).
+* RESET sets every knob and START to its default and ends Freeze, then sends the
+  playhead back to START as before. Parameter 121 (automation) is unchanged.
+* A click on the snowflake ends Freeze.
+* The controls' texts (knob names, buttons, scale, legend) are in a sans serif
+  (Bahnschrift); brand, version and file name stay serif.
+* MS-R40: a menu that cannot be shown no longer stays in the window (a crash when closing).
+* MS-R41: a preset change is complete or not at all; a project's window size and keyboard
+  are taken even if its look cannot be made.
+* MS-R42: the size and preset menus tick the current entry.
+* MS-R43: a grain gets a tail only after two moves that agree; ambiguous or implausible
+  matches start anew.
+
 ## 0.2.0 (2026-11-18)
 
 The window of the window study, version 3, with the user's decisions of 2026-11-18;

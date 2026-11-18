@@ -164,8 +164,21 @@ The new window (0.2.0, Slate; judge the look as well as what it shows):
       octave keys hide with the keyboard.
 - [ ] Texts: brand, subtitle, knob names and values readable and not cut at 50 %, 100 %
       and 200 %; "TAUREON 0.2.0" does not touch STOP.
-- [ ] CPU: the window open costs no more than with 0.1.11 (the plate is drawn about
-      every 30 ms while playing, every 120 ms otherwise).
+- [ ] CPU: the window open costs no more than with 0.1.11 (since 0.2.1 the plate is drawn
+      about 40 times a second).
+
+0.2.1 (from the first look at 0.2.0):
+
+- [ ] The values under the knobs change while a knob is dragged.
+- [ ] Dragging a knob, or START, does not freeze or stutter the plate; the loop and the
+      thumb follow START at once.
+- [ ] The waveform on the glass (trial): readable behind the grains, not too bright;
+      keep it there or back below the plate?
+- [ ] The nebula visibly moves, slowly.
+- [ ] RESET: every knob and START to their defaults, FREEZE off, playback from START.
+- [ ] A click on the snowflake ends Freeze.
+- [ ] The sans serif of the controls reads well at 50, 100 and 200 %.
+- [ ] The size and preset menus tick the current entry.
 
 ## 7. Listening
 

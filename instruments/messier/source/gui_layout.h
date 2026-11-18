@@ -30,16 +30,16 @@ constexpr double kLoadLeft = 22, kLoadTop = 52, kLoadRight = 108, kLoadBottom = 
 constexpr double kFileLeft = 138, kFileRight = 760;
 constexpr double kFileNameTop = 48, kFileNameBottom = 70, kFileInfoBottom = 86;
 
-// The plate view: the time axis, the plate in its bezel, the waveform, the START slider
-// and its row. Its x axis (the file) runs from kTimeLeft to kTimeRight.
+// The plate view: the time axis, the plate in its bezel (since 0.2.1 with the waveform on
+// the glass, the user's trial), the START slider and its row. Its x axis (the file) runs
+// from kTimeLeft to kTimeRight.
 constexpr double kMapLeft = 8, kMapTop = 84, kMapRight = 872, kMapBottom = 426;
 constexpr double kTimeLeft = 20, kTimeRight = 860;
 constexpr double kBezelEdge = 12;
 // Inside the plate view, from its top.
 constexpr double kAxisBottom = 20;   // the axis labels above, the ticks reach down to the bezel
-constexpr double kPlateTop = 32;     // the glass, 186 high, as its bitmap
-constexpr double kPlateHeight = 186;
-constexpr double kWaveTop = 236, kWaveHeight = 50;
+constexpr double kPlateTop = 32;     // the glass: its bitmap (186 high) stretched to 242
+constexpr double kPlateHeight = 242; // 0.2.0: 186, with the waveform below it
 constexpr double kSliderTop = 290, kSliderHeight = 30;
 constexpr double kRowTop = 322, kRowHeight = 18;
 

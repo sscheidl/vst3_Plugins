@@ -182,6 +182,7 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     frame->enableTooltips(true);
     applied_zoom_ = 1.0;
     drag_ = DragConstraint{};
+    ++window_serial_;
     skin_ = std::make_shared<const Skin>(settings_.preset);
     const Skin& skin = *skin_;
     const SkinColours& colours = skin.Colours();
@@ -225,6 +226,7 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     map_view_->Show(shown_display_, shown_wave_);
     if(controller) {
         map_view_->SetStart(controller->getParamNormalized(kParamStart));
+        map_view_->SetSize(controller->getParamNormalized(kParamSize));
         map_view_->SetBlend(controller->getParamNormalized(kParamBlend));
     }
     // Since 0.1.8: on the map a click or drag sets START, the wheel SPRAY, as edits the
@@ -255,6 +257,7 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
             controller->performEdit(kParamSpray, value);
             controller->endEdit(kParamSpray);
         };
+        edits.freeze_off = [this] { SetFreeze(false); }; // a click on the snowflake (0.2.1)
         map_view_->SetEdits(std::move(edits));
     }
     // Drag and drop (since 0.1.8): a WAV dropped on the file line or the map loads as
@@ -360,7 +363,7 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
                                            L::kResetTop + L::kButtonHeight),
                                        "RESET", false, [this](bool) { PressReset(); },
                                        ToggleButton::Style::Action));
-    reset->setTooltipText("Reset: playback back to START");
+    reset->setTooltipText("Reset: all knobs and START to their defaults, Freeze off, playback back to START");
     // The resize grip in the lower right corner (0.1.11), added last so that it is on top;
     // LayOut() puts it into the corner of the height the keyboard leaves.
     grip_ = Add(new ResizeGrip(Box(0, 0, L::kGripSize, L::kGripSize), colours.dim, [this] { GripBegin(); },
@@ -381,36 +384,68 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     return true;
 }
 
-void Editor::ApplySkin() {
+void Editor::ApplySkin() noexcept {
     if(!frame || !skin_)
         return;
-    const SkinColours& colours = skin_->Colours();
-    // Every view of the frame that draws with the skin gets it.
-    frame->forEachChild([&](CView* view) {
-        if(auto* button = dynamic_cast<ToggleButton*>(view))
-            button->SetSkin(skin_);
-        else if(auto* knob = dynamic_cast<MetalKnob*>(view))
-            knob->SetSkin(skin_);
+    const SkinColours colours = skin_->Colours();
+    // Every view of the frame that draws with the skin gets it; each on its own (MS-R41).
+    Guarded([&] {
+        frame->forEachChild([&](CView* view) {
+            Guarded([&] {
+                if(auto* button = dynamic_cast<ToggleButton*>(view))
+                    button->SetSkin(skin_);
+                else if(auto* knob = dynamic_cast<MetalKnob*>(view))
+                    knob->SetSkin(skin_);
+            });
+        });
     });
-    if(panel_)
-        panel_->SetSkin(skin_);
+    Guarded([&] {
+        if(panel_)
+            panel_->SetSkin(skin_);
+    });
     if(map_view_)
         map_view_->SetSkin(skin_);
-    if(keyboard_view_)
-        keyboard_view_->SetSkin(skin_);
-    if(window_shape_)
-        window_shape_->SetColour(colours.accent);
-    if(grip_)
-        grip_->SetColour(colours.dim);
+    Guarded([&] {
+        if(keyboard_view_)
+            keyboard_view_->SetSkin(skin_);
+    });
+    Guarded([&] {
+        if(window_shape_)
+            window_shape_->SetColour(colours.accent);
+    });
+    Guarded([&] {
+        if(grip_)
+            grip_->SetColour(colours.dim);
+    });
     for(Knob& knob : knobs_)
-        if(knob.value)
-            knob.value->setFontColor(colours.accent);
-    if(file_name_)
-        file_name_->setFontColor(colours.text);
-    if(catalogue_)
-        catalogue_->setFontColor(colours.accent);
-    ApplyFileTexts(); // the info's colour
-    frame->invalid();
+        Guarded([&] {
+            if(knob.value)
+                knob.value->setFontColor(colours.accent);
+        });
+    Guarded([&] {
+        if(file_name_)
+            file_name_->setFontColor(colours.text);
+    });
+    Guarded([&] {
+        if(catalogue_)
+            catalogue_->setFontColor(colours.accent);
+    });
+    Guarded([&] { ApplyFileTexts(); }); // the info's colour
+    Guarded([&] { frame->invalid(); });
+}
+
+void Editor::Animate() noexcept {
+    const auto now = std::chrono::steady_clock::now();
+    // The timer comes every kDisplayInterval; edits in between do not ask more often.
+    if(now - last_poll_ >= kDisplayInterval * 4 / 5) {
+        last_poll_ = now;
+        Guarded([&] {
+            if(callbacks_.poll)
+                callbacks_.poll();
+        });
+    }
+    if(map_view_)
+        map_view_->Tick();
 }
 
 ViewRect Editor::ScaledSize() const {
@@ -509,23 +544,25 @@ void Editor::SetZoom(double zoom) {
 }
 
 void Editor::SetGuiPreset(GuiPreset preset) {
-    if(!IsGuiPreset(static_cast<std::int32_t>(preset)) || preset == settings_.preset)
+    if(!IsGuiPreset(static_cast<std::int32_t>(preset)))
+        return;
+    // The same preset again only redraws if its look is not what the window shows (a
+    // failed change before, MS-R41).
+    if(preset == settings_.preset && (!frame || (skin_ && skin_->Preset() == ShownPreset(preset))))
         return;
     if(frame) {
-        // The new look first: if it cannot be made, the window keeps the old one.
-        skin_ = std::make_shared<const Skin>(preset);
-        settings_.preset = preset;
+        // The new look first: if it cannot be made, nothing changes. Then every view gets
+        // it; only then the setting (MS-R41).
+        auto skin = std::make_shared<const Skin>(preset);
+        skin_ = std::move(skin);
         ApplySkin();
-    } else {
-        settings_.preset = preset;
     }
+    settings_.preset = preset;
     UserChanged();
 }
 
-void Editor::ShowPresetMenu() {
-    if(!frame || !preset_button_)
-        return;
-    auto menu = makeOwned<COptionMenu>();
+SharedPointer<COptionMenu> MakePresetMenu(GuiPreset current) {
+    auto menu = makeOwned<COptionMenu>(CRect(), nullptr, -1, nullptr, nullptr, COptionMenu::kMultipleCheckStyle);
     for(std::int32_t i = 0; i < kGuiPresetCount; ++i) {
         const GuiPresetInfo& info = PresetInfo(static_cast<GuiPreset>(i));
         std::string title = info.name;
@@ -534,45 +571,79 @@ void Editor::ShowPresetMenu() {
             title += "  (bitmaps to come)";
             flags |= CMenuItem::kDisabled;
         }
-        if(static_cast<GuiPreset>(i) == settings_.preset)
+        if(static_cast<GuiPreset>(i) == current)
             flags |= CMenuItem::kChecked;
         menu->addEntry(UTF8String(title), -1, flags);
     }
+    return menu;
+}
+
+SharedPointer<COptionMenu> MakeSizeMenu(double zoom) {
+    auto menu = makeOwned<COptionMenu>(CRect(), nullptr, -1, nullptr, nullptr, COptionMenu::kMultipleCheckStyle);
+    for(const double size : kMenuZooms) {
+        char title[16];
+        std::snprintf(title, sizeof title, "%d %%", static_cast<int>(std::lround(size * 100)));
+        const bool current = std::abs(size - zoom) < 0.005;
+        menu->addEntry(UTF8String(title), -1, current ? CMenuItem::kChecked : CMenuItem::kNoFlags);
+    }
+    return menu;
+}
+
+bool PopUpMenu(CFrame* frame, COptionMenu* menu, CPoint where, std::function<void(int32_t)> chosen) {
+    if(!frame || !menu)
+        return false;
+    // A reference of our own for the whole call: the frame adds the menu as a child and
+    // removes it again only in the answer.
+    const SharedPointer<COptionMenu> hold(menu);
+    auto answered = std::make_shared<bool>(false);
+    auto take_out = [&] {
+        if(!*answered && menu->isAttached())
+            Guarded([&] { frame->removeView(menu, false); });
+    };
+    bool shown = false;
+    try {
+        shown = menu->popup(frame, where, [answered, chosen](COptionMenu* answer) {
+            *answered = true;
+            Guarded([&] {
+                if(chosen)
+                    chosen(answer ? answer->getLastResult() : -1);
+            });
+        });
+    } catch(...) {
+        take_out();
+        throw;
+    }
+    take_out(); // shown without an answer: the platform could not make the menu
+    return shown && *answered;
+}
+
+void Editor::ShowPresetMenu() {
+    if(!frame || !preset_button_)
+        return;
     const CRect at = preset_button_->getViewSize();
     const std::weak_ptr<bool> alive = alive_;
-    menu->popup(frame, CPoint(at.left, at.bottom), [this, alive](COptionMenu* chosen) {
-        Guarded([&] {
-            const auto still = alive.lock();
-            if(!still || !*still || !chosen)
-                return;
-            const int32_t index = chosen->getLastResult();
-            if(IsGuiPreset(index) && PresetInfo(static_cast<GuiPreset>(index)).delivered)
-                SetGuiPreset(static_cast<GuiPreset>(index));
-        });
+    const std::uint64_t window = window_serial_;
+    PopUpMenu(frame, MakePresetMenu(settings_.preset), CPoint(at.left, at.bottom), [this, alive, window](int32_t index) {
+        const auto still = alive.lock();
+        if(!still || !*still || !frame || window != window_serial_)
+            return; // the editor or that window is gone
+        if(IsGuiPreset(index) && PresetInfo(static_cast<GuiPreset>(index)).delivered)
+            SetGuiPreset(static_cast<GuiPreset>(index));
     });
 }
 
 void Editor::ShowSizeMenu() {
     if(!frame || !size_button_)
         return;
-    auto menu = makeOwned<COptionMenu>();
-    for(const double zoom : kMenuZooms) {
-        char title[16];
-        std::snprintf(title, sizeof title, "%d %%", static_cast<int>(std::lround(zoom * 100)));
-        const bool current = std::abs(zoom - settings_.zoom) < 0.005;
-        menu->addEntry(UTF8String(title), -1, current ? CMenuItem::kChecked : CMenuItem::kNoFlags);
-    }
     const CRect at = size_button_->getViewSize();
     const std::weak_ptr<bool> alive = alive_;
-    menu->popup(frame, CPoint(at.left, at.bottom), [this, alive](COptionMenu* chosen) {
-        Guarded([&] {
-            const auto still = alive.lock();
-            if(!still || !*still || !chosen)
-                return;
-            const int32_t index = chosen->getLastResult();
-            if(index >= 0 && index < static_cast<int32_t>(std::size(kMenuZooms)))
-                SetZoom(kMenuZooms[index]);
-        });
+    const std::uint64_t window = window_serial_;
+    PopUpMenu(frame, MakeSizeMenu(settings_.zoom), CPoint(at.left, at.bottom), [this, alive, window](int32_t index) {
+        const auto still = alive.lock();
+        if(!still || !*still || !frame || window != window_serial_)
+            return;
+        if(index >= 0 && index < static_cast<int32_t>(std::size(kMenuZooms)))
+            SetZoom(kMenuZooms[index]);
     });
 }
 
@@ -649,14 +720,8 @@ CMessageResult Editor::notify(CBaseObject* sender, const char* message) {
         });
     }
     // The controller asks the processor for the file status while a load runs.
-    if(message == CVSTGUITimer::kMsgTimer) {
-        Guarded([&] {
-            if(callbacks_.poll)
-                callbacks_.poll();
-        });
-        if(map_view_)
-            map_view_->Tick(); // the nebula drifts (0.2.0)
-    }
+    if(message == CVSTGUITimer::kMsgTimer)
+        Animate();
     return result;
 }
 
@@ -711,14 +776,16 @@ void Editor::ApplySettings(const EditorSettings& settings) {
     const GuiPreset preset =
         IsGuiPreset(static_cast<std::int32_t>(settings.preset)) ? settings.preset : GuiPreset::kSlate;
     if(preset != settings_.preset) {
-        // A loaded project brings its look. If it cannot be made, the old one stays.
-        if(frame) {
-            skin_ = std::make_shared<const Skin>(preset);
-            settings_.preset = preset;
-            ApplySkin();
-        } else {
-            settings_.preset = preset;
-        }
+        // A loaded project brings its look. If it cannot be made, the old one stays on
+        // screen, the setting is the project's, and the rest below is taken all the same
+        // (MS-R41); choosing the preset again retries.
+        settings_.preset = preset;
+        if(frame)
+            Guarded([&] {
+                auto skin = std::make_shared<const Skin>(preset);
+                skin_ = std::move(skin);
+                ApplySkin();
+            });
     }
     if(zoom == settings_.zoom && settings.keyboard == settings_.keyboard
        && transpose == settings_.transpose)
@@ -796,6 +863,7 @@ void Editor::valueChanged(CControl* control) {
         controller->setParamNormalized(id, normalized);
         controller->performEdit(id, normalized);
     });
+    Animate(); // 0.2.1: the plate moves on while the host holds back the timer
 }
 
 void Editor::SetFreeze(bool on) {
@@ -809,6 +877,24 @@ void Editor::SetFreeze(bool on) {
 }
 
 void Editor::PressReset() {
+    // 0.2.1 (the user's wish): every knob and the START slider back to its default,
+    // Freeze off, as edits the host records.
+    if(controller) {
+        auto to_default = [&](ParamID id) {
+            const ParamValue value = kDefaults[static_cast<std::size_t>(Index(id))];
+            if(controller->getParamNormalized(id) == value)
+                return;
+            controller->beginEdit(id);
+            controller->setParamNormalized(id, value);
+            controller->performEdit(id, controller->getParamNormalized(id));
+            controller->endEdit(id);
+        };
+        to_default(kParamStart);
+        for(const KnobSpec& spec : kKnobs)
+            to_default(spec.id);
+        if(IsOn(controller->getParamNormalized(kParamFreeze)))
+            SetFreeze(false);
+    }
     // MS-R08: each press goes to the processor as a message, through the controller;
     // no edit of parameter 121, which a host may merge or the window may outlive.
     if(callbacks_.reset)
@@ -872,6 +958,7 @@ void Editor::ShowDisplay(const EngineDisplay& display, std::shared_ptr<const Wav
             if(number > 0)
                 std::snprintf(text, sizeof text, "No. %llu", static_cast<unsigned long long>(number));
             catalogue_->setText(text);
+            catalogue_->invalid();
             catalogue_shown_ = number;
         });
     }
@@ -919,6 +1006,7 @@ void Editor::ApplyFileTexts() {
     if(file_name_) {
         file_name_->setText(file_name_text_.c_str());
         file_name_->setTooltipText(file_tooltip_.c_str());
+        file_name_->invalid();
     }
     if(file_zone_)
         file_zone_->setTooltipText(file_tooltip_.c_str());
@@ -926,6 +1014,7 @@ void Editor::ApplyFileTexts() {
         file_info_->setText(file_info_text_.c_str());
         if(skin_)
             file_info_->setFontColor(file_warning_ ? skin_->Colours().warning : skin_->Colours().dim);
+        file_info_->invalid();
     }
 }
 
@@ -970,8 +1059,11 @@ void Editor::ParameterChanged(ParamID id, ParamValue normalized) {
     }
     if(id == kParamStart && map_view_)
         map_view_->SetStart(normalized); // the slider under the plate (0.2.0)
+    if(id == kParamSize && map_view_)
+        map_view_->SetSize(normalized); // the loop at once (0.2.1)
     if(id == kParamBlend && map_view_)
         map_view_->SetBlend(normalized);
+    Animate(); // 0.2.1: also while the host automates and holds back the timer
     for(Knob& knob : knobs_) {
         if(knob.id != id || !knob.knob)
             continue;
@@ -1009,6 +1101,9 @@ void Editor::ShowValue(Knob& knob, ParamValue normalized) {
         return;
     }
     knob.value->setText(display.c_str());
+    // 0.2.1: drawn now. setText only marks the label for the window's timer, which some
+    // hosts hold back while a knob is dragged.
+    knob.value->invalid();
 }
 
 tresult PLUGIN_API Editor::setContentScaleFactor(ScaleFactor factor) {

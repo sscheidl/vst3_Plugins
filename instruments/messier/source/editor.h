@@ -20,7 +20,9 @@
 #include <string>
 
 namespace VSTGUI {
+class CFrame;
 class CKnob;
+class COptionMenu;
 class CTextLabel;
 } // namespace VSTGUI
 
@@ -127,6 +129,18 @@ struct EditorSettings {
 // The sizes the window's size menu offers (0.2.0), as zoom.
 constexpr double kMenuZooms[] = {0.5, 0.75, 1.0, 1.25, 1.5, 2.0};
 
+// The header's menus (MS-R42, 0.2.1): each entry carries its own tick, the current preset
+// or size (none for a size dragged freely); presets whose bitmaps are not delivered are
+// greyed.
+VSTGUI::SharedPointer<VSTGUI::COptionMenu> MakePresetMenu(GuiPreset current);
+VSTGUI::SharedPointer<VSTGUI::COptionMenu> MakeSizeMenu(double zoom);
+// Opens `menu` at `where` (frame units) and calls `chosen` with the index picked, -1 for
+// none. Windows shows the menu and answers before this returns. MS-R40 (0.2.1): a menu
+// that could not be shown, or whose showing threw, is taken out of the frame again before
+// this returns or rethrows, so the frame never keeps a menu nobody holds.
+bool PopUpMenu(VSTGUI::CFrame* frame, VSTGUI::COptionMenu* menu, VSTGUI::CPoint where,
+               std::function<void(int32_t index)> chosen);
+
 // How the window talks back to the controller.
 struct EditorCallbacks {
     // The settings changed. Called at once, also for every step of a drag.
@@ -191,8 +205,10 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     void SetZoom(double zoom);
     // Freeze as the window's switch does: an edit the host records.
     void SetFreeze(bool on);
-    // RESET as the window's button does: a message to the processor through the
-    // controller (MS-R08). Not recorded as automation; parameter 121 stays for that.
+    // RESET as the window's button does: since 0.2.1 (the user's wish) every knob and the
+    // START slider back to its default and Freeze off, as edits the host records; then,
+    // as before, the playhead back to START by a message to the processor through the
+    // controller (MS-R08). Parameter 121 stays the firmware's reset for automation.
     void PressReset();
     // Opens the file dialog, as the LOAD button does.
     void ChooseFile();
@@ -249,8 +265,17 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // The menus of the header (0.2.0).
     void ShowPresetMenu();
     void ShowSizeMenu();
-    // Hands the current skin to every view and label; draws the window anew.
-    void ApplySkin();
+    // Hands the current skin to every view and label; draws the window anew. Each step on
+    // its own (MS-R41): whatever one meets, the others are done.
+    void ApplySkin() noexcept;
+    // The window's heartbeat (0.2.1): asks for the display every kDisplayInterval and lets
+    // the plate move on. From the timer and from the user's and the host's edits, so the
+    // plate stays fluid while a host holds back the timer during a knob drag.
+    void Animate() noexcept;
+    // Opens the window: counts up, so that a menu's late answer for an earlier window of
+    // this editor does nothing (MS-R40).
+    std::uint64_t window_serial_ = 0;
+    std::chrono::steady_clock::time_point last_poll_{};
     void ShowValue(Knob& knob, Steinberg::Vst::ParamValue normalized);
     // Puts the file texts into the labels, if the window is open.
     void ApplyFileTexts();

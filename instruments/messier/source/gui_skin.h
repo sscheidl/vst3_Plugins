@@ -43,6 +43,7 @@ struct SkinColours {
     VSTGUI::CColor grain, tail, playhead;
     VSTGUI::CColor loop_fill, spray_fill, loop_edge;
     VSTGUI::CColor wave, wave_outside;
+    VSTGUI::CColor plate_wave; // the waveform on the glass (0.2.1)
     VSTGUI::CColor groove, tick, pointer;
     VSTGUI::CColor button_text;
     VSTGUI::CColor warning;
@@ -104,8 +105,10 @@ class Skin {
     const SkinColours& Colours() const { return colours_; }
     const SkinImage& Image(SkinImageId id) const { return images_[static_cast<std::size_t>(id)]; }
 
-    // Engraved capitals: the brand, labels, buttons, the axis.
+    // Engraved serif capitals: the brand and the version.
     VSTGUI::CFontRef Caps(double size) const;
+    // The controls' texts (0.2.1, the user's wish): names, buttons, scales, legend.
+    VSTGUI::CFontRef Sans(double size) const;
     VSTGUI::CFontRef Italic(double size) const;
     VSTGUI::CFontRef Mono(double size) const;
 

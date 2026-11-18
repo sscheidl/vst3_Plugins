@@ -363,7 +363,7 @@ void ToggleButton::DrawUnchecked(CDrawContext* context) {
         CRect text = area;
         if(down)
             text.offset(0, 1); // pressed in
-        DrawTracked(context, title_, text, kCenterText, 1.6, skin_->Caps(11.5), ink);
+        DrawTracked(context, title_, text, kCenterText, 1.1, skin_->Sans(11.5), ink); // sans since 0.2.1
         setDirty(false);
         return;
     }

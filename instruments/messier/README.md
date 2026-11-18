@@ -9,12 +9,12 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 0.2.0, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 0.2.1, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.2.0:** builds, passes Steinberg's validator, tested automatically (bit for
+**Status 0.2.1:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
@@ -33,22 +33,27 @@ files. Its checks of 0.1.8 and 0.1.9 four more ([0.1.8](docs/CODEX_REVIEW_0.1.8.
 [0.1.9](docs/CODEX_REVIEW_0.1.9.md), [report](docs/BUILD_REPORT_0.1.10.md)); 0.1.10 fixes
 them. Codex released 0.1.10 for the DAW test ([check](docs/CODEX_REVIEW_0.1.10.md)); 0.1.11
 fixes its two remaining edge cases ([report](docs/BUILD_REPORT_0.1.11.md)). 0.2.0 brings
-the window of the window study ([report](docs/BUILD_REPORT_0.2.0.md)); Codex' check of it
-is open. The user has tried 0.1.7 and 0.1.8 in Studio One
+the window of the window study ([report](docs/BUILD_REPORT_0.2.0.md)); Codex released it for
+the DAW test with four findings ([check](docs/CODEX_REVIEW_0.2.0.md)), which 0.2.1 fixes
+together with the user's first look at it ([report](docs/BUILD_REPORT_0.2.1.md)). The user
+has tried 0.1.7, 0.1.8 and 0.2.0 in Studio One
 (operation and sound). The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
 
 **The window** (since 0.2.0, after the window study the user settled on 2026-11-18):
 old metal with patina, a measuring plate of dark glass in a milled bezel, and below it
-the waveform and the wide START slider, all on one time axis with the seconds of the file
-above the plate. On the plate a nebula drifts slowly and fades as BLEND goes towards
-Granular; a grid of crosses marks the seconds and the quarters of the panorama; the loop,
+the wide START slider, on one time axis with the seconds of the file above the plate. On
+the plate a nebula drifts slowly and fades as BLEND goes towards Granular; the waveform
+lies on the glass (since 0.2.1, a trial); a grid of crosses marks the seconds and the
+quarters of the panorama; the loop (following START and SIZE at once),
 the spray range around the playhead and the sounding grains are drawn from the engine's
 real state. Each grain is a shooting star: its head flares with the grain's window and
 burns out, its tail follows the grain's real motion through the file (across only; down
-is its panorama, left at the top). While Freeze holds the playhead, it is dashed and
-carries a snowflake. Seven knobs and Volume, six small knobs for the secondary functions,
-FREEZE and RESET lie below; KEYS shows a keyboard with LATCH and two octave keys.
+is its panorama, left at the top). Between the engine's displays playhead and grains move
+on at their measured speeds. While Freeze holds the playhead, it is dashed and carries a
+snowflake; a click on the snowflake ends Freeze. Seven knobs and Volume, six small knobs for the secondary functions,
+FREEZE and RESET lie below (RESET: every knob and START to its default, Freeze off,
+playback back to START); KEYS shows a keyboard with LATCH and two octave keys.
 Surfaces are bitmaps at 1x and 2x (in the bundle's `Contents/Resources`), everything
 that carries information is drawn by the plug-in. Four GUI presets are planned (Slate,
 Silver, Copper, Photo plate); only Slate's bitmaps are delivered, the menu shows the
@@ -86,7 +91,7 @@ firmware passes with the same pot positions).
 | 115 | Size Random | random grain length, +- on the squared Overlap | 0 | - |
 | 117 | Mask | probability that a grain stays silent, up to 99 % | 0 | - |
 | 120 | Freeze | the playhead stands still; grains and the vocoder go on (a spectral freeze, not a mute) | off | - |
-| 121 | Reset | playback back to Start, on the rising edge of the value (for automation); the window's RESET button sends its presses directly to the processor and is not recorded as automation. Presses that fall into one 64-sample step of the engine act once; presses while no audio runs are dropped after 0.5 s, also across an activation | - | - |
+| 121 | Reset | playback back to Start, on the rising edge of the value (for automation); the window's RESET button sends its presses directly to the processor and is not recorded as automation; since 0.2.1 it first sets every knob and START to its default and Freeze off, as edits the host records. Presses that fall into one 64-sample step of the engine act once; presses while no audio runs are dropped after 0.5 s, also across an activation | - | - |
 | 122 | Volume | behind the core, 0 to 100 %; 100 % leaves the core's output untouched | 100 % | CC 33 |
 | 123 | Pitch Bend | +-2 semitones, from the pitch wheel; not saved | centre | wheel |
 | 130 | Bypass | the host's bypass (VST3 bypass flag): the output fades out in 5 ms, then the engine rests; saved | off | - |

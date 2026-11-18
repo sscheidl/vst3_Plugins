@@ -27,6 +27,9 @@
 #include "wav_reader.h"
 
 #include "public.sdk/source/common/memorystream.h"
+#include "vstgui/lib/cframe.h"
+#include "vstgui/lib/controls/coptionmenu.h"
+#include "vstgui/lib/vstguiinit.h"
 #include "public.sdk/source/vst/hosting/eventlist.h"
 #include "public.sdk/source/vst/hosting/hostclasses.h"
 #include "public.sdk/source/vst/hosting/parameterchanges.h"
@@ -1478,6 +1481,145 @@ class CoalescingHandler : public IComponentHandler, public IComponentHandler2 {
 // engine must always run one complete project: the file and the values of the
 // same load, never the new values with the old file. In the end the last project
 // plays, also as the first block of an export.
+// The window of 0.2.1, without a window: the snowflake ends Freeze (the user's wish);
+// grains are followed only by plausible, unambiguous matches (MS-R43); the menus carry
+// their ticks (MS-R42) and a menu that could not be shown leaves the frame (MS-R40);
+// RESET sets every knob and START to its default and Freeze off (the user's wish).
+void TestWindow021() {
+    using Clock = MapView::Clock;
+    // The snowflake: a click on it ends Freeze and places no START.
+    {
+        auto map = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
+        std::vector<std::string> calls;
+        MapView::Edits edits;
+        edits.start_begin = [&] { calls.push_back("begin"); };
+        edits.start = [&](double) { calls.push_back("start"); };
+        edits.start_end = [&] { calls.push_back("end"); };
+        edits.freeze_off = [&] { calls.push_back("thaw"); };
+        map->SetEdits(std::move(edits));
+        EngineDisplay display;
+        display.sequence = 1;
+        display.frames = 48000;
+        display.loop_length = 48000;
+        display.playhead = 24000;
+        map->Show(display, nullptr);
+        CHECK(map->SnowflakeBox().isEmpty()); // not frozen: no snowflake
+        display.frozen = 1;
+        map->Show(display, nullptr);
+        const VSTGUI::CRect box = map->SnowflakeBox();
+        CHECK(!box.isEmpty() && std::abs(box.getCenter().x - 420) < 0.5);
+        CHECK(map->PressAt(box.getCenter().x, box.getCenter().y));
+        map->Release();
+        CHECK(calls == std::vector<std::string>{"thaw"});
+        CHECK(map->PressAt(box.getCenter().x, box.bottom + 20)); // below it: START as before
+        map->Release();
+        CHECK(calls.size() == 4 && calls[1] == "begin" && calls[2] == "start" && calls[3] == "end");
+    }
+    // MS-R43: Codex' case, a new grain 40,000 frames away in 25 ms with the same
+    // panorama and a higher phase, gets no speed; a grain that moves evenly gets its
+    // speed after two moves that agree; two candidates that fit alike give none.
+    {
+        auto map = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
+        EngineDisplay d;
+        d.sequence = 1;
+        d.frames = 480000;
+        d.loop_length = 480000;
+        d.grain_count = 1;
+        d.grains[0] = {1000.0f, 0.5f, 0.3f};
+        Clock::time_point t{};
+        t += std::chrono::seconds(1);
+        map->ShowAt(d, nullptr, t);
+        d.grains[0] = {41000.0f, 0.5f, 0.5f};
+        t += std::chrono::milliseconds(25);
+        map->ShowAt(d, nullptr, t);
+        CHECK(map->GrainSpeed(0) == 0.0); // one move: not yet a speed
+        d.grains[0] = {41000.0f + 1200.0f, 0.5f, 0.55f};
+        t += std::chrono::milliseconds(25);
+        map->ShowAt(d, nullptr, t);
+        CHECK(map->GrainSpeed(0) == 0.0); // 1.6 million, then 48,000 frames/s: no agreement
+        for(int k = 2; k <= 4; ++k) {
+            d.grains[0] = {41000.0f + 1200.0f * static_cast<float>(k), 0.5f, 0.55f + 0.05f * static_cast<float>(k - 1)};
+            t += std::chrono::milliseconds(25);
+            map->ShowAt(d, nullptr, t);
+        }
+        CHECK(std::abs(map->GrainSpeed(0) - 48000.0) < 1.0); // even moves: the real speed
+        // Two old grains at the same panorama, equally near: ambiguous, no speed.
+        d.grain_count = 2;
+        d.grains[0] = {100000.0f, 0.2f, 0.10f};
+        d.grains[1] = {100400.0f, 0.2f, 0.10f};
+        t += std::chrono::milliseconds(25);
+        map->ShowAt(d, nullptr, t);
+        d.grain_count = 1;
+        d.grains[0] = {100200.0f, 0.2f, 0.2f};
+        t += std::chrono::milliseconds(25);
+        map->ShowAt(d, nullptr, t);
+        d.grains[0] = {100300.0f, 0.2f, 0.3f};
+        t += std::chrono::milliseconds(25);
+        map->ShowAt(d, nullptr, t);
+        CHECK(map->GrainSpeed(0) == 0.0);
+        // Across more than a quarter of a short file: no direction is guessed.
+        d.frames = 2000;
+        d.loop_length = 2000;
+        d.grains[0] = {100.0f, 0.7f, 0.1f};
+        t += std::chrono::milliseconds(25);
+        map->ShowAt(d, nullptr, t);
+        for(int k = 1; k <= 3; ++k) {
+            d.grains[0] = {static_cast<float>((100 + 900 * k) % 2000), 0.7f, 0.1f + 0.1f * static_cast<float>(k)};
+            t += std::chrono::milliseconds(25);
+            map->ShowAt(d, nullptr, t);
+        }
+        CHECK(map->GrainSpeed(0) == 0.0);
+    }
+    // MS-R42: the ticks. Menus need VSTGUI set up (their default font), as the plug-in
+    // has it in a host. Showing one needs a real window (MS-R40 is checked in the code).
+    VSTGUI::init(GetModuleHandleW(nullptr));
+    {
+        auto sizes = MakeSizeMenu(1.0);
+        CHECK(sizes->isMultipleCheckStyle() && sizes->getNbEntries() == 6);
+        for(int32 i = 0; i < 6; ++i)
+            CHECK(sizes->getEntry(i)->isChecked() == (i == 2));
+        auto free_size = MakeSizeMenu(1.1);
+        for(int32 i = 0; i < 6; ++i)
+            CHECK(!free_size->getEntry(i)->isChecked());
+        auto presets = MakePresetMenu(GuiPreset::kSlate);
+        CHECK(presets->isMultipleCheckStyle() && presets->getNbEntries() == 4);
+        CHECK(presets->getEntry(0)->isChecked() && presets->getEntry(0)->isEnabled());
+        for(int32 i = 1; i < 4; ++i)
+            CHECK(!presets->getEntry(i)->isChecked() && !presets->getEntry(i)->isEnabled());
+        CHECK(!PopUpMenu(nullptr, sizes, VSTGUI::CPoint(), {})); // nothing to show it in
+    }
+    VSTGUI::exit();
+    // RESET: knobs and START to their defaults, Freeze off; each an edit the host sees.
+    {
+        IPtr<HostApplication> app = owned(new HostApplication());
+        IPtr<Controller> controller = owned(new Controller());
+        CHECK(controller->initialize(app) == kResultOk);
+        CoalescingHandler handler;
+        CHECK(controller->setComponentHandler(&handler) == kResultOk);
+        for(const auto& [id, value] : {std::pair{kParamStart, 0.4}, std::pair{kParamSpeed, 0.9},
+                                       std::pair{kParamSpray, 0.3}, std::pair{kParamMask, 0.5},
+                                       std::pair{kParamFreeze, 1.0}})
+            controller->setParamNormalized(id, value);
+        IPtr<IPlugView> view = owned(controller->createView(ViewType::kEditor));
+        auto* editor = dynamic_cast<Editor*>(view.get());
+        CHECK(editor);
+        editor->PressReset();
+        for(ParamID id : {kParamStart, kParamSpeed, kParamSpray, kParamMask})
+            CHECK(controller->getParamNormalized(id) == kDefaults[static_cast<std::size_t>(Index(id))]);
+        CHECK(controller->getParamNormalized(kParamFreeze) == 0.0);
+        std::vector<ParamID> edited;
+        for(int32 i = 0; i < handler.changes.getParameterCount(); ++i)
+            edited.push_back(handler.changes.getParameterData(i)->getParameterId());
+        std::sort(edited.begin(), edited.end());
+        CHECK((edited == std::vector<ParamID>{kParamStart, kParamSpeed, kParamSpray, kParamMask, kParamFreeze}));
+        view = nullptr;
+        CHECK(controller->terminate() == kResultOk);
+    }
+    std::printf("window 0.2.1: the snowflake ends Freeze; grains followed only by plausible, unambiguous "
+                "matches (MS-R43); menus with ticks (MS-R42); "
+                "RESET to defaults and Freeze off\n");
+}
+
 // The GUI presets (0.2.0): the bitmaps the window asks for are in the plug-in's
 // resource folder (and so in the bundle) with the pixel sizes of the brief, at 1x and
 // 2x; presets whose bitmaps are not delivered show as Slate. The window settings carry
@@ -2629,6 +2771,7 @@ int main() {
     TestDialogStart();
     TestResizeGrip();
     TestGuiPresets();
+    TestWindow021();
     TestState();
     TestExportStart();
     TestMessagesAndKeyboard();
