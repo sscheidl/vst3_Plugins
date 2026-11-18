@@ -35,6 +35,7 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <string>
 #include <thread>
@@ -139,7 +140,7 @@ struct HostConfig {
 class PluginHost {
   public:
     explicit PluginHost(const HostConfig& config, HostScore score = {})
-    : config_(config), score_(std::move(score)), events_(4096), out_events_(4096), changes_(64) {
+    : config_(config), score_(std::move(score)), events_(4096), out_events_(4096), changes_(64), out_changes_(8) {
         host_app_ = owned(new HostApplication());
         processor = owned(new Processor());
         CHECK(processor->initialize(host_app_) == kResultOk);
@@ -166,6 +167,7 @@ class PluginHost {
         CHECK(data_.numOutputs == 1 && data_.outputs[0].numChannels == 2);
         data_.inputEvents = &events_;
         data_.outputEvents = &out_events_;
+        data_.outputParameterChanges = &out_changes_;
         data_.inputParameterChanges = &changes_;
     }
 
@@ -184,6 +186,7 @@ class PluginHost {
         events_.clear();
         out_events_.clear();
         changes_.clearQueue();
+        out_changes_.clearQueue();
         const std::int64_t end = position + std::max(frames, 1);
         for(; next_ < score_.size() && score_[next_].sample < end; ++next_) {
             const Ev& ev = score_[next_];
@@ -209,6 +212,7 @@ class PluginHost {
             }
         }
         data_.numSamples = frames;
+        data_.inputParameterChanges = external_changes ? external_changes : &changes_;
         {
             const AllocationProbe probe;
             CHECK(processor->process(data_) == kResultOk);
@@ -247,11 +251,15 @@ class PluginHost {
         right.clear();
     }
     EventList& OutEvents() { return out_events_; }
+    ParameterChanges& OutChanges() { return out_changes_; }
 
     IPtr<Processor> processor;
     std::vector<float> left, right;
     std::int64_t position = 0;
     std::uint64_t allocations = 0;
+    // If set, the parameter changes of every block come from here, as a host's
+    // edit queue would deliver them, instead of from the score.
+    IParameterChanges* external_changes = nullptr;
 
   private:
     IPtr<HostApplication> host_app_;
@@ -260,7 +268,7 @@ class PluginHost {
     std::size_t next_ = 0;
     HostProcessData data_;
     EventList events_, out_events_;
-    ParameterChanges changes_;
+    ParameterChanges changes_, out_changes_;
 };
 
 struct VaryingBlocks {
@@ -876,6 +884,364 @@ void TestViewLayout() {
                 "ratio and zoom limits kept\n");
 }
 
+
+// --- Review findings MS-R02 to MS-R04 (Codex, 2026-11-17) --------------------
+
+// A host's component handler that puts every edit at sample 0 of the next block,
+// keeping one value per parameter and position as the SDK's queue does
+// (ParameterValueQueue::addPoint replaces a point at the same offset). Counts
+// setDirty() calls.
+class CoalescingHandler : public IComponentHandler, public IComponentHandler2 {
+  public:
+    tresult PLUGIN_API beginEdit(ParamID) override { return kResultOk; }
+    tresult PLUGIN_API performEdit(ParamID id, ParamValue value) override {
+        int32 index = 0;
+        IParamValueQueue* queue = changes.addParameterData(id, index);
+        return queue && queue->addPoint(0, value, index) == kResultOk ? kResultOk : kResultFalse;
+    }
+    tresult PLUGIN_API endEdit(ParamID) override { return kResultOk; }
+    tresult PLUGIN_API restartComponent(int32) override { return kResultOk; }
+    tresult PLUGIN_API setDirty(TBool state) override {
+        dirty += state ? 1 : 0;
+        return kResultOk;
+    }
+    tresult PLUGIN_API requestOpenEditor(FIDString) override { return kResultFalse; }
+    tresult PLUGIN_API startGroupEdit() override { return kResultOk; }
+    tresult PLUGIN_API finishGroupEdit() override { return kResultOk; }
+    tresult PLUGIN_API queryInterface(const TUID iid, void** obj) override {
+        if(FUnknownPrivate::iidEqual(iid, IComponentHandler::iid)
+           || FUnknownPrivate::iidEqual(iid, FUnknown::iid)) {
+            *obj = static_cast<IComponentHandler*>(this);
+            return kResultOk;
+        }
+        if(FUnknownPrivate::iidEqual(iid, IComponentHandler2::iid)) {
+            *obj = static_cast<IComponentHandler2*>(this);
+            return kResultOk;
+        }
+        *obj = nullptr;
+        return kNoInterface;
+    }
+    uint32 PLUGIN_API addRef() override { return 1; }
+    uint32 PLUGIN_API release() override { return 1; }
+
+    ParameterChanges changes{8};
+    int dirty = 0;
+};
+
+// MS-R02: project loads in quick succession, each with another file and another
+// Freeze, a 64-sample block after each, while files wait in the retire queue. The
+// engine must always run one complete project: the file and the values of the
+// same load, never the new values with the old file. In the end the last project
+// plays, also as the first block of an export.
+void TestProjectBackpressure() {
+    const FileImage small = MakeImage(101, 48000, 2, 21), large = MakeImage(202, 48000, 2, 22);
+    const std::string small_path = WriteWav("small.wav", small), large_path = WriteWav("large.wav", large);
+    PluginHost host({});
+    int mismatches = 0, waits = 0;
+    std::uint32_t last_frames = 0;
+    for(int load = 0; load < 400; ++load) {
+        const bool odd = load % 2 != 0;
+        std::array<double, kSavedParamCount> values = DefaultValues();
+        values[static_cast<std::size_t>(Index(kParamFreeze))] = odd ? 1.0 : 0.0;
+        CHECK(LoadState(*host.processor, MakeState(values, odd ? large_path : small_path)) == kResultOk);
+        host.Run(64, 64);
+        const FileData* file = host.processor->Engine().CurrentFile();
+        CHECK(file);
+        const bool frozen = host.processor->Engine().Frozen();
+        // Each project is a pair: the small file with Freeze off, the large one on.
+        if((file->frames == 202) != frozen)
+            ++mismatches;
+        waits += file->frames == last_frames ? 1 : 0;
+        last_frames = file->frames;
+    }
+    // Once the loader's thread has freed the waiting files, the last project plays.
+    std::this_thread::sleep_for(FileLoader::kCollectInterval * 4);
+    host.Run(64, 64);
+    CHECK(host.processor->Engine().CurrentFile()->frames == 202 && host.processor->Engine().Frozen());
+    std::printf("project loads under back-pressure: 400 loads, %d blocks with new values and an old "
+                "file (must be 0), %d blocks in which a project waited for room; the last one plays\n",
+                mismatches, waits);
+    CHECK(mismatches == 0);
+    CHECK(host.allocations == 0);
+}
+
+// MS-R03, MS-R08: the RESET button. Every press reaches the processor, also with a
+// host that keeps one value per parameter and position, when the window closes right
+// after the press, and for several presses in a row. The window makes no edit of
+// parameter 121 for it (that one stays for automation).
+void TestResetButtonThroughHost() {
+    IPtr<HostApplication> app = owned(new HostApplication());
+    PluginHost host({});
+    CHECK(LoadState(*host.processor, MakeState(StartValues(), g_path)) == kResultOk);
+    host.Run(4800, 64);
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(app) == kResultOk);
+    CoalescingHandler handler;
+    CHECK(controller->setComponentHandler(&handler) == kResultOk);
+    auto* processor_point = static_cast<IConnectionPoint*>(host.processor.get());
+    auto* controller_point = static_cast<IConnectionPoint*>(controller.get());
+    CHECK(processor_point->connect(controller_point) == kResultOk);
+    CHECK(controller_point->connect(processor_point) == kResultOk);
+    host.external_changes = &handler.changes;
+    auto block = [&] {
+        host.Process(64);
+        handler.changes.clearQueue();
+    };
+    auto resets = [&] { return host.processor->Engine().Resets(); };
+    const std::uint32_t start = resets();
+    {
+        // A press, then the window goes before the next block.
+        IPtr<IPlugView> view = owned(controller->createView(ViewType::kEditor));
+        auto* editor = dynamic_cast<Editor*>(view.get());
+        CHECK(editor);
+        editor->PressReset();
+        CHECK(handler.changes.getParameterCount() == 0); // no edit of parameter 121
+    }
+    block();
+    CHECK(resets() == start + 1);
+    // Three presses with blocks in between: three resets.
+    IPtr<IPlugView> view = owned(controller->createView(ViewType::kEditor));
+    auto* editor = dynamic_cast<Editor*>(view.get());
+    for(int press = 0; press < 3; ++press) {
+        editor->PressReset();
+        block();
+        block();
+    }
+    CHECK(resets() == start + 4);
+    // Several presses before one block restart once: the same restart from START.
+    editor->PressReset();
+    editor->PressReset();
+    block();
+    CHECK(resets() == start + 5);
+    // A press while no audio runs does not act later.
+    editor->PressReset();
+    std::this_thread::sleep_for(Processor::kKeyboardNoteLifetime + std::chrono::milliseconds(50));
+    block();
+    CHECK(resets() == start + 5);
+    // Automation of parameter 121 still acts on its rising edge.
+    int32 index = 0;
+    handler.changes.addParameterData(kParamReset, index)->addPoint(0, 1.0, index);
+    block();
+    CHECK(resets() == start + 6);
+    view = nullptr;
+    host.external_changes = nullptr;
+    CHECK(processor_point->disconnect(controller_point) == kResultOk);
+    CHECK(controller_point->disconnect(processor_point) == kResultOk);
+    CHECK(controller->terminate() == kResultOk);
+    CHECK(host.allocations == 0);
+    std::printf("reset button: every press from the window reaches the processor, also when the "
+                "window closes at once and three in a row; automation of parameter 121 still acts\n");
+}
+
+// MS-R07: audio blocks between the moment the project's file is handed over and the
+// moment its values are. The engine must go on with the complete old project, never
+// the new file with the old values; afterwards the new project plays, complete. Also
+// with an activation in that moment.
+void TestProjectHandoverGap() {
+    const FileImage small = MakeImage(101, 48000, 2, 23), large = MakeImage(202, 48000, 2, 24);
+    const std::string small_path = WriteWav("gap-small.wav", small), large_path = WriteWav("gap-large.wav", large);
+    for(const bool activate : {false, true}) {
+        PluginHost host({});
+        std::array<double, kSavedParamCount> a = DefaultValues(), b = DefaultValues();
+        b[static_cast<std::size_t>(Index(kParamFreeze))] = 1.0;
+        CHECK(LoadState(*host.processor, MakeState(a, small_path)) == kResultOk);
+        host.Run(256, 64);
+        CHECK(host.processor->Engine().CurrentFile()->frames == 101 && !host.processor->Engine().Frozen());
+        int checked = 0;
+        host.processor->SetProjectLoadHookForTest([&] {
+            if(activate) {
+                host.processor->setProcessing(false);
+                CHECK(host.processor->setActive(false) == kResultOk);
+                CHECK(host.processor->setActive(true) == kResultOk);
+                host.processor->setProcessing(true);
+            }
+            for(int i = 0; i < 20; ++i) {
+                host.Process(64);
+                const LooperEngine& engine = host.processor->Engine();
+                // Still project A, complete: its file and its Freeze.
+                CHECK(engine.CurrentFile()->frames == 101 && engine.NextFile()->frames == 101);
+                CHECK(!engine.Frozen());
+                ++checked;
+            }
+        });
+        CHECK(LoadState(*host.processor, MakeState(b, large_path)) == kResultOk);
+        host.processor->SetProjectLoadHookForTest({});
+        host.Process(64);
+        CHECK(host.processor->Engine().CurrentFile()->frames == 202 && host.processor->Engine().Frozen());
+        CHECK(checked == 20 && host.allocations == 0);
+    }
+    std::printf("project hand-over: blocks between the file and the values of a project, with and "
+                "without an activation there, play the complete old project; then the new one\n");
+}
+
+// MS-R04, MS-R09: a file chosen in the window marks the project as changed, once per
+// file, also with no window open: the processor reports it through a read-only output
+// parameter, which the host passes to the controller. A failed choice, status replies
+// and loading a project do not.
+void TestFileChangeMarksProject() {
+    IPtr<HostApplication> app = owned(new HostApplication());
+    PluginHost host({});
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(app) == kResultOk);
+    CoalescingHandler handler;
+    CHECK(controller->setComponentHandler(&handler) == kResultOk);
+    auto* processor_point = static_cast<IConnectionPoint*>(host.processor.get());
+    auto* controller_point = static_cast<IConnectionPoint*>(controller.get());
+    CHECK(processor_point->connect(controller_point) == kResultOk);
+    CHECK(controller_point->connect(processor_point) == kResultOk);
+    // One block and what a host does with the processor's output parameters: it hands
+    // them to the controller (on its UI thread; here, the same thread).
+    int reported = 0;
+    auto block = [&] {
+        host.Process(256);
+        ParameterChanges& out = host.OutChanges();
+        for(int32 i = 0; i < out.getParameterCount(); ++i) {
+            IParamValueQueue* queue = out.getParameterData(i);
+            int32 offset = 0;
+            ParamValue value = 0.0;
+            if(queue && queue->getParameterId() == kParamSampleChanges
+               && queue->getPoint(queue->getPointCount() - 1, offset, value) == kResultOk) {
+                controller->setParamNormalized(kParamSampleChanges, value);
+                ++reported;
+            }
+        }
+    };
+    auto settle = [&] {
+        CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
+        block();
+        block();
+    };
+    // No window was ever opened: nothing polls.
+    CHECK(controller->LoadFile(g_path));
+    settle();
+    CHECK(reported == 1 && controller->File().path == g_path && handler.dirty == 1);
+    for(int i = 0; i < 5; ++i) {
+        CHECK(controller->RequestFileStatus());
+        block();
+    }
+    CHECK(handler.dirty == 1);
+    const std::string bad = Utf8(g_dir / "bad.wav");
+    CHECK(controller->LoadFile(bad));
+    settle();
+    CHECK(handler.dirty == 1 && reported == 1);
+    // Two files finished before the host delivers anything: two changes reported.
+    CHECK(controller->LoadFile(g_path_mono));
+    CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
+    CHECK(controller->LoadFile(g_path));
+    CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
+    block();
+    block();
+    CHECK(handler.dirty == 3);
+    // A project brings its own file: restoring is no change.
+    const std::vector<char> project = MakeState(StartValues(), g_path_mono);
+    CHECK(LoadState(*host.processor, project) == kResultOk);
+    MemoryStream stream;
+    int32 written = 0;
+    stream.write(const_cast<char*>(project.data()), static_cast<int32>(project.size()), &written);
+    stream.seek(0, IBStream::kIBSeekSet, nullptr);
+    CHECK(controller->setComponentState(&stream) == kResultOk);
+    block();
+    block();
+    CHECK(controller->File().path == g_path_mono && handler.dirty == 3);
+    CHECK(processor_point->disconnect(controller_point) == kResultOk);
+    CHECK(controller_point->disconnect(processor_point) == kResultOk);
+    CHECK(controller->terminate() == kResultOk);
+    std::printf("file change: each file from the window marks the project changed, with no "
+                "window open and two at a time; polls, a failed load and a project do not\n");
+}
+
+// MS-R01, MS-R06: no host call lets an exception out. Every allocation the call
+// makes in this thread fails in turn, the first, the second, and so on, until the call
+// gets through. Release builds only: in Debug builds the standard library allocates a
+// container proxy in noexcept constructors and terminates when that fails (see the
+// loader test).
+void TestNoExceptionLeavesHostCalls() {
+#if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
+    IPtr<HostApplication> app = owned(new HostApplication());
+    PluginHost host({});
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(app) == kResultOk);
+    auto* processor_point = static_cast<IConnectionPoint*>(host.processor.get());
+    auto* controller_point = static_cast<IConnectionPoint*>(controller.get());
+    CHECK(processor_point->connect(controller_point) == kResultOk);
+    CHECK(controller_point->connect(processor_point) == kResultOk);
+    // An editor object registered with the controller, without a window, as a host may
+    // have it between attach and open.
+    IPtr<IPlugView> view = owned(controller->createView(ViewType::kEditor));
+    auto* editor = dynamic_cast<Editor*>(view.get());
+    CHECK(editor);
+    controller->editorAttached(editor);
+    const std::vector<char> project = MakeState(StartValues(), g_path);
+    struct Call {
+        const char* name;
+        std::function<tresult()> run;
+    };
+    IPtr<IMessage> status = owned(new HostMessage());
+    status->setMessageID(kStatusMessageId);
+    for(const char* id : {kAttrPath, kAttrInfo, kAttrRequest, kAttrDetail})
+        status->getAttributes()->setBinary(id, g_path.data(), static_cast<uint32>(g_path.size()));
+    status->getAttributes()->setInt(kAttrState, 1);
+    status->getAttributes()->setInt(kAttrSerial, 7);
+    status->getAttributes()->setInt(kAttrUserLoads, 0);
+    IPtr<IMessage> load = owned(new HostMessage());
+    load->setMessageID(kLoadMessageId);
+    load->getAttributes()->setBinary(kAttrPath, g_path.data(), static_cast<uint32>(g_path.size()));
+    const std::vector<Call> calls = {
+        {"controller setComponentState", [&] {
+             MemoryStream stream;
+             int32 written = 0;
+             stream.write(const_cast<char*>(project.data()), static_cast<int32>(project.size()), &written);
+             stream.seek(0, IBStream::kIBSeekSet, nullptr);
+             return controller->setComponentState(&stream);
+         }},
+        {"controller setParamNormalized", [&] { return controller->setParamNormalized(kParamDensity, 0.7); }},
+        {"controller notify (status)", [&] { return controller->notify(status); }},
+        {"processor setState", [&] { return LoadState(*host.processor, project); }},
+        {"processor getState", [&] {
+             MemoryStream stream;
+             return host.processor->getState(&stream);
+         }},
+        {"processor notify (load)", [&] { return host.processor->notify(load); }},
+    };
+    for(const Call& call : calls) {
+        int failures = 0;
+        bool through = false;
+        for(long long after = 0; after < 400 && !through; ++after) {
+            test_support::g_failed_allocations = 0;
+            test_support::g_fail_after = after;
+            test_support::g_fail_armed = true;
+            tresult result = kResultFalse;
+            try {
+                result = call.run();
+            } catch(...) {
+                test_support::g_fail_armed = false;
+                std::printf("FAIL %s: an exception left the call after %lld allocations\n", call.name, after);
+                std::exit(1);
+            }
+            test_support::g_fail_armed = false;
+            through = test_support::g_failed_allocations == 0;
+            if(!through) {
+                ++failures;
+                CHECK(result == kOutOfMemory || result == kResultOk || result == kResultFalse);
+            }
+        }
+        CHECK(through);
+        std::printf("  %s: failed at each of its %d allocations in turn without an exception\n",
+                    call.name, failures);
+        CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
+        host.Run(256, 256);
+    }
+    controller->editorRemoved(editor);
+    view = nullptr;
+    CHECK(processor_point->disconnect(controller_point) == kResultOk);
+    CHECK(controller_point->disconnect(processor_point) == kResultOk);
+    CHECK(controller->terminate() == kResultOk);
+    std::printf("host calls: no exception leaves them, whichever allocation fails\n");
+#else
+    std::printf("host calls under failing allocations: Release builds only (Debug STL proxies)\n");
+#endif
+}
+
 } // namespace
 
 int main() {
@@ -894,6 +1260,11 @@ int main() {
     TestExportStart();
     TestMessagesAndKeyboard();
     TestLoadWhilePlaying();
+    TestProjectBackpressure();
+    TestResetButtonThroughHost();
+    TestProjectHandoverGap();
+    TestFileChangeMarksProject();
+    TestNoExceptionLeavesHostCalls();
     TestActivation();
     TestTwoInstances();
     TestSampleRates();

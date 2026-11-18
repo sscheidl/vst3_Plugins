@@ -196,10 +196,16 @@ weil der Auftrag es offen ließ:
 
 Vierter Port, Auftrag vom 2026-11-17 (`docs/CLAUDE_BUILDAUFTRAG_MESSIER_0.1.0.md`,
 liegt beim Nutzer): der Granular Looper `instruments/granular` aus Daisy-Seed (Nebulae
-on Daisy 0.2.2) als VST3-Instrument, nur mit der File-Quelle. Version 0.1.0 ist gebaut,
-vom validator geprüft und automatisch getestet, in einer DAW aber weder ausprobiert noch
-angehört; Codex' Prüfung steht aus
-([Prüfauftrag](../instruments/messier/docs/CODEX_PRUEFAUFTRAG_0.1.0.md)). Messwerte und
+on Daisy 0.2.2) als VST3-Instrument, nur mit der File-Quelle. Codex hat 0.1.0 nicht
+freigegeben: vier Fehler und das fehlende Atlas/Orion-Fenster
+([Review](../instruments/messier/docs/CODEX_REVIEW_0.1.0.md)). 0.1.1 behebt die vier Fehler
+([Umsetzung](../instruments/messier/docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)). Codex'
+Nachprüfung von 0.1.1 fand fünf weitere
+([Nachprüfung](../instruments/messier/docs/CODEX_REVIEW_0.1.1.md)); 0.1.2 behebt sie
+([Umsetzung](../instruments/messier/docs/CODEX_REVIEW_0.1.1_UMSETZUNG.md)), die nächste
+Prüfung steht aus. Das Fenster ist vorläufig: Das Atlas/Orion-Fenster aus Abschnitt 8
+des Auftrags folgt, wenn Aufteilung und Farben feststehen (Entscheidung des Nutzers vom
+2026-11-17). In einer DAW ist Messier weder ausprobiert noch angehört. Messwerte und
 Testprotokoll stehen im
 [Build-Bericht](../instruments/messier/docs/BUILD_REPORT_0.1.0.md), die offene Abnahme in
 der [DAW-Prüfliste](../instruments/messier/docs/DAW_TEST_0.1.0.md), Herkunft und Patches
@@ -217,7 +223,7 @@ Vom Nutzer am 2026-11-17 entschieden:
 | Quantum | Fest 64 Samples, die Kontrollperiode des Originals |
 | Grain-Pegel (F42) | 0,90 wie das Original statt 0,45 wie der Kern 0.2.2: der einzige Klang-Patch am Kern |
 | Dateien | PCM 16/24 Bit, Float 32 Bit, EXTENSIBLE, mono/stereo, 8–192 kHz; mehr als 16 Bit ohne Dither gerundet; höchstens 256 MiB PCM16 |
-| Fenster | Keine Wellenform, keine Positionsanzeige, kein Drag-and-drop in 0.1.0 |
+| Fenster | Ursprünglich: keine Wellenform, keine Positionsanzeige, kein Drag-and-drop in 0.1.0. Später am 2026-11-17 ersetzt (Auftrag Abschnitt 8): Atlas als Bediengrundlage mit Nebelkarte, Wellenform, Loopgrenzen, Abspielposition, Spray und echten Grainpunkten, Orion als Leitmotiv, ein breiter Blend-Regler; Aufteilung und Farben offen. Nach Codex' Review (MS-R05): erst die vier Fehler als 0.1.1, das neue Fenster danach |
 | Zweitfunktionen | Ohne MIDI-CC, wie in der Firmware |
 
 Bei der Umsetzung selbst festgelegt, weil der Auftrag es offen ließ:
@@ -244,6 +250,11 @@ Bei der Umsetzung selbst festgelegt, weil der Auftrag es offen ließ:
 | VST3-Kategorie | `Instrument\|Sampler` | Ein Instrument, das auf Samples beruht |
 | Last | Gemessen: 1,8 bis 4,2 % eines Kerns (i7-8700K). Bei 192 kHz mit 64er-Blöcken dauert ein Block mit Vocoder-Hop länger als der Block: Der Hop rechnet alle 512 internen Samples zwei Kanäle auf einmal | Befund, kein Fix in 0.1.0: Das Verteilen des Hops über mehrere Blöcke wäre eine Änderung am Kern |
 | Gemeinsamer Code | Nichts nach `common/`; Adapter, Parameterübergabe, Texteingabe, Fenster und Klaviatur sind Kopien aus Kekulé 0.3.1 und Mendelejew 0.1.4 | Auftrag |
+| Speichermangel (0.1.1, MS-R01) | Leser, Ladethread, Projektladen und die Host-Aufrufe mit Strings fangen fehlgeschlagene Allokationen ab. Eine Datei aus dem Fenster scheitert mit „out of memory“, die alte spielt weiter; ein Projekt wird still (dafür liegt ein leeres Dateiobjekt bereit). Fehlertexte bis 15 Zeichen, damit auch das Melden nicht alloziert | Ein Fehler beim Laden darf den Host nie beenden |
+| Projekt und Datei gemeinsam (0.1.1, MS-R02; 0.1.2, MS-R07) | Die Datei eines Projekts hat seit 0.1.2 einen eigenen Übergabeplatz und trägt die Nummer der Projektladung; der Audio-Thread übernimmt sie nur zusammen mit den Werten derselben Nummer. Bis beide da sind (auch bei vollem Rückstau), spielt das alte Projekt vollständig weiter, und keine Fenster-Datei wird eingetauscht. Fenster-Dateien tragen eine Reihenfolgenummer; eine ältere kommt nach einem Projekt nicht zurück | Nie neue Werte mit alter Datei oder umgekehrt. Getestet mit 400 schnellen Projektladungen und mit Audioblöcken zwischen Datei und Werten, auch mit einer Aktivierung dort |
+| Reset-Taster (0.1.1, MS-R03; 0.1.2, MS-R08) | Seit 0.1.2 schickt der Taster jeden Druck als Nachricht an den Processor, kein Edit von Parameter 121 mehr. Drucke, die denselben Audioblock erreichen, wirken einmal; Drucke ohne laufendes Audio verfallen nach 0,5 s. Parameter 121 bleibt für Automation (Flanke) | Ein Host kann Druck und Loslassen eines Parameters zusammenlegen, das Fenster kann vor dem nächsten Block schließen. Dafür nimmt der Host Drucke im Fenster nicht als Automation auf |
+| Projektänderung (0.1.1, MS-R04; 0.1.2, MS-R09) | Der Processor zählt die Dateien aus dem Fenster, die zum Klang wurden, und meldet den Zähler über den versteckten, schreibgeschützten Parameter 199; der Host reicht ihn an den Controller, der den Status holt und je neuer Datei `setDirty(true)` ruft. Projektladen und Statusabfragen zählen nicht | Ohne offenes Fenster fragte 0.1.1 nicht nach. Nachrichten aus dem Audio- oder Ladethread wären bei manchen Hosts unsicher; der Ausgabeparameter ist der vorgesehene Weg vom Processor zum Controller |
+| Controller ohne Ausnahmen (0.1.2, MS-R06) | Jeder Host-Aufruf des Controllers ist abgesichert; scheitert nur die Anzeige, gilt der geladene Zustand trotzdem | Getestet, indem jede Allokation eines Aufrufs der Reihe nach fehlschlägt (nur im Release-Bau) |
 
 ## Stand des Fahrplans
 

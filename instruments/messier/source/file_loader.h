@@ -10,7 +10,7 @@
 // Collect(), on the loader's thread or any other non-audio thread.
 //
 // FileLoader reads files on its own worker thread when the window asks for one
-// (Request), and in the calling thread when a project is loaded (LoadNow). It
+// (Request), and in the calling thread when a project is loaded (LoadProject). It
 // keeps the status the window shows. The newest request wins: a result that a
 // later request or a loaded project has overtaken is thrown away. Every failure
 // leaves the playing file as it is, unlike the firmware, which has to overwrite
@@ -81,6 +81,10 @@ struct FileStatus {
     RequestState request_state = RequestState::kNone;
     std::string detail;  // why that request failed
     std::uint32_t serial = 0; // changes with every change
+    // Counts the files from the window that became the sound (MS-R04): the
+    // controller tells the host that the project changed when it grows. Project
+    // loads do not count.
+    std::uint32_t user_loads = 0;
 
     // The two states in one number, for the message to the controller.
     int Code() const { return static_cast<int>(sound) | static_cast<int>(request_state) << 4; }
@@ -98,17 +102,28 @@ class FileLoader {
     FileLoader(const FileLoader&) = delete;
     FileLoader& operator=(const FileLoader&) = delete;
 
-    // Reads the file on the worker thread. Returns at once.
-    void Request(const std::string& utf8_path);
-    // Reads the file in this thread and offers it, or an empty file if it cannot be
-    // read: a project whose file is missing stays silent and keeps the path. An
-    // empty path is no file. Overtakes every request still running.
-    void LoadNow(const std::string& utf8_path);
+    // Reads the file on the worker thread. Returns at once. Never throws: if even
+    // the request cannot be recorded, it is reported as failed (MS-R01).
+    void Request(const std::string& utf8_path) noexcept;
+    // Reads a project's file in this thread and returns it, tagged with `project`
+    // (the processor's number of this project load) and the next sequence number, or
+    // an empty file (frames 0) if it cannot be read: a project whose file is missing
+    // stays silent and keeps the path. An empty path is no file. Does not offer the
+    // file: the processor hands it to the audio thread together with the project's
+    // values (MS-R07). Overtakes every request from the window still running. Null
+    // only if not even an empty file can be made. Never throws.
+    std::unique_ptr<FileData> LoadProject(const std::string& utf8_path, std::uint64_t project) noexcept;
+
+    // Files from the window that became the sound so far (FileStatus::user_loads),
+    // readable without the lock, also by the audio thread.
+    std::uint32_t UserLoads() const noexcept { return user_loads_.load(std::memory_order_acquire); }
 
     FileStatus Status() const;
     std::string SoundPath() const;
     // For tests: true once no request is waiting or being read.
     bool Idle() const;
+    // For tests: whether the spare empty file is there.
+    bool SpareReadyForTest() const;
     // Frees the files the audio thread has let go. The worker does it every
     // kCollectInterval as well.
     void Collect() { exchange_.Collect(); }
@@ -116,9 +131,14 @@ class FileLoader {
 
   private:
     void Run();
-    // Offers the result if `ticket` is still the newest. For a project's file
-    // (`project`) a failure still replaces the sound with silence.
-    void Finish(std::uint64_t ticket, const std::string& path, WavResult result, bool project);
+    // Offers a window request's result if the request is still the newest. Takes the
+    // mutex; never throws.
+    void Finish(std::uint64_t ticket, const std::string& path, WavResult result) noexcept;
+    void FinishUnchecked(std::uint64_t ticket, const std::string& path, WavResult& result);
+    // An empty file; the spare one if memory has run out. Only with mutex_ held,
+    // like every use of spare_empty_ (MS-R10).
+    std::unique_ptr<FileData> TakeEmptyLocked(bool out_of_memory) noexcept;
+    void RefillSpareLocked() noexcept;
 
     FileExchange& exchange_;
     const std::uint64_t max_pcm_bytes_;
@@ -128,6 +148,11 @@ class FileLoader {
     std::string wanted_;           // the request waiting for the worker
     bool has_wanted_ = false, busy_ = false, stop_ = false;
     std::uint64_t ticket_ = 0;     // of the newest request or project load
+    std::uint64_t sequence_ = 0;   // numbers the finished files
+    std::atomic<std::uint32_t> user_loads_{0};
+    // An empty file, kept ready so that a project can fall silent even when no memory
+    // is left; refilled after every result.
+    std::unique_ptr<FileData> spare_empty_;
     std::thread worker_;
 };
 

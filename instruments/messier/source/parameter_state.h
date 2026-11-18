@@ -41,6 +41,7 @@ class ParameterState {
         Values values{};
         std::uint64_t generation = 0;
         Clock::time_point loaded_at{};
+        std::uint64_t project = 0; // the processor's number of this project load
     };
 
     ParameterState() {
@@ -53,7 +54,7 @@ class ParameterState {
     // A state was loaded: the saved values (in the order of kSavedIndex),
     // the pitch wheel back in its centre. Becomes the current state at once and waits for the audio
     // thread to take it.
-    void Load(const std::array<double, kSavedParamCount>& saved) {
+    void Load(const std::array<double, kSavedParamCount>& saved, std::uint64_t project = 0) {
         const std::lock_guard<std::mutex> lock(mutex_);
         for(int i = 0; i < kSavedParamCount; ++i)
             base_[static_cast<std::size_t>(kSavedIndex[static_cast<std::size_t>(i)])] =
@@ -65,6 +66,7 @@ class ParameterState {
         loaded.values = base_;
         loaded.generation = generation_;
         loaded.loaded_at = Clock::now();
+        loaded.project = project;
         loaded_.Publish(loaded);
     }
 

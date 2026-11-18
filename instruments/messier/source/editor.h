@@ -123,6 +123,8 @@ struct EditorCallbacks {
     std::function<void(const std::string& path)> load;
     // The window's timer: time to ask the processor how loading goes.
     std::function<void()> poll;
+    // The RESET button was pressed.
+    std::function<void()> reset;
 };
 
 // The plug-in window: the sample's file line with its LOAD button, eight knobs
@@ -154,8 +156,10 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // project like the window size.
     void SetKeyboardTranspose(int semitones);
     const EditorSettings& Settings() const { return settings_; }
-    // Freeze and Reset as the window's switch and button do: edits the host records.
+    // Freeze as the window's switch does: an edit the host records.
     void SetFreeze(bool on);
+    // RESET as the window's button does: a message to the processor through the
+    // controller (MS-R08). Not recorded as automation; parameter 121 stays for that.
     void PressReset();
     // Opens the file dialog, as the LOAD button does.
     void ChooseFile();

@@ -54,6 +54,7 @@ Processor::~Processor() {
         delete released;
     for(std::size_t i = 0; i < backlog_count_; ++i)
         delete backlog_[i];
+    delete held_project_file_;
 }
 
 tresult PLUGIN_API Processor::initialize(FUnknown* context) {
@@ -121,9 +122,78 @@ void Processor::RetireReleased() {
     backlog_count_ = kept;
 }
 
-FileData* Processor::TakeIncoming() {
+bool Processor::CanTakeFile() const {
     // A swap or restart lets go of at most two files; keep room for them.
-    return backlog_count_ + 2 <= backlog_.size() / 2 ? exchange_.Take() : nullptr;
+    return backlog_count_ + 2 <= backlog_.size() / 2;
+}
+
+FileData* Processor::TakeIncoming() {
+    return CanTakeFile() ? exchange_.Take() : nullptr;
+}
+
+bool Processor::RetireLater(const FileData* file) {
+    // False if there is no room: then the caller keeps the file and tries again.
+    if(!file)
+        return true;
+    if(backlog_count_ >= backlog_.size())
+        return false;
+    backlog_[backlog_count_++] = file;
+    return true;
+}
+
+bool Processor::TakeHandovers(bool audio_thread) {
+    // MS-R07: a project's values and its file come apart (ParameterState and
+    // project_files_) and go into the engine only together: the file of project n with
+    // the values of project n. A file without its values (the values are about to be
+    // published) or values without their file (no room to take one) wait; meanwhile
+    // the previous sound plays on, complete, and no file from the window is taken.
+    ParameterState::Loaded loaded;
+    if(state_.TakeLoaded(loaded)) {
+        pending_project_ = loaded; // a newer project replaces one still waiting
+        has_pending_project_ = true;
+    }
+    if(CanTakeFile())
+        if(FileData* file = project_files_.Take()) {
+            // Room for the one it replaces: CanTakeFile() held.
+            if(audio_thread)
+                RetireLater(held_project_file_);
+            else
+                delete held_project_file_;
+            held_project_file_ = file;
+        }
+    if(has_pending_project_ && held_project_file_
+       && held_project_file_->project < pending_project_.project) {
+        // The file of an older project whose values never arrived: superseded.
+        if(!audio_thread) {
+            delete held_project_file_;
+            held_project_file_ = nullptr;
+        } else if(RetireLater(held_project_file_)) {
+            held_project_file_ = nullptr;
+        }
+    }
+    if(has_pending_project_ && held_project_file_
+       && held_project_file_->project == pending_project_.project) {
+        const FileData* file = held_project_file_;
+        held_project_file_ = nullptr;
+        has_pending_project_ = false;
+        ApplyLoadedState(pending_project_, file);
+        return true;
+    }
+    return false;
+}
+
+FileData* Processor::TakeWindowFile() {
+    // Only between projects; and a file older than the one playing (finished before a
+    // project that has come in since) is not swapped in.
+    if(has_pending_project_ || held_project_file_)
+        return nullptr;
+    FileData* file = TakeIncoming();
+    if(!file)
+        return nullptr;
+    const FileData* current = engine_.NextFile();
+    if(current && file->sequence < current->sequence && RetireLater(file))
+        return nullptr; // room was there: CanTakeFile() held
+    return file;
 }
 
 void Processor::Restart(const ParameterState::Values& values, const FileData* incoming) {
@@ -140,19 +210,30 @@ tresult PLUGIN_API Processor::setActive(TBool state) {
         const double rate = processSetup.sampleRate;
         if(rate > 0.0 && rate != adapter_.HostRate() && adapter_.Prepare(rate))
             latency_.store(static_cast<uint32>(adapter_.LatencySamples()));
-        ParameterState::Loaded pending;
-        while(state_.TakeLoaded(pending)) {
-            state_.Adopt(pending.generation);
-            keyboard_valid_after_ = pending.loaded_at;
+        // Not the audio thread: files waiting for the retire queue can be freed here,
+        // so that a loaded project and its file are always taken together.
+        for(std::size_t i = 0; i < backlog_count_; ++i)
+            delete backlog_[i];
+        backlog_count_ = 0;
+        exchange_.Collect();
+        reset_presses_.store(0); // presses while the audio was off do not act later
+        // A complete project, if one is there, restarts the engine (MS-R07); else the
+        // current values with the newest file from the window, without a fade. While a
+        // project waits for its other half, the values in the engine stay those of the
+        // last project adopted.
+        if(!TakeHandovers(false)) {
+            FileData* file = TakeWindowFile();
+            Restart(has_pending_project_ || held_project_file_ ? adopted_values_ : state_.Current(),
+                    file);
+            RetireReleased();
         }
-        // The newest file, without a fade: the restart starts with it.
-        Restart(state_.Current(), TakeIncoming());
         release_held_keys_ = true;
     }
     return AudioEffect::setActive(state);
 }
 
 void Processor::ApplyLoadedState(const ParameterState::Loaded& loaded, const FileData* incoming) {
+    adopted_values_ = loaded.values;
     state_.Adopt(loaded.generation);
     keyboard_valid_after_ = loaded.loaded_at;
     Restart(loaded.values, incoming);
@@ -160,7 +241,7 @@ void Processor::ApplyLoadedState(const ParameterState::Loaded& loaded, const Fil
 
 void Processor::QueueParameter(int32 offset, ParamID id, double value) {
     const int index = Index(id);
-    if(index < 0)
+    if(index < 0 || id == kParamSampleChanges) // that one is the processor's own output
         return;
     value = Clamp01(value);
     state_.Write(index, value);
@@ -356,17 +437,38 @@ void Processor::Render(ProcessData& data) {
         output->silenceFlags = audible ? 0 : ChannelMask(channels);
 }
 
+void Processor::ReportSampleChanges(IParameterChanges* output) {
+    // MS-R09: a file from the window became the sound. The output parameter reaches
+    // the controller through the host, on the host's thread, window open or not; the
+    // controller then asks for the status and tells the host the project changed.
+    const std::uint32_t loads = loader_.UserLoads();
+    if(loads == reported_user_loads_ || !output)
+        return;
+    int32 index = 0;
+    IParamValueQueue* queue = output->addParameterData(kParamSampleChanges, index);
+    int32 point = 0;
+    if(queue && queue->addPoint(0, SampleChangesValue(loads), point) == kResultOk)
+        reported_user_loads_ = loads; // else again in the next block
+}
+
 tresult PLUGIN_API Processor::process(ProcessData& data) {
-    // A new file first: a state loaded in the same breath restarts with it, without
-    // a fade; on its own it is swapped in with the firmware's fade.
-    const FileData* incoming = TakeIncoming();
-    ParameterState::Loaded loaded;
-    if(state_.TakeLoaded(loaded)) {
-        ApplyLoadedState(loaded, incoming);
-        incoming = nullptr;
+    // A loaded project first, then its file: the restart takes both at once,
+    // without a fade (MS-R02). A file on its own is swapped in with the
+    // firmware's fade.
+    // Files released in the last block that found no room then go first, so that
+    // a project waiting for room can come in now.
+    RetireReleased();
+    if(!TakeHandovers(true))
+        if(FileData* file = TakeWindowFile())
+            engine_.SwapFile(file);
+    // The window's RESET presses (MS-R08). Presses that reach one block act once:
+    // the same restart from START.
+    if(reset_presses_.exchange(0, std::memory_order_acq_rel) > 0) {
+        const auto pressed = Clock::time_point(Clock::duration(last_reset_press_.load()));
+        if(Clock::now() - pressed <= kKeyboardNoteLifetime)
+            adapter_.AddEvent(0, ResetEvent());
     }
-    if(incoming)
-        engine_.SwapFile(incoming);
+    ReportSampleChanges(data.outputParameterChanges);
 
     const int32 num_samples = std::max<int32>(data.numSamples, 0);
     if(data.inputParameterChanges)
@@ -384,6 +486,14 @@ tresult PLUGIN_API Processor::process(ProcessData& data) {
 tresult PLUGIN_API Processor::getState(IBStream* state) {
     if(!state)
         return kInvalidArgument;
+    try {
+        return SaveState(state);
+    } catch(...) {
+        return kOutOfMemory; // MS-R01: nothing leaves this call as an exception
+    }
+}
+
+tresult Processor::SaveState(IBStream* state) {
     const ParameterState::Values current = state_.Current();
     SavedState saved;
     for(std::size_t i = 0; i < saved.values.size(); ++i)
@@ -395,17 +505,40 @@ tresult PLUGIN_API Processor::getState(IBStream* state) {
 tresult PLUGIN_API Processor::setState(IBStream* state) {
     if(!state)
         return kInvalidArgument;
+    try {
+        return LoadState(state);
+    } catch(...) {
+        return kOutOfMemory; // MS-R01: reading the state itself could not allocate
+    }
+}
+
+tresult Processor::LoadState(IBStream* state) {
     // Read and check everything first; a damaged state changes nothing.
     SavedState saved;
     if(!ReadSavedState(state, saved))
         return kResultFalse;
-    // The sample now, before the values: the audio thread restarts with both.
-    loader_.LoadNow(saved.path);
-    state_.Load(saved.values);
+    // The sample now, before the values: the audio thread restarts with both
+    // (MS-R02). Both carry the same number of this project load.
+    const std::uint64_t project = ++project_serial_;
+    std::unique_ptr<FileData> file = loader_.LoadProject(saved.path, project);
+    if(!file)
+        return kOutOfMemory; // not even an empty file: the old project stays
+    project_files_.Offer(std::move(file));
+    if(project_load_hook_)
+        project_load_hook_();
+    state_.Load(saved.values, project);
     return kResultOk;
 }
 
-void Processor::SendFileStatus() {
+void Processor::SendFileStatus() noexcept {
+    try {
+        SendFileStatusUnchecked();
+    } catch(...) {
+        // No memory for the message: the window asks again on its next poll.
+    }
+}
+
+void Processor::SendFileStatusUnchecked() {
     IPtr<IMessage> message = owned(allocateMessage());
     if(!message || !message->getAttributes())
         return;
@@ -418,6 +551,7 @@ void Processor::SendFileStatus() {
     SetText(attributes, kAttrDetail, status.detail);
     attributes->setInt(kAttrState, status.Code());
     attributes->setInt(kAttrSerial, status.serial);
+    attributes->setInt(kAttrUserLoads, status.user_loads);
     sendMessage(message);
 }
 
@@ -427,7 +561,13 @@ tresult PLUGIN_API Processor::notify(IMessage* message) {
     const char* id = message->getMessageID();
     if(std::strcmp(id, kLoadMessageId) == 0) {
         std::string path;
-        if(!GetText(message->getAttributes(), kAttrPath, path) || path.empty()
+        try {
+            if(!GetText(message->getAttributes(), kAttrPath, path))
+                return kInvalidArgument;
+        } catch(...) {
+            return kOutOfMemory;
+        }
+        if(path.empty()
            || path.size() > static_cast<std::size_t>(kMaxPathBytes) || !IsValidUtf8(path))
             return kInvalidArgument;
         loader_.Request(path);
@@ -436,6 +576,11 @@ tresult PLUGIN_API Processor::notify(IMessage* message) {
     }
     if(std::strcmp(id, kStatusRequestId) == 0) {
         SendFileStatus();
+        return kResultOk;
+    }
+    if(std::strcmp(id, kResetMessageId) == 0) {
+        last_reset_press_.store(Clock::now().time_since_epoch().count());
+        reset_presses_.fetch_add(1, std::memory_order_acq_rel);
         return kResultOk;
     }
     if(std::strcmp(id, kNoteMessageId) != 0)

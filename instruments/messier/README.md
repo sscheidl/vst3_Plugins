@@ -9,15 +9,25 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 0.1.0, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 0.1.2, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.1.0:** builds, passes Steinberg's validator, tested automatically (bit for
+**Status 0.1.2:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
-[build report](docs/BUILD_REPORT_0.1.0.md)). Not tried in a DAW, not listened to. The
-[DAW test list](docs/DAW_TEST_0.1.0.md) is open.
+[build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
+([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
+check of 0.1.1 five more ([check](docs/CODEX_REVIEW_0.1.1.md),
+[fixes](docs/CODEX_REVIEW_0.1.1_UMSETZUNG.md)); 0.1.2 fixes them, Codex' next check is
+open. Not tried in a DAW, not listened to. The [DAW test list](docs/DAW_TEST_0.1.0.md) is
+open.
+
+**The window is provisional.** The build order's window (section 8: an Atlas nebula map
+with the waveform, loop bounds, playhead, spray and the real grains, Orion as the visual
+theme, a broad Blend slider above seven knobs) is not built yet; it follows once its
+layout and colours are settled. Until then the window is the plain knob layout described
+below.
 
 Only the file source in 0.1.0. Live recording, overdub, circular recording, the dry
 blend of the input, input gain and grain FM follow in 0.2.0, through the sidechain input
@@ -46,9 +56,10 @@ makes of the pot; typed text is converted back.
 | 115 | Size Random | random grain length, +- on the squared Overlap | 0 | - |
 | 117 | Mask | probability that a grain stays silent, up to 99 % | 0 | - |
 | 120 | Freeze | the playhead stands still; grains and the vocoder go on (a spectral freeze, not a mute) | off | - |
-| 121 | Reset | a button: playback back to Start | - | - |
+| 121 | Reset | playback back to Start, on the rising edge of the value (for automation); the window's RESET button sends its presses directly to the processor and is not recorded as automation | - | - |
 | 122 | Volume | behind the core, 0 to 100 %; 100 % leaves the core's output untouched | 100 % | CC 33 |
 | 123 | Pitch Bend | +-2 semitones, from the pitch wheel; not saved | centre | wheel |
+| 199 | Sample Changes | hidden and read-only: the processor's report that a file from the window became the sound; not saved | - | - |
 
 The secondaries are the firmware's SOURCE page under their pot. Speed's and Blend's
 secondaries (input gain, grain FM) need the audio input; their IDs 111 and 116 are kept
@@ -94,13 +105,18 @@ A file is read on a worker thread and checked completely; only the finished file
 to the audio thread, which fades the old one out (5.3 ms), swaps, and fades the new one
 in from Start, as the firmware does. Unlike the firmware, every failure leaves the old
 file playable. The window shows the file's name, format and length, or what went wrong:
-not found, not a valid WAV (with the reason), too large.
+not found, not a valid WAV (with the reason), too large, or out of memory (also then the
+old file plays on). A file chosen in the window marks the project as changed, so that the
+host offers to save it.
 
 **Projects** store the file's path (UTF-8), not the audio. Opening a project reads the
 file at once, in the thread that loads the project, so that an export straight after
 opening does not start in silence. If the file is not there, the plug-in stays silent,
 keeps the path (saving the project again keeps it too) and the window shows the path
 with "File not found". Move a file back to its path, or load it again, to hear it.
+The project's values and its file always reach the engine together: if the file cannot be
+taken over at once, the whole project waits a few milliseconds and the previous sound
+plays on, never the new values with the old file.
 
 Memory: a loaded file takes its size as PCM16 (a 3-minute stereo file at 48 kHz: 33 MB).
 During a swap the old and the new file exist at the same time, briefly also a third
@@ -196,6 +212,12 @@ ctest --preset windows-vs2026-x64-release -R messier
 
 `bench_messier` (built with the tests, run by hand) measures the load; the numbers are
 in the build report.
+
+Failing allocations are tested by fault injection: in Release builds every case (the
+loader below 16 bytes, and every allocation of six host calls in turn); in Debug builds
+the loader's cases from 40 bytes, the spare empty file included. Below that the Debug
+standard library of MSVC ends the process by design (its container proxies), outside the
+plug-in's code; the plug-in ships as a Release build.
 
 ## Structure
 

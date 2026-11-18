@@ -1,5 +1,16 @@
 # Build report: Messier 0.1.0
 
+> **Later than this report (2026-11-17):** Codex reviewed 0.1.0 (commit `26b8509`) and
+> did not release it: four defects, MS-R01 to MS-R04, and the missing Atlas/Orion window
+> of the work order's section 8, which was extended after this build had started
+> ([CODEX_REVIEW_0.1.0.md](CODEX_REVIEW_0.1.0.md)). The statement below that no defect is
+> known no longer holds for 0.1.0. 0.1.1 fixes the four defects; its checks and numbers
+> are in [CODEX_REVIEW_0.1.0_UMSETZUNG.md](CODEX_REVIEW_0.1.0_UMSETZUNG.md). The window
+> stays provisional until its layout and colours are settled. Codex' check of 0.1.1 found
+> five more (MS-R06 to MS-R10, [CODEX_REVIEW_0.1.1.md](CODEX_REVIEW_0.1.1.md)); 0.1.2
+> fixes them ([CODEX_REVIEW_0.1.1_UMSETZUNG.md](CODEX_REVIEW_0.1.1_UMSETZUNG.md)). The rest
+> of this report is left as written.
+
 Date: 2026-11-17. Work order: `docs/CLAUDE_BUILDAUFTRAG_MESSIER_0.1.0.md` (approved by the
 user on 2026-11-17, kept untracked in the main checkout). Built and tested by Claude
 (Opus 5.5) on the user's machine, in the worktree `.work/messier/wt` on the branch

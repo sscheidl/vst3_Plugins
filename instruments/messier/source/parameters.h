@@ -35,10 +35,14 @@ enum ParamId : std::uint32_t {
     kParamReset = 121,        // a button: 0 to 1 sends playback back to START; not saved
     kParamVolume = 122,
     kParamPitchBend = 123,    // fed by the MIDI pitch wheel; not saved
+    // Since 0.1.2 (MS-R09): read-only and hidden, written by the processor whenever a
+    // file chosen in the window has become the sound, so that the controller learns of
+    // it through the host on its own thread, window open or not. Not saved.
+    kParamSampleChanges = 199,
 };
-constexpr int kParamCount = 18;
+constexpr int kParamCount = 19;
 constexpr std::array<std::uint32_t, kParamCount> kParamIds = {
-    100, 101, 102, 103, 104, 105, 106, 107, 110, 112, 113, 114, 115, 117, 120, 121, 122, 123};
+    100, 101, 102, 103, 104, 105, 106, 107, 110, 112, 113, 114, 115, 117, 120, 121, 122, 123, 199};
 
 // The position of a parameter in kParamIds, or -1 for an ID that is not one.
 constexpr int Index(std::uint32_t id) {
@@ -80,7 +84,14 @@ constexpr std::array<double, kParamCount> kDefaults = {
     0.0,                                    // Freeze off
     0.0,                                    // Reset
     1.0,                                    // Volume
-    kDefaultPitchBend};
+    kDefaultPitchBend,
+    0.0};                                   // sample changes
+
+// The value of kParamSampleChanges for a count of files loaded from the window. It
+// only has to change with every load; 1024 steps before it repeats.
+inline double SampleChangesValue(std::uint32_t loads) {
+    return static_cast<double>(loads % 1024u) / 1023.0;
+}
 
 inline double Clamp01(double value) {
     return value >= 0.0 ? (value <= 1.0 ? value : 1.0) : 0.0; // NaN becomes 0
@@ -242,5 +253,10 @@ constexpr const char* kAttrInfo = "info";
 constexpr const char* kAttrRequest = "request";
 constexpr const char* kAttrState = "state";
 constexpr const char* kAttrSerial = "serial";
+constexpr const char* kAttrUserLoads = "userLoads";
+// Controller -> processor (since 0.1.2, MS-R08): the window's RESET button was pressed.
+// A message, not an edit of parameter 121: the host may merge a press and a release
+// of one parameter at one position, and the window may close before the next block.
+constexpr const char* kResetMessageId = "TaureonMessierReset";
 
 } // namespace messier

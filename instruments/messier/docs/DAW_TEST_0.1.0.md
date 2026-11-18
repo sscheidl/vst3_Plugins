@@ -1,4 +1,4 @@
-# DAW test list: Messier 0.1.0
+# DAW test list: Messier 0.1.0 and later
 
 What the automatic tests cannot show: how the plug-in behaves in a real host, how the
 window looks and handles, and how it sounds. For Studio One 7 first; Waveform 14 and
@@ -10,7 +10,10 @@ None yet (2026-11-17).
 
 ## Before starting
 
-* Install: copy `Messier.vst3` from `out/messier-0.1.0/` into
+* Not before Codex has released a build for the DAW test (0.1.0 was not released;
+  0.1.1 and 0.1.2 fix the findings of two reviews; Codex' next check is open). The window is provisional
+  (see the README); judge its handling, not its final look.
+* Install: copy `Messier.vst3` from `out/messier-0.1.2/` into
   `C:\Program Files\Common Files\VST3\` (administrator rights). Studio One may need a
   rescan of its plug-ins.
 * Have a few WAV files ready: a 16-bit stereo loop at 48 kHz, a 24-bit file, a 32-bit
@@ -39,8 +42,11 @@ None yet (2026-11-17).
       sensibly (Speed as a factor, Pitch in octaves, Density in grains per second,
       Window by name).
 - [ ] Speed and Pitch snap to +1x and 0 octaves near the centre.
-- [ ] Freeze: the playhead stands still, the sound goes on (spectral freeze). Reset
-      sends playback back to Start.
+- [ ] Freeze: the playhead stands still, the sound goes on (spectral freeze). RESET
+      sends playback back to Start, every press (since 0.1.2 the window's presses are not
+      recorded as automation; an automation lane for Reset still works).
+- [ ] After loading a file in the window and closing it, the host offers to save the
+      song (also with the window closed before the file has finished loading).
 - [ ] Double-click on a knob returns it to its default; typing a value in the host's
       parameter field works (for example "1x", "-1 oct", "Rectangle", "50 %").
 - [ ] MIDI notes: C4 plays at the base pitch, other notes transpose and restart from

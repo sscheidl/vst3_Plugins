@@ -27,7 +27,10 @@ enum class WavError : int { kNone = 0, kMissing, kInvalid, kTooLarge, kReadError
 
 struct WavResult {
     WavError error = WavError::kNone;
-    std::string detail;               // why, in English, for the window
+    // Why, in English, for the window. A fixed buffer, not a std::string: a result
+    // must be possible without any allocation (MS-R01; in Debug builds even an empty
+    // std::string allocates).
+    char detail[96] = {};
     std::unique_ptr<FileData> file;   // set exactly when error is kNone
     std::uint16_t source_bits = 0;    // 16, 24 or 32 (float)
     bool source_float = false;
@@ -44,14 +47,18 @@ inline std::int16_t Pcm24To16(const std::uint8_t* p) {
     return static_cast<std::int16_t>(y > 32767 ? 32767 : y);
 }
 
+// Copies `text` into result.detail, cut to its size.
+void SetDetail(WavResult& result, const char* text) noexcept;
+
 // A float sample rounded to PCM16: NaN is 0, beyond full scale clamps.
 std::int16_t FloatTo16(float value);
 
 // Decodes a WAV of `size` bytes from `in`.
-WavResult DecodeWav(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes = kMaxPcmBytes);
+// Never throws: a failed allocation is the result kTooLarge, "out of memory" (MS-R01).
+WavResult DecodeWav(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes = kMaxPcmBytes) noexcept;
 
 // Opens and decodes the file at a UTF-8 path.
-WavResult ReadWavFile(const std::string& utf8_path, std::uint64_t max_pcm_bytes = kMaxPcmBytes);
+WavResult ReadWavFile(const std::string& utf8_path, std::uint64_t max_pcm_bytes = kMaxPcmBytes) noexcept;
 
 const char* WavErrorText(WavError error);
 

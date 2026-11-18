@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -28,10 +29,10 @@ std::uint32_t U32(const std::uint8_t* p) {
            | std::uint32_t(p[3]) << 24;
 }
 
-WavResult Fail(WavError error, const std::string& detail) {
+WavResult Fail(WavError error, const char* detail) noexcept {
     WavResult result;
     result.error = error;
-    result.detail = detail;
+    SetDetail(result, detail);
     return result;
 }
 
@@ -45,6 +46,10 @@ bool ReadAt(std::istream& in, std::uint64_t offset, void* target, std::size_t co
 }
 
 } // namespace
+
+void SetDetail(WavResult& result, const char* text) noexcept {
+    std::snprintf(result.detail, sizeof(result.detail), "%s", text ? text : "");
+}
 
 std::int16_t FloatTo16(float value) {
     if(!(value == value))
@@ -65,7 +70,15 @@ const char* WavErrorText(WavError error) {
     return "";
 }
 
-WavResult DecodeWav(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes) {
+namespace {
+
+// MS-R01: an allocation that fails while reading becomes a result, never an
+// exception that leaves the loader. Building the result allocates nothing.
+WavResult OutOfMemory() noexcept {
+    return Fail(WavError::kTooLarge, "out of memory");
+}
+
+WavResult DecodeUnchecked(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes) {
     std::uint8_t header[12];
     if(size < 12 || !ReadAt(in, 0, header, sizeof(header)))
         return Fail(WavError::kInvalid, "too short for a WAV file");
@@ -138,8 +151,12 @@ WavResult DecodeWav(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_
         return Fail(WavError::kInvalid, "no audio in the data chunk");
     const std::uint64_t pcm_bytes = frames * channels * 2u;
     if(pcm_bytes > max_pcm_bytes)
-        return Fail(WavError::kTooLarge, "more than " + std::to_string(max_pcm_bytes >> 20)
-                                             + " MiB as 16-bit audio");
+        {
+        char text[64];
+        std::snprintf(text, sizeof(text), "more than %llu MiB as 16-bit audio",
+                      static_cast<unsigned long long>(max_pcm_bytes >> 20));
+        return Fail(WavError::kTooLarge, text);
+    }
 
     auto file = std::make_unique<FileData>();
     const std::size_t samples = static_cast<std::size_t>(frames * channels);
@@ -191,7 +208,7 @@ WavResult DecodeWav(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_
     return result;
 }
 
-WavResult ReadWavFile(const std::string& utf8_path, std::uint64_t max_pcm_bytes) {
+WavResult ReadUnchecked(const std::string& utf8_path, std::uint64_t max_pcm_bytes) {
     if(utf8_path.empty())
         return Fail(WavError::kMissing, "no path");
     std::filesystem::path path;
@@ -210,7 +227,29 @@ WavResult ReadWavFile(const std::string& utf8_path, std::uint64_t max_pcm_bytes)
     std::ifstream in(path, std::ios::binary);
     if(!in)
         return Fail(WavError::kReadError, "cannot open the file");
-    return DecodeWav(in, static_cast<std::uint64_t>(size), max_pcm_bytes);
+    return DecodeUnchecked(in, static_cast<std::uint64_t>(size), max_pcm_bytes);
+}
+
+} // namespace
+
+WavResult DecodeWav(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes) noexcept {
+    try {
+        return DecodeUnchecked(in, size, max_pcm_bytes);
+    } catch(const std::bad_alloc&) {
+        return OutOfMemory();
+    } catch(...) {
+        return Fail(WavError::kReadError, "could not be read");
+    }
+}
+
+WavResult ReadWavFile(const std::string& utf8_path, std::uint64_t max_pcm_bytes) noexcept {
+    try {
+        return ReadUnchecked(utf8_path, max_pcm_bytes);
+    } catch(const std::bad_alloc&) {
+        return OutOfMemory();
+    } catch(...) {
+        return Fail(WavError::kReadError, "could not be read");
+    }
 }
 
 } // namespace messier

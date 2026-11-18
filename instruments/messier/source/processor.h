@@ -14,6 +14,7 @@
 #include <atomic>
 #include <bitset>
 #include <chrono>
+#include <functional>
 
 namespace messier {
 
@@ -80,6 +81,9 @@ class Processor : public Steinberg::Vst::AudioEffect {
     const StreamAdapter& Adapter() const { return adapter_; }
     const LooperEngine& Engine() const { return engine_; }
     FileLoader& Loader() { return loader_; }
+    // Called in setState() between handing over a project's file and its values; for
+    // the test of MS-R07, which renders blocks right there.
+    void SetProjectLoadHookForTest(std::function<void()> hook) { project_load_hook_ = std::move(hook); }
 
   private:
     using Clock = std::chrono::steady_clock;
@@ -95,7 +99,16 @@ class Processor : public Steinberg::Vst::AudioEffect {
     void ApplyLoadedState(const ParameterState::Loaded& loaded, const FileData* incoming);
     // Files the engine let go, to the loader's thread.
     void RetireReleased();
+    bool CanTakeFile() const;
     FileData* TakeIncoming();
+    // Takes what setState() published and restarts with a complete project, if one
+    // is there (MS-R02, MS-R07). True if it restarted.
+    bool TakeHandovers(bool audio_thread);
+    // The newest file from the window, if no project is on its way and it is newer
+    // than the file playing.
+    FileData* TakeWindowFile();
+    bool RetireLater(const FileData* file);
+    void ReportSampleChanges(Steinberg::Vst::IParameterChanges* output);
     void QueueParameter(Steinberg::int32 offset, Steinberg::Vst::ParamID id, double value);
     void ReadParameterChanges(Steinberg::Vst::IParameterChanges& changes,
                               Steinberg::int32 num_samples);
@@ -108,8 +121,11 @@ class Processor : public Steinberg::Vst::AudioEffect {
     void ReleaseToHost(Steinberg::Vst::IEventList* output, int note);
     void ReadEvents(Steinberg::Vst::IEventList& events, Steinberg::int32 num_samples);
     void Render(Steinberg::Vst::ProcessData& data);
-    // Tells the controller what the loader knows. UI thread.
-    void SendFileStatus();
+    // Tells the controller what the loader knows. UI thread. Never throws.
+    void SendFileStatus() noexcept;
+    void SendFileStatusUnchecked();
+    Steinberg::tresult SaveState(Steinberg::IBStream* state);
+    Steinberg::tresult LoadState(Steinberg::IBStream* state);
 
     LooperEngine engine_;
     EngineBridge bridge_{engine_};
@@ -117,8 +133,22 @@ class Processor : public Steinberg::Vst::AudioEffect {
     std::atomic<Steinberg::uint32> latency_{0};
     ParameterState state_;
     bool reset_pressed_ = false; // the Reset button as the audio thread last saw it
+    // A loaded project not yet in the engine because its file could not be taken
+    // (MS-R02). Owned by the audio side.
+    ParameterState::Loaded pending_project_;
+    bool has_pending_project_ = false;
+    // The file of a project, taken from project_files_, waiting for its values.
+    const FileData* held_project_file_ = nullptr;
+    // The values of the project in the engine, for a restart while another waits.
+    ParameterState::Values adopted_values_ = kDefaults;
+    std::atomic<std::uint64_t> project_serial_{0}; // numbers the project loads
+    // The window's RESET presses since the last block, and when the last came (MS-R08).
+    std::atomic<std::uint32_t> reset_presses_{0};
+    std::atomic<Clock::rep> last_reset_press_{0};
+    std::uint32_t reported_user_loads_ = 0; // audio thread
 
-    FileExchange exchange_;
+    FileExchange exchange_;      // files from the window
+    FileExchange project_files_; // project files; their retire queue is unused
     FileLoader loader_{exchange_};
     // Released files the retire queue had no room for yet. Owned by the audio
     // side; no new file is taken while it is more than half full.
@@ -132,6 +162,8 @@ class Processor : public Steinberg::Vst::AudioEffect {
     std::bitset<128> host_keys_;
     std::bitset<128> owed_releases_;
     bool release_held_keys_ = false;
+
+    std::function<void()> project_load_hook_;
 
     static constexpr int kChunk = 256;
     std::array<float, kChunk> chunk_left_{}, chunk_right_{};

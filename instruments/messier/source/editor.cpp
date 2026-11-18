@@ -481,15 +481,10 @@ void Editor::SetFreeze(bool on) {
 }
 
 void Editor::PressReset() {
-    if(!controller)
-        return;
-    // A press and its release in one edit: the processor acts on the press.
-    controller->beginEdit(kParamReset);
-    controller->setParamNormalized(kParamReset, 1.0);
-    controller->performEdit(kParamReset, 1.0);
-    controller->setParamNormalized(kParamReset, 0.0);
-    controller->performEdit(kParamReset, 0.0);
-    controller->endEdit(kParamReset);
+    // MS-R08: each press goes to the processor as a message, through the controller;
+    // no edit of parameter 121, which a host may merge or the window may outlive.
+    if(callbacks_.reset)
+        callbacks_.reset();
 }
 
 void Editor::ChooseFile() {

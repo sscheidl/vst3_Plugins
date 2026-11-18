@@ -21,7 +21,7 @@
 
 namespace messier {
 
-constexpr const char* kEngineVersion = "0.1.0";
+constexpr const char* kEngineVersion = "0.1.2";
 
 // A sample file in the core's format: interleaved PCM16, mono or stereo, at the
 // file's own rate (the core converts the rate when it reads). Immutable once handed
@@ -31,6 +31,12 @@ struct FileData {
     std::uint32_t frames = 0;
     std::uint32_t rate = 48000;
     std::uint16_t channels = 2;
+    // Which project load brought the file: the processor's number for it, 0 for a
+    // file chosen in the window. The engine does not read it.
+    std::uint64_t project = 0;
+    // The loader's count of finished files, window and project alike: which of two
+    // files is the newer choice. The engine does not read it.
+    std::uint64_t sequence = 0;
 };
 
 // Continuous controls, each 0..1 as the pot of the Daisy kit. The first eight are

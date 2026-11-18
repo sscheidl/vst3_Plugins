@@ -46,7 +46,9 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
     bool LoadFile(const std::string& path);
     // Asks the processor for the file status. Sent while a load runs, when a
     // window opens and after a project was loaded.
-    bool RequestFileStatus();
+    bool RequestFileStatus() noexcept;
+    // RESET from the window: a message to the processor (MS-R08).
+    bool PressReset() noexcept;
     const FileStatus& File() const { return file_; }
 
     // IMidiMapping
@@ -69,8 +71,16 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
         Steinberg::Vst::EditorView* view;
         Editor* editor;
     };
-    bool SendKey(int note, int velocity);
-    void ShowFile();
+    void AddParameters();
+    // A value set as part of a loaded state, then shown; never throws.
+    void SetValue(Steinberg::Vst::ParamID tag, Steinberg::Vst::ParamValue value) noexcept;
+    void ShowParameter(Steinberg::Vst::ParamID tag) noexcept;
+    bool SendKey(int note, int velocity) noexcept;
+    bool SendKeyUnchecked(int note, int velocity);
+    bool SendLoad(const std::string& path);
+    bool SendSimple(const char* id) noexcept;
+    Editor* MakeEditor();
+    void ShowFile() noexcept;
 
     std::vector<OpenEditor> editors_;
     EditorSettings editor_;

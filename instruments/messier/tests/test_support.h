@@ -27,6 +27,13 @@ namespace test_support {
 // VirtualAlloc or allocations inside other DLLs.
 inline thread_local std::uint64_t t_allocations = 0;
 
+// Fault injection (Messier MS-R06): while g_fail_armed is set, the allocations of
+// the thread that armed it count down g_fail_after, and every one after it reaches
+// zero throws std::bad_alloc. Other threads are not affected.
+inline thread_local bool g_fail_armed = false;
+inline thread_local long long g_fail_after = 0;
+inline thread_local std::uint64_t g_failed_allocations = 0;
+
 struct AllocationProbe {
     std::uint64_t start = t_allocations;
     std::uint64_t Count() const { return t_allocations - start; }
@@ -118,6 +125,10 @@ struct Lcg {
 #ifdef TEST_SUPPORT_COUNT_ALLOCATIONS
 void* operator new(std::size_t size) {
     ++test_support::t_allocations;
+    if(test_support::g_fail_armed && test_support::g_fail_after-- <= 0) {
+        ++test_support::g_failed_allocations;
+        throw std::bad_alloc();
+    }
     if(void* p = std::malloc(size ? size : 1))
         return p;
     throw std::bad_alloc();

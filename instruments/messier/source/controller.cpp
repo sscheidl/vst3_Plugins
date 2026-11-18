@@ -72,6 +72,15 @@ tresult PLUGIN_API Controller::initialize(FUnknown* context) {
     const tresult result = EditController::initialize(context);
     if(result != kResultOk)
         return result;
+    try {
+        AddParameters();
+    } catch(...) {
+        return kOutOfMemory; // MS-R06: nothing leaves a host call as an exception
+    }
+    return kResultOk;
+}
+
+void Controller::AddParameters() {
     const struct {
         const TChar* title;
         ParamID id;
@@ -94,35 +103,63 @@ tresult PLUGIN_API Controller::initialize(FUnknown* context) {
     // controllers. It can be automated, has no knob and is not saved.
     parameters.addParameter(new DisplayParameter(STR16("Pitch Bend"), kParamPitchBend, 0,
                                                  ParameterInfo::kCanAutomate));
-    return kResultOk;
+    // Since 0.1.2 (MS-R09): the processor's report that a file from the window has
+    // become the sound. Read-only and hidden; not for automation.
+    parameters.addParameter(new DisplayParameter(STR16("Sample Changes"), kParamSampleChanges, 0,
+                                                 ParameterInfo::kIsReadOnly | ParameterInfo::kIsHidden));
 }
 
 tresult PLUGIN_API Controller::setComponentState(IBStream* state) {
     if(!state)
         return kInvalidArgument;
+    // MS-R06: the whole call is guarded. A project that cannot be read is refused; a
+    // window that cannot show it does not make it unreadable.
     SavedState saved;
-    if(!ReadSavedState(state, saved))
-        return kResultFalse;
+    try {
+        if(!ReadSavedState(state, saved))
+            return kResultFalse;
+    } catch(...) {
+        return kOutOfMemory;
+    }
     for(int i = 0; i < kSavedParamCount; ++i)
-        setParamNormalized(kParamIds[static_cast<std::size_t>(kSavedIndex[static_cast<std::size_t>(i)])],
-                           saved.values[static_cast<std::size_t>(i)]);
-    setParamNormalized(kParamReset, 0.0);
-    setParamNormalized(kParamPitchBend, kDefaultPitchBend);
-    // The processor has read the file by now; it says how that went.
-    file_.path = saved.path;
-    file_.sound = saved.path.empty() ? SoundState::kNone : SoundState::kReady;
+        SetValue(kParamIds[static_cast<std::size_t>(kSavedIndex[static_cast<std::size_t>(i)])],
+                 saved.values[static_cast<std::size_t>(i)]);
+    SetValue(kParamReset, 0.0);
+    SetValue(kParamPitchBend, kDefaultPitchBend);
+    // The processor has read the file by now; it says how that went. Moving the
+    // path allocates nothing.
+    file_.path = std::move(saved.path);
+    file_.sound = file_.path.empty() ? SoundState::kNone : SoundState::kReady;
     file_.info.clear();
     ShowFile();
     RequestFileStatus();
     return kResultOk;
 }
 
+void Controller::SetValue(ParamID tag, ParamValue value) noexcept {
+    if(EditController::setParamNormalized(tag, value) == kResultOk)
+        ShowParameter(tag);
+}
+
+void Controller::ShowParameter(ParamID tag) noexcept {
+    try {
+        for(const OpenEditor& open : editors_)
+            open.editor->ParameterChanged(tag, getParamNormalized(tag));
+    } catch(...) {
+        // Out of memory while drawing a text: the value is set, the window is late.
+    }
+}
+
 tresult PLUGIN_API Controller::setParamNormalized(ParamID tag, ParamValue value) {
+    const ParamValue before = getParamNormalized(tag);
     const tresult result = EditController::setParamNormalized(tag, value);
     if(result != kResultOk)
         return result;
-    for(const OpenEditor& open : editors_)
-        open.editor->ParameterChanged(tag, getParamNormalized(tag));
+    ShowParameter(tag);
+    // MS-R09: the processor reports a file from the window that became the sound;
+    // the status says which, and that tells the host the project changed.
+    if(tag == kParamSampleChanges && getParamNormalized(tag) != before)
+        RequestFileStatus();
     return result;
 }
 
@@ -153,8 +190,12 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
     editor_.zoom = ClampEditorZoom(zoom);
     editor_.keyboard = keyboard != 0;
     editor_.transpose = transpose;
-    for(const OpenEditor& open : editors_)
-        open.editor->ApplySettings(editor_);
+    try {
+        for(const OpenEditor& open : editors_)
+            open.editor->ApplySettings(editor_);
+    } catch(...) {
+        // The settings are taken; an open window shows them when it can.
+    }
     return kResultOk;
 }
 
@@ -166,7 +207,15 @@ bool Controller::ReleaseNote(int note) {
     return SendKey(note, 0);
 }
 
-bool Controller::SendKey(int note, int velocity) {
+bool Controller::SendKey(int note, int velocity) noexcept {
+    try {
+        return SendKeyUnchecked(note, velocity);
+    } catch(...) {
+        return false;
+    }
+}
+
+bool Controller::SendKeyUnchecked(int note, int velocity) {
     if(note < 0 || note > 127)
         return false;
     IPtr<IMessage> message = owned(allocateMessage());
@@ -179,6 +228,14 @@ bool Controller::SendKey(int note, int velocity) {
 }
 
 bool Controller::LoadFile(const std::string& path) {
+    try {
+        return SendLoad(path);
+    } catch(...) {
+        return false; // MS-R01: not into the window's callback
+    }
+}
+
+bool Controller::SendLoad(const std::string& path) {
     if(path.empty() || path.size() > static_cast<std::size_t>(kMaxPathBytes) || !IsValidUtf8(path))
         return false;
     IPtr<IMessage> message = owned(allocateMessage());
@@ -190,48 +247,88 @@ bool Controller::LoadFile(const std::string& path) {
     return sendMessage(message) == kResultOk;
 }
 
-bool Controller::RequestFileStatus() {
-    IPtr<IMessage> message = owned(allocateMessage());
-    if(!message)
+bool Controller::RequestFileStatus() noexcept {
+    return SendSimple(kStatusRequestId);
+}
+
+bool Controller::PressReset() noexcept {
+    // MS-R08: each press as a message; the processor acts on every press that comes.
+    return SendSimple(kResetMessageId);
+}
+
+bool Controller::SendSimple(const char* id) noexcept {
+    try {
+        IPtr<IMessage> message = owned(allocateMessage());
+        if(!message)
+            return false;
+        message->setMessageID(id);
+        return sendMessage(message) == kResultOk;
+    } catch(...) {
         return false;
-    message->setMessageID(kStatusRequestId);
-    return sendMessage(message) == kResultOk;
+    }
 }
 
 tresult PLUGIN_API Controller::notify(IMessage* message) {
     if(!message || !message->getMessageID()
        || std::strcmp(message->getMessageID(), kStatusMessageId) != 0)
         return EditController::notify(message);
-    IAttributeList* attributes = message->getAttributes();
-    FileStatus status;
-    int64 code = 0, serial = 0;
-    if(!attributes || !GetText(attributes, kAttrPath, status.path)
-       || !GetText(attributes, kAttrInfo, status.info) || !GetText(attributes, kAttrRequest, status.request)
-       || !GetText(attributes, kAttrDetail, status.detail)
-       || attributes->getInt(kAttrState, code) != kResultOk
-       || attributes->getInt(kAttrSerial, serial) != kResultOk)
-        return kInvalidArgument;
-    status.SetCode(static_cast<int>(code));
-    status.serial = static_cast<std::uint32_t>(serial);
-    file_ = std::move(status);
-    ShowFile();
-    return kResultOk;
+    try {
+        IAttributeList* attributes = message->getAttributes();
+        FileStatus status;
+        int64 code = 0, serial = 0, user_loads = 0;
+        if(!attributes || !GetText(attributes, kAttrPath, status.path)
+           || !GetText(attributes, kAttrInfo, status.info) || !GetText(attributes, kAttrRequest, status.request)
+           || !GetText(attributes, kAttrDetail, status.detail)
+           || attributes->getInt(kAttrState, code) != kResultOk
+           || attributes->getInt(kAttrSerial, serial) != kResultOk
+           || attributes->getInt(kAttrUserLoads, user_loads) != kResultOk)
+            return kInvalidArgument;
+        status.SetCode(static_cast<int>(code));
+        status.serial = static_cast<std::uint32_t>(serial);
+        status.user_loads = static_cast<std::uint32_t>(user_loads);
+        // MS-R04, MS-R09: files from the window became the sound. The project's saved
+        // state has changed though no parameter did; tell the host once for each such
+        // load since the last status. Restoring a project and repeated status replies
+        // leave the count alone.
+        const std::uint32_t added =
+            status.user_loads > file_.user_loads ? status.user_loads - file_.user_loads : 0;
+        file_ = std::move(status);
+        for(std::uint32_t i = 0; i < added && i < 1024u; ++i)
+            setDirty(true);
+        ShowFile();
+        return kResultOk;
+    } catch(...) {
+        return kOutOfMemory;
+    }
 }
 
-void Controller::ShowFile() {
-    for(const OpenEditor& open : editors_)
-        open.editor->ShowFileStatus(file_);
+void Controller::ShowFile() noexcept {
+    try {
+        for(const OpenEditor& open : editors_)
+            open.editor->ShowFileStatus(file_);
+    } catch(...) {
+        // The window shows the status when it next can.
+    }
 }
 
 IPlugView* PLUGIN_API Controller::createView(FIDString name) {
     if(!name || std::strcmp(name, ViewType::kEditor) != 0)
         return nullptr;
+    try {
+        return MakeEditor();
+    } catch(...) {
+        return nullptr;
+    }
+}
+
+Editor* Controller::MakeEditor() {
     EditorCallbacks callbacks;
     callbacks.changed = [this](const EditorSettings& settings) { editor_ = settings; };
     callbacks.settled = [this] { setDirty(true); };
     callbacks.strike = [this](int note) { PlayNote(note); };
     callbacks.release = [this](int note) { ReleaseNote(note); };
     callbacks.load = [this](const std::string& path) { LoadFile(path); };
+    callbacks.reset = [this] { PressReset(); };
     // While a file is being read, the window asks how it goes, ten times a second.
     callbacks.poll = [this] {
         if(file_.request_state == RequestState::kLoading || file_.serial == 0)
@@ -249,7 +346,11 @@ void Controller::editorAttached(EditorView* editor) {
     for(const OpenEditor& open : editors_)
         if(open.view == editor)
             return;
-    editors_.push_back({editor, own});
+    try {
+        editors_.push_back({editor, own});
+    } catch(...) {
+        // Without memory for the list this window gets no updates.
+    }
 }
 
 void Controller::editorRemoved(EditorView* editor) {

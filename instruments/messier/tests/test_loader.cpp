@@ -9,7 +9,9 @@
 #include "file_loader.h"
 #include "wav_reader.h"
 
+#include <atomic>
 #include <chrono>
+#include <new>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -23,6 +25,38 @@
 using namespace messier;
 using namespace test_support;
 namespace fs = std::filesystem;
+
+// Fault injection for MS-R01: while g_fail_from is not 0, every allocation of at
+// least that many bytes, in any thread, throws std::bad_alloc. The nothrow forms
+// of operator new call this one and return null.
+static std::atomic<std::size_t> g_fail_from{0};
+static std::atomic<std::uint64_t> g_failed{0};
+
+void* operator new(std::size_t size) {
+    const std::size_t from = g_fail_from.load(std::memory_order_relaxed);
+    if(from != 0 && size >= from) {
+        g_failed.fetch_add(1, std::memory_order_relaxed);
+        throw std::bad_alloc();
+    }
+    if(void* p = std::malloc(size ? size : 1))
+        return p;
+    throw std::bad_alloc();
+}
+void* operator new[](std::size_t size) {
+    return operator new(size);
+}
+void operator delete(void* p) noexcept {
+    std::free(p);
+}
+void operator delete[](void* p) noexcept {
+    std::free(p);
+}
+void operator delete(void* p, std::size_t) noexcept {
+    std::free(p);
+}
+void operator delete[](void* p, std::size_t) noexcept {
+    std::free(p);
+}
 
 namespace {
 
@@ -263,8 +297,8 @@ void TestRefused() {
     for(const Case& c : cases) {
         const WavResult r = ReadWavFile(Write(std::string("refused-") + c.name + ".wav", c.bytes));
         if(r.error != c.error)
-            std::printf("  %s: error %d (%s)\n", c.name, static_cast<int>(r.error), r.detail.c_str());
-        CHECK(r.error == c.error && !r.file && !r.detail.empty());
+            std::printf("  %s: error %d (%s)\n", c.name, static_cast<int>(r.error), r.detail);
+        CHECK(r.error == c.error && !r.file && r.detail[0] != 0);
     }
     // Missing, and a folder instead of a file.
     CHECK(ReadWavFile((g_dir / "nothing.wav").string()).error == WavError::kMissing);
@@ -332,18 +366,22 @@ void TestLoader() {
 
     // A project's file that is missing: the path stays, the sound is silent.
     const std::string gone = (g_dir / "gone.wav").string();
-    loader.LoadNow(gone);
+    // A project's file is returned, not offered (MS-R07): the processor hands it over
+    // together with the project's values.
+    FileData* empty = loader.LoadProject(gone, 1).release();
     status = loader.Status();
     CHECK(status.path == gone && status.sound == SoundState::kMissing);
-    FileData* empty = exchange.Take();
-    CHECK(empty && empty->frames == 0);
-    loader.LoadNow(good);
-    CHECK(loader.Status().sound == SoundState::kReady);
-    loader.LoadNow("");
+    CHECK(empty && empty->frames == 0 && empty->project == 1 && !exchange.Pending());
+    CHECK(empty->sequence > second->sequence);
+    std::unique_ptr<FileData> project = loader.LoadProject(good, 2);
+    CHECK(project && project->frames == 4800 && project->sequence > empty->sequence);
+    CHECK(loader.Status().sound == SoundState::kReady && !exchange.Pending());
+    project.reset();
+    FileData* last = loader.LoadProject("", 3).release();
     CHECK(loader.Status().sound == SoundState::kNone && loader.SoundPath().empty());
-    // An offer replaces one the audio thread has not taken (and frees it).
-    FileData* last = exchange.Take();
-    CHECK(last && last->frames == 0);
+    CHECK(last && last->frames == 0 && last->project == 3);
+    // A project load does not count as a file from the window.
+    CHECK(loader.UserLoads() == loader.Status().user_loads && loader.UserLoads() > 0);
 
     // Retired files are freed by the worker.
     CHECK(exchange.Retire(taken) && exchange.Retire(second) && exchange.Retire(empty)
@@ -357,6 +395,102 @@ void TestLoader() {
                 "wins, a missing project file stays named and silent, retired files are freed\n");
 }
 
+
+// MS-R01: allocations that fail while loading, in the worker thread and in the
+// thread that loads a project, become a failure result; the process lives on, the
+// playing file stays for a request from the window, a project falls silent.
+void TestOutOfMemory() {
+    std::vector<std::int16_t> samples(9600 * 2, 500);
+    const std::string good = Write("oom-good.wav", Riff({FmtChunk({}), DataChunk(Pcm16(samples))}));
+    samples.assign(4800 * 2, -500);
+    const std::string other = Write("oom-other-with-a-rather-long-name-for-the-path.wav",
+                                    Riff({FmtChunk({}), DataChunk(Pcm16(samples))}));
+    samples.assign(300000 * 2, 250); // 1.2 MB of PCM16: more than the conversion buffer
+    const std::string big = Write("oom-big.wav", Riff({FmtChunk({}), DataChunk(Pcm16(samples))}));
+    FileExchange exchange;
+    FileLoader loader(exchange);
+    FileData* playing = loader.LoadProject(good, 1).release();
+    CHECK(playing && playing->frames == 9600 && playing->project == 1);
+    struct Case {
+        const char* what;
+        std::size_t from;
+        const std::string* path;
+    };
+    // The conversion buffer (exactly 1 MiB) of a small file; the PCM array of a
+    // 1.2 MB file, whose buffer still fits; nearly everything (strings, the file
+    // object, the status texts).
+    const Case cases[] = {{"conversion buffer", 1u << 20, &other},
+                          {"PCM array", 1100000, &big},
+                          {"almost all", 40, &other}};
+    for(const Case& c : cases) {
+        const std::uint64_t failed_before = g_failed.load();
+        g_fail_from = c.from;
+        loader.Request(*c.path);
+        const bool idle = WaitFor([&] { return loader.Idle(); });
+        g_fail_from = 0;
+        CHECK(idle);
+        const FileStatus status = loader.Status();
+        std::printf("  %s: %llu allocations refused; request %d, detail '%s'\n", c.what,
+                    static_cast<unsigned long long>(g_failed.load() - failed_before),
+                    static_cast<int>(status.request_state), status.detail.c_str());
+        CHECK(g_failed.load() > failed_before);
+        CHECK(status.request_state == RequestState::kFailed && !status.detail.empty());
+        CHECK(status.path == good && status.sound == SoundState::kReady && !exchange.Pending());
+        }
+    // A project loaded with almost no memory: silent, from the spare empty file.
+    // FileData has 40 bytes, so not even the empty file object can be made here: the
+    // spare is used, and cannot be made again while memory is short. This runs in
+    // Debug builds too (no allocation below 40 bytes fails).
+    static_assert(sizeof(FileData) >= 40);
+    CHECK(loader.SpareReadyForTest());
+    g_fail_from = 40;
+    FileData* silent = loader.LoadProject(other, 2).release();
+    const bool spare_after_failure = loader.SpareReadyForTest();
+    g_fail_from = 0;
+    CHECK(!spare_after_failure);
+    FileStatus status = loader.Status();
+    CHECK(status.sound == SoundState::kTooLarge || status.sound == SoundState::kReadError);
+    CHECK(silent && silent->frames == 0 && silent->project == 2);
+    // Memory back: everything works again, the spare is refilled.
+    FileData* back = loader.LoadProject(other, 3).release();
+    CHECK(loader.SpareReadyForTest()); // made again
+    CHECK(back && back->frames == 4800 && back->project == 3);
+    g_fail_from = 40;
+    FileData* again = loader.LoadProject(other, 4).release();
+    g_fail_from = 0;
+    CHECK(again && again->frames == 0 && again->project == 4);
+    // So little memory that not even an empty file object can be made: the spare
+    // kept for this case is used, and made again once memory is back. Not in Debug
+    // builds: there the standard library allocates a 16-byte container proxy even in
+    // noexcept constructors (std::filesystem::path) and terminates by design when that
+    // fails. The plug-in ships as a Release build, which has no such proxies.
+#if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
+    // Memory back once more, so that the spare is there again (the case above may
+    // have used it: FileData has 40 bytes since 0.1.2).
+    loader.LoadProject(other, 50).reset();
+    g_fail_from = 16;
+    FileData* spare = loader.LoadProject(other, 5).release();
+    g_fail_from = 0;
+    CHECK(spare && spare->frames == 0 && spare->project == 5);
+    delete spare;
+    loader.LoadProject(other, 6).reset();
+    g_fail_from = 16;
+    spare = loader.LoadProject(other, 7).release();
+    g_fail_from = 0;
+    CHECK(spare && spare->frames == 0 && spare->project == 7);
+    delete spare;
+#endif
+    loader.Request(other);
+    CHECK(WaitFor([&] { return loader.Idle(); }));
+    CHECK(loader.Status().request_state == RequestState::kNone && loader.SoundPath() == other);
+    delete exchange.Take();
+    for(FileData* file : {playing, silent, back, again})
+        delete file;
+    std::printf("out of memory: the conversion buffer, the PCM array and the status texts refused "
+                "in the worker, and a project load in the calling thread: the process lives on, "
+                "the old file stays, a project falls silent\n");
+}
+
 } // namespace
 
 int main() {
@@ -367,6 +501,7 @@ int main() {
     TestFormats();
     TestRefused();
     TestLoader();
+    TestOutOfMemory();
     fs::remove_all(g_dir);
     std::printf("PASS messier.loader\n");
     return 0;
