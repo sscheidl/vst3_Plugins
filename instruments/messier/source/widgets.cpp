@@ -2,6 +2,8 @@
 // the switch; only the namespace is changed.
 #include "widgets.h"
 
+#include "guard.h"
+
 #include "view_layout.h"
 
 #include "reference_dsp.h"
@@ -83,6 +85,10 @@ void KeyboardView::SetTranspose(int semitones) {
 }
 
 void KeyboardView::draw(CDrawContext* context) {
+    Guarded([&] { DrawUnchecked(context); }); // MS-R37
+}
+
+void KeyboardView::DrawUnchecked(CDrawContext* context) {
     const CRect area = getViewSize();
     const double width = area.getWidth();
     const double height = area.getHeight();
@@ -173,29 +179,36 @@ void KeyboardView::MouseUp() {
         Release();
 }
 
+// MS-R37: the mouse handlers are exception boundaries (guard.h).
 void KeyboardView::onMouseDownEvent(MouseDownEvent& event) {
-    if(!event.buttonState.isLeft())
-        return;
-    MouseDownOn(NoteAtPoint(event.mousePosition));
-    event.consumed = true;
+    Guarded([&] {
+        if(!event.buttonState.isLeft())
+            return;
+        MouseDownOn(NoteAtPoint(event.mousePosition));
+        event.consumed = true;
+    });
 }
 
 void KeyboardView::onMouseMoveEvent(MouseMoveEvent& event) {
-    if(!dragging_)
-        return;
-    MouseMoveTo(NoteAtPoint(event.mousePosition));
-    event.consumed = true;
+    Guarded([&] {
+        if(!dragging_)
+            return;
+        MouseMoveTo(NoteAtPoint(event.mousePosition));
+        event.consumed = true;
+    });
 }
 
 void KeyboardView::onMouseUpEvent(MouseUpEvent& event) {
-    if(!dragging_)
-        return;
-    MouseUp();
-    event.consumed = true;
+    Guarded([&] {
+        if(!dragging_)
+            return;
+        MouseUp();
+        event.consumed = true;
+    });
 }
 
 void KeyboardView::onMouseCancelEvent(MouseCancelEvent& event) {
-    MouseUp();
+    Guarded([&] { MouseUp(); });
     event.consumed = true;
 }
 
@@ -227,6 +240,10 @@ void WindowShapeView::SetValue(float pot) {
 }
 
 void WindowShapeView::draw(CDrawContext* context) {
+    Guarded([&] { DrawUnchecked(context); }); // MS-R37
+}
+
+void WindowShapeView::DrawUnchecked(CDrawContext* context) {
     float mixed[neb::WIN_LEN + 1];
     neb::WinMix(WindowBank(), pot_, mixed);
     const CRect area = getViewSize();
@@ -266,6 +283,10 @@ void ToggleButton::SetOn(bool on) {
 }
 
 void ToggleButton::draw(CDrawContext* context) {
+    Guarded([&] { DrawUnchecked(context); }); // MS-R37
+}
+
+void ToggleButton::DrawUnchecked(CDrawContext* context) {
     const CRect area = getViewSize();
     context->setDrawMode(kAntiAliasing | kNonIntegralMode);
     if(on_)
@@ -283,10 +304,18 @@ void ToggleButton::onMouseDownEvent(MouseDownEvent& event) {
         return;
     if(style_ != Style::Action)
         on_ = !on_;
-    invalid();
-    if(toggled_)
-        toggled_(on_);
     event.consumed = true;
+    // MS-R37: what the button does (LOAD..., KEYS, LATCH, STOP, FREEZE, RESET, the
+    // octave keys) runs inside the window's exception boundary. If it could not be
+    // done, the button shows its old state again.
+    const bool done = Guarded(false, [&] {
+        if(toggled_)
+            toggled_(on_);
+        return true;
+    });
+    if(!done && style_ != Style::Action)
+        on_ = !on_;
+    Guarded([&] { invalid(); });
 }
 
 } // namespace messier

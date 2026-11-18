@@ -11,10 +11,10 @@ None yet (2026-11-17).
 ## Before starting
 
 * Not before Codex has released a build for the DAW test (0.1.0 was not released;
-  0.1.1 to 0.1.3 and 0.1.5 to 0.1.8 fix the findings of seven reviews; 0.1.4 adds the
-  window's data path and a provisional map; Codex' next check is open). The window is provisional
+  0.1.1 to 0.1.3, 0.1.5 to 0.1.8 and 0.1.10 fix the findings of nine reviews; 0.1.4 adds
+  the window's data path and a provisional map; Codex' next check is open). The window is provisional
   (see the README); judge its handling, not its final look.
-* Install: copy `Messier.vst3` from `out/messier-0.1.9/` into
+* Install: copy `Messier.vst3` from `out/messier-0.1.10/` into
   `C:\Program Files\Common Files\VST3\` (administrator rights). Studio One may need a
   rescan of its plug-ins.
 * Have a few WAV files ready: a 16-bit stereo loop at 48 kHz, a 24-bit file, a 32-bit
@@ -62,6 +62,12 @@ None yet (2026-11-17).
 - [ ] STOP (0.1.9): the sound fades out without a click; pressed again it goes on
       where it stopped, fading in. Studio One's bypass of the plug-in does the same;
       reopening a bypassed song opens it bypassed, a stopped song opens playing.
+      (0.1.10) Automate STOP in a lane with a short on/off within one bar: the gap is
+      heard at its place, with any buffer size. Screen keys struck while stopped do
+      nothing and send no MIDI; after STOP off the pitch is that of the keys still held.
+- [ ] Screen key and MIDI on channel 1 (0.1.10): hold C5 on a MIDI keyboard (channel 1),
+      click C5 on the screen and let go: the note stays. Close the window while both
+      hold C5: the MIDI note stays.
 - [ ] LATCH: a struck screen key stays held (pitch stays changed); another key moves the
       hold, the same key or LATCH off lets it go; without LATCH as before.
 - [ ] Freeze: the playhead stands still, the sound goes on (spectral freeze). RESET

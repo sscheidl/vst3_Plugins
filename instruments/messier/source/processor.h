@@ -4,6 +4,7 @@
 #include "file_loader.h"
 #include "latest_value.h"
 #include "looper_engine.h"
+#include "output_gate.h"
 #include "parameter_state.h"
 #include "parameters.h"
 #include "spsc_queue.h"
@@ -120,6 +121,9 @@ class Processor : public Steinberg::Vst::AudioEffect {
     bool RetireLater(const FileData* file);
     void ReportSampleChanges(Steinberg::Vst::IParameterChanges* output);
     void QueueParameter(Steinberg::int32 offset, Steinberg::Vst::ParamID id, double value);
+    // Bypass and Stop of the block, then the gate's plan (MS-R35). Also without
+    // changes and for a block of 0 samples.
+    void ReadSwitches(Steinberg::Vst::IParameterChanges* changes, Steinberg::int32 num_samples);
     void ReadParameterChanges(Steinberg::Vst::IParameterChanges& changes,
                               Steinberg::int32 num_samples);
     void ReadKeyboard(Steinberg::Vst::IEventList* output);
@@ -150,13 +154,19 @@ class Processor : public Steinberg::Vst::AudioEffect {
     std::atomic<Steinberg::uint32> latency_{0};
     ParameterState state_;
     bool reset_pressed_ = false; // the Reset button as the audio thread last saw it
-    // Bypass and Stop (since 0.1.8), audio thread: the output's gain glides to 0 while
-    // either is on (step per sample, 5 ms); at 0 the engine is not rendered.
-    bool bypass_ = false, stopped_ = false;
-    float out_gain_ = 1.0f;
-    float fade_step_ = 1.0f / (0.005f * 48000.0f);
-    bool Resting() const { return (bypass_ || stopped_) && out_gain_ == 0.0f; }
+    // Bypass and Stop (since 0.1.9), audio thread: the output's gain glides to 0 while
+    // either is on (step per sample, 5 ms); at 0 the engine is not rendered. Each
+    // switch point acts on its own sample (MS-R35).
+    OutputGate gate_;
     void SetFadeRate(double rate);
+    // Who holds which note (MS-R34): the screen keyboard, and the host per MIDI channel.
+    // On the keyboard's channel the engine hears a note-off only when the last of the
+    // two lets go. A release of a note nobody holds is not passed on at all (the engine
+    // would ignore it), so that releases arriving during a long pause cannot fill the
+    // adapter's note queue. Audio thread; cleared with the engine at every restart.
+    std::bitset<128> screen_held_;
+    std::array<std::bitset<128>, 16> host_held_{};
+    void EngineNoteOff(Steinberg::int32 offset, int note);
     // A loaded project not yet in the engine because its file could not be taken
     // (MS-R02). Owned by the audio side.
     ParameterState::Loaded pending_project_;

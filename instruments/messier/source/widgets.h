@@ -37,6 +37,7 @@ class KeyboardView : public VSTGUI::CView {
     void SetTranspose(int semitones);
 
     void draw(VSTGUI::CDrawContext* context) override;
+    void DrawUnchecked(VSTGUI::CDrawContext* context);
     void onMouseDownEvent(VSTGUI::MouseDownEvent& event) override;
     void onMouseMoveEvent(VSTGUI::MouseMoveEvent& event) override;
     void onMouseUpEvent(VSTGUI::MouseUpEvent& event) override;
@@ -63,6 +64,7 @@ class WindowShapeView : public VSTGUI::CView {
     explicit WindowShapeView(const VSTGUI::CRect& size) : CView(size) { setMouseEnabled(false); }
     void SetValue(float pot);
     void draw(VSTGUI::CDrawContext* context) override;
+    void DrawUnchecked(VSTGUI::CDrawContext* context);
     // For tests: the curve's height (0..1) at a share of its length.
     static float Sample(float pot, float share);
 
@@ -81,6 +83,7 @@ class ToggleButton : public VSTGUI::CView {
 
     void SetOn(bool on);
     void draw(VSTGUI::CDrawContext* context) override;
+    void DrawUnchecked(VSTGUI::CDrawContext* context);
     void onMouseDownEvent(VSTGUI::MouseDownEvent& event) override;
 
   private:

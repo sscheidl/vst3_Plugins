@@ -1,5 +1,23 @@
 # Changes
 
+## 0.1.10 (2026-11-18)
+
+The four findings of Codex' checks of 0.1.8 and 0.1.9 (`docs/CODEX_REVIEW_0.1.8.md`,
+`docs/CODEX_REVIEW_0.1.9.md`), each fixed as a class; details in
+`docs/BUILD_REPORT_0.1.10.md`. The sound while playing is unchanged.
+
+* Stop and Bypass act on their own sample (MS-R35). The output no longer depends on how
+  the host divides its blocks, and an on and off within one block is heard. Notes and
+  parameter points are put on the engine's own time, so one that comes while the engine
+  rests acts when it goes on.
+* While resting, a screen key is dropped like a host note, and no MIDI goes out for it
+  (MS-R36). A release of a note nobody holds is not passed on, so a busy MIDI track
+  during a long pause cannot fill the engine's note queue.
+* The screen keyboard and host MIDI on channel 1 share a note: it ends when the last of
+  them lets go, also when a reconnect lets go of the screen's keys (MS-R34).
+* Every call of the host, VSTGUI or the system into the window's code is an exception
+  boundary: drawing, mouse, wheel, drag and drop, timer, file dialog, sizes (MS-R37).
+
 ## 0.1.9 (2026-11-18)
 
 From the user's DAW test of 0.1.8; details in `docs/BUILD_REPORT_0.1.9.md`. The sound is

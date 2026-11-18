@@ -25,6 +25,7 @@ class MapView : public VSTGUI::CView {
     // New data; redraws if it differs from what is shown. Never throws.
     void Show(const EngineDisplay& display, std::shared_ptr<const WaveOverview> wave) noexcept;
     void draw(VSTGUI::CDrawContext* context) override;
+    void DrawUnchecked(VSTGUI::CDrawContext* context);
     // A drag over the window's sample area (since 0.1.8): a usable WAV shows a frame
     // and "Drop WAV to load", a refused file a frame in the warning colour and why.
     // Never throws.

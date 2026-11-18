@@ -90,9 +90,12 @@ void FileDropTarget::Show(Hover state, const std::string& reason) noexcept {
     }
 }
 
+// MS-R37: none of the four lets an exception out into VSTGUI. The verdict is moved,
+// never copied (moving strings allocates nothing), and the hover state is reset before
+// anything that could throw.
 DragOperation FileDropTarget::onDragEnter(DragEventData data) {
     // Judged once, when the drag enters: the files do not change while it hovers.
-    verdict_ = JudgeDrop(data.drag);
+    verdict_ = JudgeDrop(data.drag); // never throws
     over_ = true;
     Show(verdict_.usable ? Hover::kUsable : Hover::kRefused, verdict_.reason);
     return verdict_.usable ? DragOperation::Copy : DragOperation::None;
@@ -104,15 +107,16 @@ DragOperation FileDropTarget::onDragMove(DragEventData) {
 
 void FileDropTarget::onDragLeave(DragEventData) {
     over_ = false;
+    verdict_ = DropVerdict{};
     Show(Hover::kNone, {});
 }
 
 bool FileDropTarget::onDrop(DragEventData data) {
-    Show(Hover::kNone, {});
     // Judged again if the drag did not enter here first (some hosts send no enter).
-    const DropVerdict verdict = over_ ? verdict_ : JudgeDrop(data.drag);
+    DropVerdict verdict = over_ ? std::move(verdict_) : JudgeDrop(data.drag);
     over_ = false;
     verdict_ = DropVerdict{};
+    Show(Hover::kNone, {});
     if(!verdict.usable)
         return false;
     try {

@@ -1,4 +1,6 @@
 #include "editor.h"
+
+#include "guard.h"
 #include "file_drop.h"
 
 #include "file_loader.h"
@@ -475,17 +477,25 @@ void Editor::UserChanged() {
     last_change_ = std::chrono::steady_clock::now();
 }
 
+// MS-R37: every call of the host, VSTGUI or the system into the editor is an
+// exception boundary (guard.h); the window catches up on a later call.
 CMessageResult Editor::notify(CBaseObject* sender, const char* message) {
-    const CMessageResult result = VSTGUIEditor::notify(sender, message);
+    const CMessageResult result =
+        Guarded(kMessageUnknown, [&] { return VSTGUIEditor::notify(sender, message); });
     if(message == CVSTGUITimer::kMsgTimer && settle_pending_
        && std::chrono::steady_clock::now() - last_change_ >= kSettleDelay) {
         settle_pending_ = false;
-        if(callbacks_.settled)
-            callbacks_.settled();
+        Guarded([&] {
+            if(callbacks_.settled)
+                callbacks_.settled();
+        });
     }
     // The controller asks the processor for the file status while a load runs.
-    if(message == CVSTGUITimer::kMsgTimer && callbacks_.poll)
-        callbacks_.poll();
+    if(message == CVSTGUITimer::kMsgTimer)
+        Guarded([&] {
+            if(callbacks_.poll)
+                callbacks_.poll();
+        });
     return result;
 }
 
@@ -494,6 +504,10 @@ tresult PLUGIN_API Editor::canResize() {
 }
 
 tresult PLUGIN_API Editor::checkSizeConstraint(ViewRect* size) {
+    return Guarded(static_cast<tresult>(kResultFalse), [&] { return CheckSizeUnchecked(size); });
+}
+
+tresult Editor::CheckSizeUnchecked(ViewRect* size) {
     if(!size)
         return kInvalidArgument;
     const EditorSize allowed =
@@ -505,6 +519,10 @@ tresult PLUGIN_API Editor::checkSizeConstraint(ViewRect* size) {
 }
 
 tresult PLUGIN_API Editor::onSize(ViewRect* newSize) {
+    return Guarded(static_cast<tresult>(kOutOfMemory), [&] { return OnSizeUnchecked(newSize); });
+}
+
+tresult Editor::OnSizeUnchecked(ViewRect* newSize) {
     if(!newSize)
         return kInvalidArgument;
     const int32 width = newSize->getWidth();
@@ -544,34 +562,20 @@ void Editor::ApplySettings(const EditorSettings& settings) {
 }
 
 tresult PLUGIN_API Editor::getSize(ViewRect* size) {
-    // Before the window exists, answer with the size it will have.
-    if(!frame)
-        setRect(ScaledSize());
-    return VSTGUIEditor::getSize(size);
+    return Guarded(static_cast<tresult>(kResultFalse), [&] {
+        // Before the window exists, answer with the size it will have.
+        if(!frame)
+            setRect(ScaledSize());
+        return VSTGUIEditor::getSize(size);
+    });
 }
 
 void PLUGIN_API Editor::close() {
-    if(settle_pending_) { // a change made just before closing still counts
-        settle_pending_ = false;
-        if(callbacks_.settled)
-            callbacks_.settled();
-    }
-    // A knob still held by the mouse, or within the pause that follows a turn
-    // of the wheel, has told the host that an edit began. Its view is about
-    // to go without a mouse-up; finish the edit here, once, while the frame
-    // can still pass it on. The same for a screen key still held: the host
-    // gets its note-off.
-    if(frame)
-        for(const Knob& knob : knobs_)
-            while(knob.knob && knob.knob->isEditing())
-                knob.knob->endEdit();
-    if(keyboard_view_)
-        keyboard_view_->ReleaseHeld();
-    if(map_view_)
-        map_view_->Release(); // a START drag still going: its edit ends here (0.1.8)
+    // Each step on its own: whatever one of them meets, the frame is let go.
+    Guarded([&] { FinishEdits(); });
     ForgetViews();
     if(frame) {
-        frame->removeAll(true);
+        Guarded([&] { frame->removeAll(true); });
         if(frame->getNbReference() == 1)
             frame->close(); // also releases the frame
         else
@@ -580,13 +584,45 @@ void PLUGIN_API Editor::close() {
     }
 }
 
+void Editor::FinishEdits() {
+    // A change made just before closing still counts.
+    Guarded([&] {
+        if(settle_pending_) {
+            settle_pending_ = false;
+            if(callbacks_.settled)
+                callbacks_.settled();
+        }
+    });
+    // A knob still held by the mouse, or within the pause that follows a turn
+    // of the wheel, has told the host that an edit began. Its view is about
+    // to go without a mouse-up; finish the edit here, once, while the frame
+    // can still pass it on. The same for a screen key still held: the host
+    // gets its note-off. Each on its own (MS-R37).
+    if(frame)
+        for(const Knob& knob : knobs_)
+            Guarded([&] {
+                while(knob.knob && knob.knob->isEditing())
+                    knob.knob->endEdit();
+            });
+    Guarded([&] {
+        if(keyboard_view_)
+            keyboard_view_->ReleaseHeld();
+    });
+    Guarded([&] {
+        if(map_view_)
+            map_view_->Release(); // a START drag still going: its edit ends here (0.1.8)
+    });
+}
+
 void Editor::valueChanged(CControl* control) {
-    if(!controller || !control)
-        return;
-    const auto id = static_cast<ParamID>(control->getTag());
-    const ParamValue normalized = control->getValueNormalized();
-    controller->setParamNormalized(id, normalized);
-    controller->performEdit(id, normalized);
+    Guarded([&] {
+        if(!controller || !control)
+            return;
+        const auto id = static_cast<ParamID>(control->getTag());
+        const ParamValue normalized = control->getValueNormalized();
+        controller->setParamNormalized(id, normalized);
+        controller->performEdit(id, normalized);
+    });
 }
 
 void Editor::SetFreeze(bool on) {
@@ -628,9 +664,12 @@ void Editor::ChooseFile() {
         if(!*alive)
             return;
         dialog_open_ = false;
-        if(chosen && chosen->getNumSelectedFiles() > 0 && callbacks_.load)
-            if(const char* path = chosen->getSelectedFile(0))
-                callbacks_.load(path);
+        // MS-R37: making the path's string may fail; not into the dialog's caller.
+        Guarded([&] {
+            if(chosen && chosen->getNumSelectedFiles() > 0 && callbacks_.load)
+                if(const char* path = chosen->getSelectedFile(0))
+                    callbacks_.load(path);
+        });
     });
     selector->forget();
 }
@@ -775,9 +814,11 @@ tresult PLUGIN_API Editor::setContentScaleFactor(ScaleFactor factor) {
     if(!(factor > 0.0f) || !std::isfinite(factor))
         return kInvalidArgument;
     scale_ = factor;
-    if(frame && !Resize())
-        LayOut(rect.getWidth(), rect.getHeight());
-    return kResultOk;
+    return Guarded(static_cast<tresult>(kOutOfMemory), [&] {
+        if(frame && !Resize())
+            LayOut(rect.getWidth(), rect.getHeight());
+        return static_cast<tresult>(kResultOk);
+    });
 }
 
 } // namespace messier

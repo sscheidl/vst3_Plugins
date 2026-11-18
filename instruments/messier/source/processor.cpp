@@ -250,14 +250,17 @@ bool Processor::PrepareAdapter(double rate) noexcept {
 }
 
 void Processor::SetFadeRate(double rate) {
-    fade_step_ = rate > 0.0 ? static_cast<float>(1.0 / (0.005 * rate)) : 1.0f / (0.005f * 48000.0f);
+    gate_.SetFadeStep(rate > 0.0 ? static_cast<float>(1.0 / (0.005 * rate)) : 1.0f / (0.005f * 48000.0f));
 }
 
 void Processor::Restart(const ParameterState::Values& values, const FileData* incoming) {
     // Bypass and Stop as the values say, without a fade at a new start.
-    bypass_ = IsOn(values[static_cast<std::size_t>(Index(kParamBypass))]);
-    stopped_ = IsOn(values[static_cast<std::size_t>(Index(kParamStop))]);
-    out_gain_ = bypass_ || stopped_ ? 0.0f : 1.0f;
+    gate_.Reset(IsOn(values[static_cast<std::size_t>(Index(kParamBypass))]),
+                IsOn(values[static_cast<std::size_t>(Index(kParamStop))]));
+    // The engine starts without notes; nobody holds one now.
+    screen_held_.reset();
+    for(auto& held : host_held_)
+        held.reset();
     // MS-R18: a RESET press the adapter has put on a quantum not yet rendered would
     // be dropped by its Reset(); it acts in the first quantum of the new start.
     const bool reset_waiting = adapter_.ControlWaiting(static_cast<int>(kResetControl));
@@ -336,10 +339,35 @@ void Processor::QueueParameter(int32 offset, ParamID id, double value) {
         case kParamPitchBend:
             adapter_.AddEvent(offset, BendEvent(static_cast<unsigned>(PitchBendRaw(value))));
             break;
-        case kParamBypass: bypass_ = IsOn(value); break;
-        case kParamStop: stopped_ = IsOn(value); break;
-        default: break;
+        default: break; // Bypass and Stop: the gate's points (ReadSwitches)
     }
+}
+
+void Processor::ReadSwitches(IParameterChanges* changes, int32 num_samples) {
+    // MS-R35: Bypass and Stop first, each point at its own sample, so that the plan
+    // knows before anything else of the block is read where the engine rests.
+    const int32 last = std::max<int32>(num_samples - 1, 0);
+    const int32 count = changes ? changes->getParameterCount() : 0;
+    for(int32 i = 0; i < count; ++i) {
+        IParamValueQueue* queue = changes->getParameterData(i);
+        if(!queue)
+            continue;
+        const ParamID id = queue->getParameterId();
+        if(id != kParamBypass && id != kParamStop)
+            continue;
+        const int32 points = queue->getPointCount();
+        for(int32 point = 0; point < points; ++point) {
+            int32 offset = 0;
+            ParamValue value = 0.0;
+            if(queue->getPoint(point, offset, value) != kResultOk)
+                continue;
+            value = Clamp01(value);
+            state_.Write(Index(id), value);
+            gate_.AddPoint(id == kParamBypass ? OutputGate::kBypass : OutputGate::kStop,
+                           std::clamp<int32>(offset, 0, last), IsOn(value));
+        }
+    }
+    gate_.Plan(num_samples);
 }
 
 void Processor::ReadParameterChanges(IParameterChanges& changes, int32 num_samples) {
@@ -350,15 +378,18 @@ void Processor::ReadParameterChanges(IParameterChanges& changes, int32 num_sampl
         if(!queue)
             continue;
         const ParamID id = queue->getParameterId();
+        if(id == kParamBypass || id == kParamStop)
+            continue; // read by ReadSwitches
         const int32 points = queue->getPointCount();
         // Every point takes effect at its own time, as a step on the quantum grid;
-        // the core smooths the pots.
+        // the core smooths the pots. The time is the engine's (MS-R35): a point while
+        // the engine rests acts when it goes on.
         for(int32 point = 0; point < points; ++point) {
             int32 offset = 0;
             ParamValue value = 0.0;
             if(queue->getPoint(point, offset, value) != kResultOk)
                 continue;
-            QueueParameter(std::clamp<int32>(offset, 0, last), id, value);
+            QueueParameter(gate_.EngineOffset(std::clamp<int32>(offset, 0, last)), id, value);
         }
     }
 }
@@ -405,10 +436,23 @@ void Processor::StrikeToHost(IEventList* output, int note, int velocity) {
         host_keys_.set(key);
 }
 
+void Processor::EngineNoteOff(int32 offset, int note) {
+    // MS-R34: the screen keyboard and the host's MIDI on the keyboard's channel share
+    // the engine's note. It ends when the last of the two lets go.
+    const auto key = static_cast<std::size_t>(note);
+    if(screen_held_.test(key) || host_held_[kKeyboardChannel].test(key))
+        return;
+    adapter_.AddEvent(offset, NoteOffEvent(kKeyboardChannel, static_cast<unsigned>(note)));
+}
+
 void Processor::ReleaseKey(IEventList* output, int note) {
     // Unlike Kekule's engine, this one listens to the release: the last held note
     // sounds, and without one the loop plays at its base pitch and full level.
-    adapter_.AddEvent(0, NoteOffEvent(kKeyboardChannel, static_cast<unsigned>(note)));
+    const auto key = static_cast<std::size_t>(note);
+    const bool held = screen_held_.test(key);
+    screen_held_.reset(key);
+    if(held) // a key dropped while resting, or struck before a restart, holds nothing
+        EngineNoteOff(0, note);
     ReleaseToHost(output, note);
 }
 
@@ -441,7 +485,10 @@ void Processor::PlayKeyboardNote(IEventList* output, const KeyboardNote& key,
         return; // struck while nobody was rendering
     if(key.struck <= keyboard_valid_after_)
         return; // struck before the state that was loaded since
+    if(gate_.RestingAt(0))
+        return; // MS-R36: paused or bypassed, as a host note: none waits for the end
     adapter_.AddEvent(0, NoteOnEvent(kKeyboardChannel, key.note, key.velocity));
+    screen_held_.set(static_cast<std::size_t>(key.note));
     StrikeToHost(output, key.note, key.velocity);
 }
 
@@ -461,19 +508,32 @@ void Processor::ReadEvents(IEventList& events, int32 num_samples) {
         if(pitch < 0 || pitch > 127)
             continue;
         const auto midi_channel = static_cast<unsigned>(channel >= 0 && channel < 16 ? channel : 0);
-        const int32 offset = std::max(std::clamp<int32>(event.sampleOffset, 0, last), previous);
-        previous = offset;
+        const int32 host_offset = std::max(std::clamp<int32>(event.sampleOffset, 0, last), previous);
+        previous = host_offset;
+        // MS-R35: on the engine's time; an event while the engine rests acts when it
+        // goes on.
+        const int32 offset = gate_.EngineOffset(host_offset);
         const float velocity = on ? event.noteOn.velocity : 0.0f;
-        if(on && Resting() && velocity > 0.0f)
-            continue; // paused or bypassed: no new note waits for the end of the pause
-        if(!on || !(velocity > 0.0f) || !std::isfinite(velocity)) {
-            adapter_.AddEvent(offset, NoteOffEvent(midi_channel, static_cast<unsigned>(pitch)));
+        const bool strike = on && velocity > 0.0f && std::isfinite(velocity);
+        const auto key = static_cast<std::size_t>(pitch);
+        if(!strike) {
+            std::bitset<128>& held = host_held_[midi_channel];
+            if(!held.test(key))
+                continue; // the host holds no such note: nothing to end
+            held.reset(key);
+            if(midi_channel == kKeyboardChannel)
+                EngineNoteOff(offset, pitch); // MS-R34: not while the screen holds it
+            else
+                adapter_.AddEvent(offset, NoteOffEvent(midi_channel, static_cast<unsigned>(pitch)));
             continue;
         }
+        if(gate_.RestingAt(host_offset))
+            continue; // paused or bypassed: no new note waits for the end of the pause
         const long scaled = std::lround(std::min(velocity, 1.0f) * 127.0f);
         adapter_.AddEvent(offset,
                           NoteOnEvent(midi_channel, static_cast<unsigned>(pitch),
                                       static_cast<unsigned>(std::clamp(scaled, 1L, 127L))));
+        host_held_[midi_channel].set(key);
     }
 }
 
@@ -491,40 +551,44 @@ void Processor::Render(ProcessData& data) {
             channels = 0;
 
     bool audible = false;
-    for(int32 done = 0; done < data.numSamples; done += kChunk) {
-        const int32 frames = std::min<int32>(kChunk, data.numSamples - done);
-        // Bypass and Stop (0.1.8): faded out, the engine rests; it goes on where it
-        // stopped. In between, the gain glides; at full gain nothing is touched, so the
-        // sound stays bit for bit the engine's.
-        const float gain_target = bypass_ || stopped_ ? 0.0f : 1.0f;
-        if(gain_target == 0.0f && out_gain_ == 0.0f) {
-            std::fill(chunk_left_.begin(), chunk_left_.begin() + frames, 0.0f);
-            std::fill(chunk_right_.begin(), chunk_right_.begin() + frames, 0.0f);
-        } else {
-            adapter_.Process(chunk_left_.data(), chunk_right_.data(), frames);
-            if(out_gain_ != 1.0f || gain_target != 1.0f)
-                for(int32 i = 0; i < frames; ++i) {
-                    out_gain_ = gain_target > out_gain_ ? std::min(gain_target, out_gain_ + fade_step_)
-                                                        : std::max(gain_target, out_gain_ - fade_step_);
-                    chunk_left_[i] *= out_gain_;
-                    chunk_right_[i] *= out_gain_;
-                }
-        }
-        for(int32 channel = 0; channel < channels; ++channel) {
-            const float* source =
-                channel == 0 ? chunk_left_.data() : (channel == 1 ? chunk_right_.data() : nullptr);
-            if(is_double) {
-                Sample64* target = output->channelBuffers64[channel] + done;
-                for(int32 i = 0; i < frames; ++i)
-                    target[i] = source ? static_cast<Sample64>(source[i]) : 0.0;
+    // Bypass and Stop (0.1.9): faded out, the engine rests; it goes on where it stopped.
+    // In between, the gain glides; at full gain nothing is touched, so the sound stays
+    // bit for bit the engine's. The segments are the gate's plan of this block, cut at
+    // every switch point and where the gain reaches 0 (MS-R35).
+    for(int s = 0; s < gate_.SegmentCount(); ++s) {
+        const OutputGate::Segment& segment = gate_.SegmentAt(s);
+        float gain = segment.gain;
+        const bool untouched = segment.gain == 1.0f && segment.target == 1.0f;
+        for(int32 done = segment.start; done < segment.end; done += kChunk) {
+            const int32 frames = std::min<int32>(kChunk, segment.end - done);
+            if(!segment.rendered) {
+                std::fill(chunk_left_.begin(), chunk_left_.begin() + frames, 0.0f);
+                std::fill(chunk_right_.begin(), chunk_right_.begin() + frames, 0.0f);
             } else {
-                Sample32* target = output->channelBuffers32[channel] + done;
-                for(int32 i = 0; i < frames; ++i)
-                    target[i] = source ? source[i] : 0.0f;
+                adapter_.Process(chunk_left_.data(), chunk_right_.data(), frames);
+                if(!untouched)
+                    for(int32 i = 0; i < frames; ++i) {
+                        gain = OutputGate::Step(gain, segment.target, gate_.FadeStep());
+                        chunk_left_[i] *= gain;
+                        chunk_right_[i] *= gain;
+                    }
             }
+            for(int32 channel = 0; channel < channels; ++channel) {
+                const float* source =
+                    channel == 0 ? chunk_left_.data() : (channel == 1 ? chunk_right_.data() : nullptr);
+                if(is_double) {
+                    Sample64* target = output->channelBuffers64[channel] + done;
+                    for(int32 i = 0; i < frames; ++i)
+                        target[i] = source ? static_cast<Sample64>(source[i]) : 0.0;
+                } else {
+                    Sample32* target = output->channelBuffers32[channel] + done;
+                    for(int32 i = 0; i < frames; ++i)
+                        target[i] = source ? source[i] : 0.0f;
+                }
+            }
+            for(int32 i = 0; i < frames && !audible; ++i)
+                audible = chunk_left_[i] != 0.0f || chunk_right_[i] != 0.0f;
         }
-        for(int32 i = 0; i < frames && !audible; ++i)
-            audible = chunk_left_[i] != 0.0f || chunk_right_[i] != 0.0f;
     }
     if(output && channels > 0)
         output->silenceFlags = audible ? 0 : ChannelMask(channels);
@@ -565,6 +629,7 @@ tresult PLUGIN_API Processor::process(ProcessData& data) {
     }
     ReportSampleChanges(data.outputParameterChanges);
 
+    ReadSwitches(data.inputParameterChanges, num_samples); // plans the block (MS-R35)
     if(data.inputParameterChanges)
         ReadParameterChanges(*data.inputParameterChanges, num_samples);
     if(num_samples > 0)

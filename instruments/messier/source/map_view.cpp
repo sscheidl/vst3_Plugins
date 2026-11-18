@@ -1,5 +1,7 @@
 #include "map_view.h"
 
+#include "guard.h"
+
 #include "vstgui/lib/events.h"
 
 #include "vstgui/lib/cdrawcontext.h"
@@ -43,10 +45,14 @@ void MapView::Show(const EngineDisplay& display, std::shared_ptr<const WaveOverv
         return;
     display_ = display;
     wave_ = std::move(wave);
-    invalid();
+    Guarded([&] { invalid(); }); // a noexcept function (MS-R37)
 }
 
 void MapView::draw(CDrawContext* context) {
+    Guarded([&] { DrawUnchecked(context); }); // MS-R37
+}
+
+void MapView::DrawUnchecked(CDrawContext* context) {
     const CRect all = getViewSize();
     context->setDrawMode(kAntiAliasing | kNonIntegralMode);
     context->setFillColor(kMapBack);
@@ -149,7 +155,7 @@ void MapView::SetDropState(DropShown state, const std::string& reason) noexcept 
         drop_reason_.clear();
     }
     drop_state_ = state;
-    invalid();
+    Guarded([&] { invalid(); }); // a noexcept function (MS-R37)
 }
 
 void MapView::DrawDropHighlight(CDrawContext* context) {
@@ -222,38 +228,47 @@ bool MapView::Wheel(double delta, bool fine) {
     return true;
 }
 
+// MS-R37: the mouse handlers are exception boundaries (guard.h).
 void MapView::onMouseDownEvent(MouseDownEvent& event) {
-    if(!event.buttonState.isLeft())
-        return;
-    if(PressAt(event.mousePosition.x - getViewSize().left))
-        event.consumed = true;
+    Guarded([&] {
+        if(!event.buttonState.isLeft())
+            return;
+        if(PressAt(event.mousePosition.x - getViewSize().left))
+            event.consumed = true;
+    });
 }
 
 void MapView::onMouseMoveEvent(MouseMoveEvent& event) {
-    if(!dragging_)
-        return;
-    DragTo(event.mousePosition.x - getViewSize().left);
-    event.consumed = true;
+    Guarded([&] {
+        if(!dragging_)
+            return;
+        DragTo(event.mousePosition.x - getViewSize().left);
+        event.consumed = true;
+    });
 }
 
 void MapView::onMouseUpEvent(MouseUpEvent& event) {
-    if(!dragging_)
-        return;
-    Release();
-    event.consumed = true;
+    Guarded([&] {
+        if(!dragging_)
+            return;
+        Release();
+        event.consumed = true;
+    });
 }
 
 void MapView::onMouseCancelEvent(MouseCancelEvent& event) {
-    Release();
+    Guarded([&] { Release(); });
     event.consumed = true;
 }
 
 void MapView::onMouseWheelEvent(MouseWheelEvent& event) {
-    double delta = event.deltaY;
-    if(event.flags & MouseWheelEvent::DirectionInvertedFromDevice)
-        delta = -delta;
-    if(Wheel(delta, event.modifiers.has(ModifierKey::Shift)))
-        event.consumed = true;
+    Guarded([&] {
+        double delta = event.deltaY;
+        if(event.flags & MouseWheelEvent::DirectionInvertedFromDevice)
+            delta = -delta;
+        if(Wheel(delta, event.modifiers.has(ModifierKey::Shift)))
+            event.consumed = true;
+    });
 }
 
 } // namespace messier

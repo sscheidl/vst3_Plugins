@@ -1034,6 +1034,218 @@ void TestStopAndBypass() {
                 "faded in; Bypass saved (state 2), version 1 still read\n");
 }
 
+// MS-R35 (0.1.10): Bypass and Stop act on their own sample, and the output is the same
+// however the host divides its blocks (Codex' case: a point at sample 512 of a block of
+// 1024). A switch on and off within one block does not vanish. While the engine rests,
+// a strike is dropped; a release and a parameter point act when it goes on.
+struct SwitchRun {
+    std::vector<float> out;
+    std::int64_t rendered = 0;
+    float pitch = 0.0f;
+};
+
+SwitchRun RunSwitches(const HostScore& score, std::int64_t total, const std::function<int()>& blocks) {
+    PluginHost host({}, score);
+    CHECK(LoadState(*host.processor, MakeState(StartValues(), g_path)) == kResultOk);
+    host.Run(total, blocks);
+    CHECK(host.allocations == 0);
+    return {host.Stereo(), host.processor->Adapter().RenderedSamples(), host.processor->Engine().EffectivePitch()};
+}
+
+void TestSwitchesOnTheSample() {
+    for(const ParamID id : {kParamStop, kParamBypass}) {
+        const std::int64_t on = 4800 + 512 + 37; // on no block or quantum boundary
+        const std::int64_t off = on + 3000;
+        const std::int64_t total = off + 6000;
+        auto make = [&](bool dropped_note, bool fading_note, bool blip) {
+            HostScore score = {{on - 2000, Ev::kNoteOn, 72, 0.8, 5},
+                               {on, Ev::kParam, static_cast<int>(id), 1.0}};
+            if(fading_note) // 100 samples into the 240-sample fade: still played
+                score.push_back({on + 100, Ev::kNoteOn, 67, 0.8, 6});
+            if(dropped_note) // the engine rests: dropped
+                score.push_back({on + 1000, Ev::kNoteOn, 60, 0.9, 3});
+            score.push_back({on + 1200, Ev::kParam, static_cast<int>(kParamDensity), 0.8});
+            score.push_back({on + 1500, Ev::kNoteOff, 72, 0.0, 5});
+            score.push_back({off, Ev::kParam, static_cast<int>(id), 0.0});
+            if(blip) { // on and off again 50 samples later, inside one block of 2048
+                score.push_back({off + 2100, Ev::kParam, static_cast<int>(id), 1.0});
+                score.push_back({off + 2150, Ev::kParam, static_cast<int>(id), 0.0});
+            }
+            std::stable_sort(score.begin(), score.end(),
+                             [](const Ev& a, const Ev& b) { return a.sample < b.sample; });
+            return score;
+        };
+        const HostScore score = make(true, true, true);
+        const SwitchRun reference = RunSwitches(score, total, [] { return 512; });
+        const std::vector<std::function<int()>> divisions = {
+            [] { return 2048; }, [] { return 1024; }, [] { return 1; }, VaryingBlocks{},
+            [n = 0]() mutable { return (n++ % 2) ? 333 : 1000; }};
+        int index = 0;
+        for(const auto& blocks : divisions) {
+            const std::function<int()> next = blocks;
+            if(index++ == 2) { // single samples: only around the switches, else too slow
+                PluginHost host({}, score);
+                CHECK(LoadState(*host.processor, MakeState(StartValues(), g_path)) == kResultOk);
+                host.Run(on - 300, 512);
+                host.Run(total - (on - 300), next);
+                CHECK(host.Stereo() == reference.out);
+                continue;
+            }
+            const SwitchRun run = RunSwitches(score, total, next);
+            CHECK(run.out == reference.out);
+            CHECK(run.rendered == reference.rendered);
+        }
+        // The fade starts at the point itself: before it, the output is that of a run
+        // without any switch; right after it, it is quieter.
+        HostScore plain;
+        for(const Ev& ev : score)
+            if(ev.a != static_cast<int>(id))
+                plain.push_back(ev);
+        const SwitchRun unswitched = RunSwitches(plain, total, [] { return 512; });
+        const auto n = static_cast<std::size_t>(total);
+        for(std::size_t i = 0; i < static_cast<std::size_t>(on); ++i)
+            CHECK(reference.out[i] == unswitched.out[i] && reference.out[n + i] == unswitched.out[n + i]);
+        // Resting from the fade's end until `off`: silent, and the engine stood.
+        for(std::int64_t i = on + 250; i < off; ++i)
+            CHECK(reference.out[static_cast<std::size_t>(i)] == 0.0f);
+        CHECK(reference.rendered < unswitched.rendered);
+        // The note struck while resting was dropped, the one struck while fading played;
+        // the release while resting acted (72 let go, 67 sounds).
+        CHECK(RunSwitches(make(false, true, true), total, [] { return 512; }).out == reference.out);
+        CHECK(RunSwitches(make(true, false, true), total, [] { return 512; }).out != reference.out);
+        CHECK(std::fabs(reference.pitch - std::pow(2.0f, 7.0f / 12.0f)) < 1e-5f);
+        // The blip within one block is heard (it does not vanish into the block's end).
+        CHECK(RunSwitches(make(true, true, false), total, [] { return 2048; }).out != reference.out);
+    }
+    std::printf("switches on the sample: Stop and Bypass act at their own sample, the same output for "
+                "blocks of 2048, 1024, 512, 1, varying and 333/1000; a blip inside one block is heard; "
+                "while resting a strike is dropped, a release and a point act when it goes on\n");
+}
+
+// MS-R34, MS-R36 (0.1.10): the screen keyboard and the host's MIDI on the keyboard's
+// channel share the engine's note; it ends only when the last of them lets go, also at
+// a disconnect. While the engine rests, a screen key is dropped like a host note, and
+// no MIDI goes out for it.
+bool NoteOnOut(PluginHost& host, int pitch) {
+    for(int32 i = 0; i < host.OutEvents().getEventCount(); ++i) {
+        Event e{};
+        host.OutEvents().getEvent(i, e);
+        if(e.type == Event::kNoteOnEvent && e.noteOn.pitch == pitch)
+            return true;
+    }
+    return false;
+}
+
+void TestScreenAndHostKeys() {
+    const auto ch = static_cast<int>(Processor::kKeyboardChannel);
+    const HostScore score = {{4800, Ev::kNoteOn, 72, 0.8, ch},   {5824, Ev::kNoteOff, 72, 0.0, ch},
+                             {6336, Ev::kNoteOn, 72, 0.8, ch},   {7360, Ev::kNoteOff, 72, 0.0, ch}};
+    IPtr<HostApplication> app = owned(new HostApplication());
+    PluginHost host({}, score);
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(app) == kResultOk);
+    auto* processor_point = static_cast<IConnectionPoint*>(host.processor.get());
+    auto* controller_point = static_cast<IConnectionPoint*>(controller.get());
+    CHECK(processor_point->connect(controller_point) == kResultOk);
+    CHECK(controller_point->connect(processor_point) == kResultOk);
+    CHECK(LoadState(*host.processor, MakeState(StartValues(), g_path)) == kResultOk);
+    host.Run(4800, 256);
+    auto pitch = [&] { return host.processor->Engine().EffectivePitch(); };
+    // The host holds 72; the screen strikes and lets go of it: the host's note stays.
+    host.Run(256, 256);
+    CHECK(pitch() == 2.0f);
+    CHECK(controller->PlayNote(72));
+    host.Run(256, 256);
+    CHECK(controller->ReleaseNote(72));
+    host.Run(256, 256);
+    CHECK(pitch() == 2.0f);
+    // The screen holds 72 and the host lets go of it: the screen's note stays.
+    CHECK(controller->PlayNote(72));
+    host.Run(256, 256);
+    host.Run(256, 256); // 5824: the host's release
+    CHECK(pitch() == 2.0f);
+    CHECK(controller->ReleaseNote(72));
+    host.Run(256, 256);
+    CHECK(pitch() == 1.0f);
+    // Codex' case: both hold 72, then a disconnect releases the screen's key; the host's
+    // note sounds on.
+    host.Run(256, 256); // 6336: the host strikes
+    CHECK(controller->PlayNote(72));
+    host.Run(256, 256);
+    CHECK(processor_point->disconnect(controller_point) == kResultOk);
+    CHECK(controller_point->disconnect(processor_point) == kResultOk);
+    host.Run(512, 256);
+    CHECK(pitch() == 2.0f);
+    host.Run(512, 256); // 7360: the host lets go
+    CHECK(pitch() == 1.0f);
+
+    // MS-R36: Stop rests the engine. A screen key struck now is dropped, without MIDI
+    // out; one held from before is let go by its release.
+    CHECK(processor_point->connect(controller_point) == kResultOk);
+    CHECK(controller_point->connect(processor_point) == kResultOk);
+    CHECK(controller->PlayNote(64));
+    host.Run(256, 256);
+    CHECK(std::fabs(pitch() - std::pow(2.0f, 4.0f / 12.0f)) < 1e-6f);
+    ParameterChanges changes(4);
+    host.external_changes = &changes;
+    int32 index = 0;
+    changes.addParameterData(kParamStop, index)->addPoint(0, 1.0, index);
+    host.Process(256);
+    changes.clearQueue();
+    host.Run(768, 256); // faded out: resting
+    CHECK(controller->PlayNote(72));
+    host.Run(256, 256);
+    CHECK(!NoteOnOut(host, 72));
+    CHECK(controller->ReleaseNote(64));
+    CHECK(controller->ReleaseNote(72));
+    host.Run(256, 256);
+    changes.addParameterData(kParamStop, index)->addPoint(0, 0.0, index);
+    host.Process(256);
+    changes.clearQueue();
+    host.Run(512, 256);
+    CHECK(pitch() == 1.0f); // neither 72 (dropped) nor 64 (let go while resting)
+    host.external_changes = nullptr;
+    CHECK(processor_point->disconnect(controller_point) == kResultOk);
+    CHECK(controller_point->disconnect(processor_point) == kResultOk);
+    CHECK(controller->terminate() == kResultOk);
+    CHECK(host.allocations == 0);
+    std::printf("screen and host keys: the shared note ends when the last holder lets go, also at a "
+                "disconnect; while resting a screen key is dropped without MIDI out, a release acts\n");
+}
+
+// A long pause with a busy MIDI track (0.1.10): while the engine rests, the adapter's
+// note queue does not drain. Strikes are dropped there; releases of notes nobody holds
+// are not passed on, so they cannot fill the queue and push out the release of a note
+// that does sound.
+void TestLongPause() {
+    const std::int64_t stop = 5000, junk = 6000, resume = 14000;
+    HostScore score = {{4800, Ev::kNoteOn, 72, 0.8, 2},
+                       {stop, Ev::kParam, static_cast<int>(kParamStop), 1.0}};
+    std::int64_t at = junk;
+    auto busy = [&](int count) { // a track playing on while stopped
+        for(int i = 0; i < count; ++i, at += 3) {
+            score.push_back({at, Ev::kNoteOn, 40 + i % 40, 0.7, 3});
+            score.push_back({at + 1, Ev::kNoteOff, 40 + i % 40, 0.0, 3});
+        }
+    };
+    busy(1100); // more releases than the queue holds
+    score.push_back({at, Ev::kNoteOff, 72, 0.0, 2}); // the held note's release
+    at += 3;
+    busy(50);
+    score.push_back({resume, Ev::kParam, static_cast<int>(kParamStop), 0.0});
+    PluginHost host({}, score);
+    CHECK(LoadState(*host.processor, MakeState(StartValues(), g_path)) == kResultOk);
+    host.Run(4800, 256);
+    host.Run(256, 256);
+    CHECK(host.processor->Engine().EffectivePitch() == 2.0f);
+    host.Run(resume + 2048 - host.position, 256);
+    CHECK(host.processor->Engine().EffectivePitch() == 1.0f); // 72 was let go
+    CHECK(host.processor->Adapter().DroppedNotes() == 0);
+    CHECK(host.allocations == 0);
+    std::printf("long pause: a busy track while stopped neither fills the note queue nor loses the "
+                "release of the note held\n");
+}
+
 // The map takes the mouse (0.1.8): a click or drag sets START to that place in the
 // file, the wheel steps SPRAY; without a file a click does nothing.
 void TestMapEdits() {
@@ -2043,6 +2255,10 @@ void TestNoExceptionLeavesHostCalls() {
     display_reply->getAttributes()->setInt(kAttrReply, 1000000);
     display_reply->getAttributes()->setBinary(kAttrFrame, &frame, sizeof frame);
     display_reply->getAttributes()->setBinary(kAttrWave, wave.get(), sizeof(WaveOverview));
+    FakePackage dropped_wav;
+    dropped_wav.items = {{VSTGUI::IDataPackage::kFilePath, g_path}};
+    auto drop_target = VSTGUI::makeOwned<FileDropTarget>([](FileDropTarget::Hover, const std::string&) {},
+                                                         [&](const std::string& path) { controller->LoadFile(path); });
     const std::vector<Call> calls = {
         {"controller setComponentState", [&] {
              MemoryStream stream;
@@ -2146,6 +2362,30 @@ void TestNoExceptionLeavesHostCalls() {
              controller_point->disconnect(processor_point);
              return controller_point->connect(processor_point);
          }},
+        // MS-R37: drag and drop, with the editor's own drop callback (a load through the
+        // controller). Entered first, and dropped without an enter.
+        {"drop target: enter and drop", [&] {
+             const VSTGUI::DragEventData data{&dropped_wav, VSTGUI::CPoint(), VSTGUI::Modifiers()};
+             if(drop_target->onDragEnter(data) != VSTGUI::DragOperation::Copy) {
+                 drop_target->onDragLeave(data);
+                 return static_cast<tresult>(kOutOfMemory);
+             }
+             return static_cast<tresult>(drop_target->onDrop(data) ? kResultOk : kOutOfMemory);
+         }},
+        {"drop target: drop without enter", [&] {
+             const VSTGUI::DragEventData data{&dropped_wav, VSTGUI::CPoint(), VSTGUI::Modifiers()};
+             return static_cast<tresult>(drop_target->onDrop(data) ? kResultOk : kOutOfMemory);
+         }},
+        // MS-R37: the editor without a window, as a host may call it: sizes, the scale
+        // factor and the timer (which asks the controller for status and display).
+        {"editor: sizes, scale and timer without a window", [&] {
+             ViewRect size(0, 0, 900, 700);
+             editor->getSize(&size);
+             editor->checkSizeConstraint(&size);
+             editor->setContentScaleFactor(1.5f);
+             editor->notify(nullptr, VSTGUI::CVSTGUITimer::kMsgTimer);
+             return static_cast<tresult>(kResultOk);
+         }},
     };
     for(const Call& call : calls) {
         int failures = 0;
@@ -2180,8 +2420,9 @@ void TestNoExceptionLeavesHostCalls() {
     CHECK(processor_point->disconnect(controller_point) == kResultOk);
     CHECK(controller_point->disconnect(processor_point) == kResultOk);
     CHECK(controller->terminate() == kResultOk);
-    std::printf("host calls: no exception leaves them, whichever allocation fails (sixteen calls, "
-                "parameter texts, the window, the display, the factory and the life cycle included)\n");
+    std::printf("host calls: no exception leaves them, whichever allocation fails (nineteen calls, "
+                "parameter texts, the window, drag and drop, the display, the factory and the life "
+                "cycle included)\n");
 #else
     std::printf("host calls under failing allocations: Release builds only (Debug STL proxies)\n");
 #endif
@@ -2206,6 +2447,9 @@ int main() {
     TestWindowSymbol();
     TestMapEdits();
     TestStopAndBypass();
+    TestSwitchesOnTheSample();
+    TestScreenAndHostKeys();
+    TestLongPause();
     TestState();
     TestExportStart();
     TestMessagesAndKeyboard();

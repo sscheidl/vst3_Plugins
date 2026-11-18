@@ -234,6 +234,10 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // Forgets the views of a closed window.
     void ForgetViews();
     bool OpenUnchecked(void* parent, const VSTGUI::PlatformType& platformType);
+    // MS-R37: the bodies of checkSizeConstraint, onSize and the first part of close.
+    Steinberg::tresult CheckSizeUnchecked(Steinberg::ViewRect* size);
+    Steinberg::tresult OnSizeUnchecked(Steinberg::ViewRect* newSize);
+    void FinishEdits();
     // Adds a view to the frame at once, so that the frame owns it (MS-R24); a view the
     // frame could not take is let go.
     template <typename View>

@@ -14,7 +14,7 @@ supported by Qu-Bit Electronix; their name and the product name of the original 
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.1.9:** builds, passes Steinberg's validator, tested automatically (bit for
+**Status 0.1.10:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
@@ -29,7 +29,10 @@ fixes them. Its check of 0.1.5 six more ([check](docs/CODEX_REVIEW_0.1.5.md),
 ([check](docs/CODEX_REVIEW_0.1.6.md), [report](docs/BUILD_REPORT_0.1.7.md)); 0.1.7 fixes
 them. Its check of 0.1.7 four more ([check](docs/CODEX_REVIEW_0.1.7.md),
 [report](docs/BUILD_REPORT_0.1.8.md)); 0.1.8 fixes them and adds drag and drop of WAV
-files, Codex' next check is open. Not tried in a DAW, not listened to. The [DAW test list](docs/DAW_TEST_0.1.0.md) is
+files. Its checks of 0.1.8 and 0.1.9 four more ([0.1.8](docs/CODEX_REVIEW_0.1.8.md),
+[0.1.9](docs/CODEX_REVIEW_0.1.9.md), [report](docs/BUILD_REPORT_0.1.10.md)); 0.1.10 fixes
+them, Codex' next check is open. The user has tried 0.1.7 and 0.1.8 in Studio One
+(operation and sound). The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
 
 **The window is provisional.** The build order's window (section 8: an Atlas nebula map
@@ -103,7 +106,9 @@ firmware applies the bend to the held note).
 The screen keyboard below the controls plays like MIDI on channel 1 with velocity 100,
 note-on on the press, note-off on the release, and sends both to the host's MIDI output
 for recording. The octave keys `<<` and `>>` move it by octaves (C2 to C8), as in
-Kekulé 0.3.1.
+Kekulé 0.3.1. When the screen keyboard and the host's MIDI on channel 1 hold the same
+note, it ends only when both have let go (since 0.1.10); closing the window or a
+reconnect lets go of the screen's keys only.
 
 ## The sample
 
@@ -147,7 +152,11 @@ so the file line always follows. The LOAD... dialog opens in the folder of the f
 playing.
 
 **STOP** (in the header): pauses the sound with a 5 ms fade; pressed again, it goes on
-where it stopped. While stopped or bypassed, new notes are not kept for later.
+where it stopped. While stopped or bypassed, new notes are not kept for later, from the
+host or the screen keyboard (no MIDI goes out for them either); releases and parameter
+changes made meanwhile act when the sound goes on. Automated STOP and Bypass act on
+their own sample, so the output does not depend on the host's block size (since
+0.1.10).
 
 **On the map** (since 0.1.8): a click or drag sets START to that place in the file (an
 edit the host records like a knob turn), the mouse wheel widens or narrows SPRAY (finer
@@ -259,15 +268,16 @@ ctest --preset windows-vs2026-x64-release -R messier
 | `messier.engine` | the engine layer bit for bit against the separately compiled firmware core; the grain level 0.90; two instances; file swaps; Volume; the display laws; the window's display data, which leaves the sound bit-identical |
 | `messier.adapter` | block sizes, event timing at five rates, latency, no drift over two minutes, queue limits, no allocation; a new rate without memory leaves the adapter as it was |
 | `messier.loader` | WAV formats and conversion, damaged and cut files, size limit, missing files, a non-ASCII path, the loader thread, the waveform overview |
-| `messier.plugin` | the VST3 plug-in against the firmware core at 48 kHz, block sizes and 32/64 bit, rates, state, missing samples, loading while playing, two instances, keyboard, messages, parameter texts, MIDI mapping, buses, the window's display path (0.1.4), a new processor at the same controller in every order of connect, parameter 199 and status, late display replies, a project without memory to decode its file |
+| `messier.plugin` | the VST3 plug-in against the firmware core at 48 kHz, block sizes and 32/64 bit, rates, state, missing samples, loading while playing, two instances, keyboard, messages, parameter texts, MIDI mapping, buses, the window's display path (0.1.4), a new processor at the same controller in every order of connect, parameter 199 and status, late display replies, a project without memory to decode its file, Stop and Bypass on their sample for any block division, the screen keyboard and host MIDI on the same note, a busy MIDI track during a long pause, drag and drop |
 | `messier.provenance` | the copies are what [components.json](components.json) says; the reference differs by the F42 line only |
 
 `bench_messier` (built with the tests, run by hand) measures the load; the numbers are
 in the build report.
 
 Failing allocations are tested by fault injection: in Release builds every case (the
-loader below 16 bytes, and every allocation of sixteen host calls in turn, parameter
-texts, the window's creation, the display messages, messages whose attribute list the host
+loader below 16 bytes, and every allocation of nineteen host calls in turn, parameter
+texts, the window's creation, drag and drop, the editor's sizes and timer without a
+window, the display messages, messages whose attribute list the host
 makes on first access, the factory's create functions and the processor's life cycle
 included); in Debug builds
 the loader's cases from 40 bytes, the spare empty file included. Below that the Debug
