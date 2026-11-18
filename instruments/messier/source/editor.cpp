@@ -6,6 +6,7 @@
 
 #include "file_loader.h"
 #include "map_view.h"
+#include "panel_view.h"
 #include "parameters.h"
 #include "version.h"
 #include "widgets.h"
@@ -17,11 +18,14 @@
 #include "vstgui/lib/cframe.h"
 #include "vstgui/lib/cvstguitimer.h"
 #include "vstgui/lib/controls/cknob.h"
+#include "vstgui/lib/controls/coptionmenu.h"
 #include "vstgui/lib/controls/ctextlabel.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <utility>
@@ -31,46 +35,15 @@ namespace messier {
 using namespace Steinberg;
 using namespace Steinberg::Vst;
 using namespace VSTGUI;
+namespace L = layout;
 
 namespace {
 
-// Layout in unscaled pixels: nine columns, the pots and Volume.
 constexpr CCoord kWidth = kEditorWidth;
-constexpr CCoord kMargin = 20;
-constexpr int kColumns = 9;
-constexpr CCoord kColumnWidth = (kWidth - 2 * kMargin) / kColumns;
-constexpr CCoord kFileTop = 54;
-constexpr CCoord kInfoTop = 76;
-// The map of the sample (0.1.4, provisional) between the file line and the knobs.
-constexpr CCoord kMapTop = 102;
-constexpr CCoord kMapBottom = kMapTop + kEditorMapHeight - 8;
-constexpr CCoord kNameTop = 104 + kEditorMapHeight;
-constexpr CCoord kKnobSize = 60;
-constexpr CCoord kKnobTop = 122 + kEditorMapHeight;
-constexpr CCoord kValueTop = 186 + kEditorMapHeight;
-constexpr CCoord kSmallNameTop = 214 + kEditorMapHeight;
-constexpr CCoord kSmallKnobSize = 40;
-constexpr CCoord kSmallKnobTop = 230 + kEditorMapHeight;
-constexpr CCoord kSmallValueTop = 272 + kEditorMapHeight;
-constexpr CCoord kKeyboardTop = kEditorTopHeight - 4;
-constexpr CCoord kKeyboardBottom = kEditorTopHeight + kKeyboardSectionHeight - 18;
-constexpr CCoord kButtonWidth = 52;
-constexpr CCoord kGripSize = 18; // the resize grip (0.1.11)
 
 // After the last step of a drag, wait this long before telling the host the
 // project changed. Hosts may do real work for that message.
 constexpr auto kSettleDelay = std::chrono::milliseconds(400);
-
-constexpr CColor kBackground(28, 30, 36);
-constexpr CColor kTrack(64, 68, 80);
-constexpr CColor kText(232, 232, 236);
-constexpr CColor kDimText(150, 156, 168);
-constexpr CColor kWarning(236, 172, 64);
-
-// The rings of the knobs: Mendelejew's three colours, by what a knob acts on.
-constexpr CColor kKnobWhite(226, 228, 234);    // the playhead and the output
-constexpr CColor kKnobMagenta(222, 78, 162);   // the grains: how many, how long, what shape
-constexpr CColor kKnobTurquoise(52, 196, 196); // the sound of the read: pitch and the mix
 
 struct KnobSpec {
     ParamID id;
@@ -78,28 +51,38 @@ struct KnobSpec {
     int column;
     bool small;
     bool bipolar;
-    CColor ring;
 };
 
+// The columns of the window study, version 3: START is the slider under the plate, so
+// the first column holds only its secondary, SPRAY. The secondaries stand under their
+// pot; under Speed and Blend the places of their secondaries, which act on the audio
+// input (0.3.0).
 constexpr KnobSpec kKnobs[Editor::kKnobCount] = {
-    {kParamStart, "START", 0, false, false, kKnobWhite},
-    {kParamSpeed, "SPEED", 1, false, true, kKnobWhite},
-    {kParamSize, "SIZE", 2, false, false, kKnobWhite},
-    {kParamDensity, "DENSITY", 3, false, false, kKnobMagenta},
-    {kParamPitch, "PITCH", 4, false, true, kKnobTurquoise},
-    {kParamOverlap, "OVERLAP", 5, false, false, kKnobMagenta},
-    {kParamBlend, "BLEND", 6, false, false, kKnobTurquoise},
-    {kParamWindow, "WINDOW", 7, false, false, kKnobMagenta},
-    {kParamVolume, "VOLUME", 8, false, false, kKnobWhite},
-    // The secondaries under their pot; none under Speed and Blend, whose
-    // secondaries act on the audio input (0.2.0).
-    {kParamSpray, "SPRAY", 0, true, false, kKnobWhite},
-    {kParamPanRandom, "PAN RND", 2, true, false, kKnobWhite},
-    {kParamDisplacement, "DISPLACE", 3, true, false, kKnobMagenta},
-    {kParamPitchRandom, "PITCH RND", 4, true, false, kKnobTurquoise},
-    {kParamSizeRandom, "SIZE RND", 5, true, false, kKnobMagenta},
-    {kParamMask, "MASK", 7, true, false, kKnobMagenta},
+    {kParamSpeed, "SPEED", 1, false, true},
+    {kParamSize, "LOOP SIZE", 2, false, false},
+    {kParamDensity, "DENSITY", 3, false, false},
+    {kParamPitch, "PITCH", 4, false, true},
+    {kParamOverlap, "OVERLAP", 5, false, false},
+    {kParamWindow, "WINDOW", 6, false, false},
+    {kParamBlend, "BLEND", 7, false, false},
+    {kParamVolume, "VOLUME", 8, false, false},
+    {kParamSpray, "SPRAY", 0, true, false},
+    {kParamPanRandom, "PAN RND", 2, true, false},
+    {kParamDisplacement, "DISPLACE", 3, true, false},
+    {kParamPitchRandom, "PITCH RND", 4, true, false},
+    {kParamSizeRandom, "SIZE RND", 5, true, false},
+    {kParamMask, "MASK", 6, true, false},
 };
+
+struct Reserved {
+    int column;
+    const char* text;
+};
+constexpr Reserved kReserved[] = {{1, "INPUT GAIN\n(0.3.0)"}, {7, "GRAIN FM\n(0.3.0)"}};
+
+CRect Box(double left, double top, double right, double bottom) {
+    return CRect(left, top, right, bottom);
+}
 
 CTextLabel* MakeLabel(const CRect& size, const char* text, CFontRef font, CColor color,
                       CHoriTxtAlign align) {
@@ -127,6 +110,7 @@ Editor::Editor(EditController* controller, const EditorSettings& settings,
     settings_.zoom = ClampEditorZoom(settings.zoom);
     settings_.keyboard = settings.keyboard;
     settings_.transpose = ClampKeyboardTranspose(settings.transpose);
+    settings_.preset = IsGuiPreset(static_cast<std::int32_t>(settings.preset)) ? settings.preset : GuiPreset::kSlate;
     setRect(ScaledSize());
 }
 
@@ -156,6 +140,12 @@ void Editor::ForgetViews() {
     latch_button_ = nullptr;
     grip_ = nullptr;
     stop_button_ = nullptr;
+    panel_ = nullptr;
+    size_button_ = nullptr;
+    preset_button_ = nullptr;
+    catalogue_ = nullptr;
+    catalogue_shown_ = ~std::uint64_t(0);
+    skin_.reset();
 }
 
 tresult PLUGIN_API Editor::attached(void* parent, FIDString type) {
@@ -188,50 +178,58 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
 
 bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     frame = new CFrame(CRect(0, 0, kWidth, EditorBaseHeight(settings_.keyboard)), this);
-    frame->setBackgroundColor(kBackground);
+    frame->setBackgroundColor(kBlackCColor);
     frame->enableTooltips(true);
     applied_zoom_ = 1.0;
     drag_ = DragConstraint{};
+    skin_ = std::make_shared<const Skin>(settings_.preset);
+    const Skin& skin = *skin_;
+    const SkinColours& colours = skin.Colours();
 
-    const auto title_font = makeOwned<CFontDesc>("Segoe UI", 20, kBoldFace);
-    const auto name_font = makeOwned<CFontDesc>("Segoe UI", 10, kBoldFace);
-    const auto small_name_font = makeOwned<CFontDesc>("Segoe UI", 9, kBoldFace);
-    const auto value_font = makeOwned<CFontDesc>("Segoe UI", 13);
-    const auto small_value_font = makeOwned<CFontDesc>("Segoe UI", 11);
-    const auto file_font = makeOwned<CFontDesc>("Segoe UI", 13, kBoldFace);
-    const auto info_font = makeOwned<CFontDesc>("Segoe UI", 11);
+    // The background first: chassis, rules, the fixed texts.
+    panel_ = Add(new PanelView(CRect(0, 0, kWidth, EditorBaseHeight(settings_.keyboard))));
 
-    Add(MakeLabel(CRect(kMargin, 14, 200, 42), stringPluginName, title_font, kText, kLeftText));
-    const CCoord button_left = kWidth - kMargin - kButtonWidth;
-    Add(MakeLabel(CRect(kWidth / 2 - 100, 18, button_left - 152, 40),
-                  stringCompanyName "  " FULL_VERSION_STR, name_font, kDimText, kRightText));
-    keyboard_button_ = Add(new ToggleButton(CRect(button_left, 18, kWidth - kMargin, 40), "KEYS",
-                                            settings_.keyboard,
-                                            [this](bool on) { SetKeyboardVisible(on); }));
-    latch_button_ = Add(new ToggleButton(CRect(button_left - 70, 18, button_left - 8, 40), "LATCH", latch_,
-                                         [this](bool on) { SetLatch(on); }));
-    latch_button_->setTooltipText("Latch: a struck key stays held; click it again, another key or LATCH to let go");
+    // The header: STOP, KEYS, the size and preset menus.
     {
         const bool stopped = controller && IsOn(controller->getParamNormalized(kParamStop));
-        stop_button_ = Add(new ToggleButton(CRect(button_left - 140, 18, button_left - 78, 40), "STOP", stopped,
-                                            [this](bool on) { SetStop(on); }));
+        stop_button_ = Add(new ToggleButton(Box(L::kStopLeft, L::kButtonTop, L::kStopRight, L::kButtonTop + L::kButtonHeight),
+                                            "STOP", stopped, [this](bool on) { SetStop(on); }));
         stop_button_->setTooltipText("Stop: pauses the sound with a short fade; press again to go on where it stopped");
     }
+    keyboard_button_ = Add(new ToggleButton(Box(L::kKeysLeft, L::kButtonTop, L::kKeysRight, L::kButtonTop + L::kButtonHeight),
+                                            "KEYS", settings_.keyboard, [this](bool on) { SetKeyboardVisible(on); }));
+    size_button_ = Add(new ToggleButton(Box(L::kSizeLeft, L::kButtonTop, L::kSizeRight, L::kButtonTop + L::kButtonHeight),
+                                        "", false, [this](bool) { ShowSizeMenu(); }, ToggleButton::Style::Action));
+    size_button_->SetIcon(ToggleButton::Icon::kSize);
+    size_button_->setTooltipText("Window size");
+    preset_button_ = Add(new ToggleButton(Box(L::kPresetLeft, L::kButtonTop, L::kPresetRight, L::kButtonTop + L::kButtonHeight),
+                                          "", false, [this](bool) { ShowPresetMenu(); }, ToggleButton::Style::Action));
+    preset_button_->SetIcon(ToggleButton::Icon::kPreset);
+    preset_button_->setTooltipText("GUI preset: the look of the window");
 
-    // The sample: LOAD, its name, its format or what went wrong.
-    auto* load = Add(new ToggleButton(CRect(kMargin, kFileTop, kMargin + 72, kFileTop + 22), "LOAD...",
+    // The sample: LOAD, its name, its format or what went wrong, its catalogue number.
+    auto* load = Add(new ToggleButton(Box(L::kLoadLeft, L::kLoadTop, L::kLoadRight, L::kLoadBottom), "LOAD...",
                                       false, [this](bool) { ChooseFile(); }, ToggleButton::Style::Action));
     load->setTooltipText("Load a WAV file: 16 or 24 bit PCM or 32 bit float, mono or stereo");
-    file_name_ = Add(MakeLabel(CRect(kMargin + 84, kFileTop, kWidth - kMargin, kFileTop + 22), "",
-                               file_font, kText, kLeftText));
-    file_info_ = Add(MakeLabel(CRect(kMargin + 84, kInfoTop, kWidth - kMargin, kInfoTop + 18), "",
-                               info_font, kDimText, kLeftText));
+    load->SetSkin(skin_);
+    file_name_ = Add(MakeLabel(Box(L::kFileLeft, L::kFileNameTop, L::kFileRight, L::kFileNameBottom), "",
+                               skin.Italic(19), colours.text, kLeftText));
+    file_info_ = Add(MakeLabel(Box(L::kFileLeft, L::kFileNameBottom, L::kFileRight, L::kFileInfoBottom), "",
+                               skin.Mono(11), colours.dim, kLeftText));
+    catalogue_ = Add(MakeLabel(Box(L::kFileRight, 52, kWidth - 24, 76), "", skin.Caps(15), colours.accent,
+                               kRightText));
+    catalogue_->setTooltipText("Catalogue number: the how-manyth file this instance has loaded");
     ApplyFileTexts();
 
-    map_view_ = Add(new MapView(CRect(kMargin, kMapTop, kWidth - kMargin, kMapBottom)));
+    map_view_ = Add(new MapView(Box(L::kMapLeft, L::kMapTop, L::kMapRight, L::kMapBottom), L::kBezelEdge));
     map_view_->Show(shown_display_, shown_wave_);
+    if(controller) {
+        map_view_->SetStart(controller->getParamNormalized(kParamStart));
+        map_view_->SetBlend(controller->getParamNormalized(kParamBlend));
+    }
     // Since 0.1.8: on the map a click or drag sets START, the wheel SPRAY, as edits the
-    // host can record (begin, perform, end), as a knob would.
+    // host can record (begin, perform, end), as a knob would. Since 0.2.0 the map holds
+    // the START slider too.
     {
         MapView::Edits edits;
         edits.start_begin = [this] {
@@ -279,90 +277,96 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
                     callbacks_.load(path);
             });
         map_view_->setDropTarget(drop);
-        file_zone_ = Add(new CView(CRect(kMargin + 84, kFileTop, kWidth - kMargin, kInfoTop + 18)));
+        file_zone_ = Add(new CView(Box(L::kFileLeft, L::kFileNameTop, L::kFileRight, L::kFileInfoBottom)));
         file_zone_->setDropTarget(drop);
         ApplyFileTexts(); // its tooltip
     }
 
-    keyboard_view_ = Add(new KeyboardView(CRect(kMargin + 40, kKeyboardTop, kWidth - kMargin - 40,
-                                            kKeyboardBottom),
-                                      [this](int note) {
-                                          if(callbacks_.strike)
-                                              callbacks_.strike(note);
-                                      },
-                                      [this](int note) {
-                                          if(callbacks_.release)
-                                              callbacks_.release(note);
-                                      }));
+    // The keyboard section: LATCH, the octave keys, the keys.
+    keyboard_view_ = Add(new KeyboardView(Box(L::kKeyboardLeft, L::kKeysTop, L::kKeyboardLeft + L::kKeyboardWidth,
+                                              L::kKeysTop + L::kKeysHeight),
+                                          [this](int note) {
+                                              if(callbacks_.strike)
+                                                  callbacks_.strike(note);
+                                          },
+                                          [this](int note) {
+                                              if(callbacks_.release)
+                                                  callbacks_.release(note);
+                                          }));
     keyboard_view_->SetTranspose(settings_.transpose);
     keyboard_view_->SetLatch(latch_);
     keyboard_view_->setVisible(settings_.keyboard);
-    octave_down_ = Add(new ToggleButton(CRect(kMargin, kKeyboardTop + 22, kMargin + 32,
-                                          kKeyboardTop + 46),
-                                    "<<", false,
-                                    [this](bool) { SetKeyboardTranspose(settings_.transpose - 12); },
-                                    ToggleButton::Style::Action));
-    octave_up_ = Add(new ToggleButton(CRect(kWidth - kMargin - 32, kKeyboardTop + 22, kWidth - kMargin,
-                                        kKeyboardTop + 46),
-                                  ">>", false,
-                                  [this](bool) { SetKeyboardTranspose(settings_.transpose + 12); },
-                                  ToggleButton::Style::Action));
+    latch_button_ = Add(new ToggleButton(Box(L::kLatchLeft, L::kKeyButtonTop, L::kLatchRight,
+                                             L::kKeyButtonTop + L::kButtonHeight),
+                                         "LATCH", latch_, [this](bool on) { SetLatch(on); }));
+    latch_button_->setTooltipText("Latch: a struck key stays held; click it again, another key or LATCH to let go");
+    const CCoord keys_right = L::kKeyboardLeft + L::kKeyboardWidth;
+    octave_down_ = Add(new ToggleButton(Box(L::kKeyboardLeft - 10 - L::kOctaveWidth, L::kKeyButtonTop,
+                                            L::kKeyboardLeft - 10, L::kKeyButtonTop + L::kButtonHeight),
+                                        "<<", false,
+                                        [this](bool) { SetKeyboardTranspose(settings_.transpose - 12); },
+                                        ToggleButton::Style::Action));
+    octave_up_ = Add(new ToggleButton(Box(keys_right + 10, L::kKeyButtonTop, keys_right + 10 + L::kOctaveWidth,
+                                          L::kKeyButtonTop + L::kButtonHeight),
+                                      ">>", false,
+                                      [this](bool) { SetKeyboardTranspose(settings_.transpose + 12); },
+                                      ToggleButton::Style::Action));
     octave_down_->setTooltipText("Keyboard down one octave (lowest: C2 to C4)");
     octave_up_->setTooltipText("Keyboard up one octave (highest: C6 to C8)");
 
+    // The knobs, their names (on the panel) and values.
+    const CFontRef value_font = skin.Mono(12.5);
+    const CFontRef small_value_font = skin.Mono(11.5);
     for(std::size_t i = 0; i < knobs_.size(); ++i) {
         const KnobSpec& spec = kKnobs[i];
-        const CCoord left = kMargin + spec.column * kColumnWidth;
-        const CCoord size = spec.small ? kSmallKnobSize : kKnobSize;
-        const CCoord top = spec.small ? kSmallKnobTop : kKnobTop;
-        const CCoord name_top = spec.small ? kSmallNameTop : kNameTop;
-        const CCoord value_top = spec.small ? kSmallValueTop : kValueTop;
-        const CCoord knob_left = left + (kColumnWidth - size) / 2;
+        const CCoord left = L::ColumnLeft(spec.column);
+        const CCoord right = left + L::kColumnWidth;
+        const CCoord size = spec.small ? L::kSmallKnobSize : L::kKnobSize;
+        const CCoord top = spec.small ? L::kSmallKnobTop : L::kKnobTop;
+        const CCoord name_top = spec.small ? L::kSmallNameTop : L::kNameTop;
+        const CCoord value_top = spec.small ? L::kSmallValueTop : L::kValueTop;
+        const CCoord knob_left = left + (L::kColumnWidth - size) / 2;
 
-        Add(MakeLabel(CRect(left, name_top, left + kColumnWidth, name_top + 16), spec.name,
-                      spec.small ? small_name_font : name_font, kDimText, kCenterText));
-        int32_t style = CKnob::kCoronaOutline | CKnob::kCoronaDrawing;
-        if(spec.bipolar)
-            style |= CKnob::kCoronaFromCenter;
-        auto* knob = Add(new CKnob(CRect(knob_left, top, knob_left + size, top + size), this,
-                                   static_cast<int32_t>(spec.id), nullptr, nullptr, CPoint(0, 0), style));
-        knob->setCoronaColor(spec.ring);
-        knob->setColorShadowHandle(kTrack);
-        knob->setColorHandle(kText);
-        knob->setHandleLineWidth(spec.small ? 3 : 4);
-        knob->setCoronaInset(spec.small ? 4 : 5);
-        knob->setInsetValue(spec.small ? 10 : 15);
+        panel_->AddLabel(Box(left, name_top, right, name_top + (spec.small ? 14 : 16)), spec.name,
+                         spec.small ? PanelView::LabelKind::kSmallKnob : PanelView::LabelKind::kKnob);
+        auto* knob = Add(new MetalKnob(Box(knob_left, top, knob_left + size, top + size), this,
+                                       static_cast<int32_t>(spec.id), spec.small, spec.bipolar));
         knob->setDefaultValue(static_cast<float>(kDefaults[static_cast<std::size_t>(Index(spec.id))]));
         knob->setWheelInc(0.01f);
-        auto* value = Add(MakeLabel(CRect(left, value_top, left + kColumnWidth, value_top + 18), "",
-                                    spec.small ? small_value_font : value_font, kText, kCenterText));
+        auto* value = Add(MakeLabel(Box(left, value_top, right, value_top + (spec.small ? 14 : 16)), "",
+                                    spec.small ? small_value_font : value_font, colours.accent, kCenterText));
         if(spec.id == kParamWindow) // the mixed window as a symbol (0.1.8)
-            window_shape_ = Add(new WindowShapeView(CRect(left + (kColumnWidth - 46) / 2, value_top + 2,
-                                                          left + (kColumnWidth + 46) / 2, value_top + 16)));
+            window_shape_ = Add(new WindowShapeView(Box(left + (L::kColumnWidth - 46) / 2, value_top + 1,
+                                                        left + (L::kColumnWidth + 46) / 2, value_top + 15)));
         knobs_[i] = {spec.id, knob, value};
         const ParamValue normalized = controller ? controller->getParamNormalized(spec.id) : 0.0;
         knob->setValue(static_cast<float>(normalized));
         ShowValue(knobs_[i], normalized);
     }
+    for(const Reserved& place : kReserved) {
+        const CCoord left = L::ColumnLeft(place.column);
+        panel_->AddLabel(Box(left, L::kSmallKnobTop + 4, left + L::kColumnWidth, L::kSmallKnobTop + 40), place.text,
+                         PanelView::LabelKind::kReserved);
+    }
 
     // Freeze and Reset under Volume.
-    const CCoord column = kMargin + 8 * kColumnWidth;
-    const CCoord button_inset = (kColumnWidth - 60) / 2;
+    const CCoord column = L::ColumnLeft(8) + (L::kColumnWidth - L::kButtonWidth) / 2;
     const bool frozen = controller && IsOn(controller->getParamNormalized(kParamFreeze));
-    freeze_button_ = Add(new ToggleButton(CRect(column + button_inset, kSmallKnobTop - 6,
-                                                column + button_inset + 60, kSmallKnobTop + 16),
+    freeze_button_ = Add(new ToggleButton(Box(column, L::kFreezeTop, column + L::kButtonWidth,
+                                              L::kFreezeTop + L::kButtonHeight),
                                           "FREEZE", frozen, [this](bool on) { SetFreeze(on); }));
     freeze_button_->setTooltipText("Freeze: the playhead stands still; grains and the vocoder go on");
-    auto* reset = Add(new ToggleButton(CRect(column + button_inset, kSmallKnobTop + 26,
-                                             column + button_inset + 60, kSmallKnobTop + 48),
+    auto* reset = Add(new ToggleButton(Box(column, L::kResetTop, column + L::kButtonWidth,
+                                           L::kResetTop + L::kButtonHeight),
                                        "RESET", false, [this](bool) { PressReset(); },
                                        ToggleButton::Style::Action));
     reset->setTooltipText("Reset: playback back to START");
     // The resize grip in the lower right corner (0.1.11), added last so that it is on top;
     // LayOut() puts it into the corner of the height the keyboard leaves.
-    grip_ = Add(new ResizeGrip(CRect(0, 0, kGripSize, kGripSize), kDimText, [this] { GripBegin(); },
+    grip_ = Add(new ResizeGrip(Box(0, 0, L::kGripSize, L::kGripSize), colours.dim, [this] { GripBegin(); },
                                [this](double dx, double dy) { GripDrag(dx, dy); }));
 
+    ApplySkin();
     if(!frame->open(parent, platformType)) {
         frame->forget();
         frame = nullptr;
@@ -375,6 +379,38 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     if(callbacks_.poll)
         callbacks_.poll();
     return true;
+}
+
+void Editor::ApplySkin() {
+    if(!frame || !skin_)
+        return;
+    const SkinColours& colours = skin_->Colours();
+    // Every view of the frame that draws with the skin gets it.
+    frame->forEachChild([&](CView* view) {
+        if(auto* button = dynamic_cast<ToggleButton*>(view))
+            button->SetSkin(skin_);
+        else if(auto* knob = dynamic_cast<MetalKnob*>(view))
+            knob->SetSkin(skin_);
+    });
+    if(panel_)
+        panel_->SetSkin(skin_);
+    if(map_view_)
+        map_view_->SetSkin(skin_);
+    if(keyboard_view_)
+        keyboard_view_->SetSkin(skin_);
+    if(window_shape_)
+        window_shape_->SetColour(colours.accent);
+    if(grip_)
+        grip_->SetColour(colours.dim);
+    for(Knob& knob : knobs_)
+        if(knob.value)
+            knob.value->setFontColor(colours.accent);
+    if(file_name_)
+        file_name_->setFontColor(colours.text);
+    if(catalogue_)
+        catalogue_->setFontColor(colours.accent);
+    ApplyFileTexts(); // the info's colour
+    frame->invalid();
 }
 
 ViewRect Editor::ScaledSize() const {
@@ -397,10 +433,17 @@ double Editor::DisplayZoom(int32 width, int32 height) const {
 void Editor::LayOut(int32 width, int32 height) {
     if(!frame)
         return;
+    const CCoord bottom = EditorBaseHeight(settings_.keyboard);
+    if(panel_) {
+        panel_->setViewSize(CRect(0, 0, kWidth, bottom));
+        panel_->SetKeyboard(settings_.keyboard);
+    }
     if(keyboard_view_)
         keyboard_view_->setVisible(settings_.keyboard);
     if(keyboard_button_)
         keyboard_button_->SetOn(settings_.keyboard);
+    if(latch_button_)
+        latch_button_->setVisible(settings_.keyboard);
     for(ToggleButton* octave : {octave_down_, octave_up_}) {
         if(!octave)
             continue;
@@ -410,8 +453,7 @@ void Editor::LayOut(int32 width, int32 height) {
         octave->invalid();
     }
     if(grip_) {
-        const CCoord bottom = EditorBaseHeight(settings_.keyboard);
-        grip_->setViewSize(CRect(kWidth - kGripSize - 2, bottom - kGripSize - 2, kWidth - 2, bottom - 2));
+        grip_->setViewSize(CRect(kWidth - L::kGripSize - 2, bottom - L::kGripSize - 2, kWidth - 2, bottom - 2));
         grip_->setMouseableArea(grip_->getViewSize());
         grip_->invalid();
     }
@@ -451,6 +493,87 @@ void Editor::SetKeyboardVisible(bool show) {
         return;
     }
     UserChanged();
+}
+
+void Editor::SetZoom(double zoom) {
+    zoom = ClampEditorZoom(zoom);
+    if(zoom == settings_.zoom)
+        return;
+    const EditorSettings before = settings_;
+    settings_.zoom = zoom;
+    if(frame && !Resize()) {
+        settings_ = before; // the host keeps the size
+        return;
+    }
+    UserChanged();
+}
+
+void Editor::SetGuiPreset(GuiPreset preset) {
+    if(!IsGuiPreset(static_cast<std::int32_t>(preset)) || preset == settings_.preset)
+        return;
+    if(frame) {
+        // The new look first: if it cannot be made, the window keeps the old one.
+        skin_ = std::make_shared<const Skin>(preset);
+        settings_.preset = preset;
+        ApplySkin();
+    } else {
+        settings_.preset = preset;
+    }
+    UserChanged();
+}
+
+void Editor::ShowPresetMenu() {
+    if(!frame || !preset_button_)
+        return;
+    auto menu = makeOwned<COptionMenu>();
+    for(std::int32_t i = 0; i < kGuiPresetCount; ++i) {
+        const GuiPresetInfo& info = PresetInfo(static_cast<GuiPreset>(i));
+        std::string title = info.name;
+        int32_t flags = CMenuItem::kNoFlags;
+        if(!info.delivered) {
+            title += "  (bitmaps to come)";
+            flags |= CMenuItem::kDisabled;
+        }
+        if(static_cast<GuiPreset>(i) == settings_.preset)
+            flags |= CMenuItem::kChecked;
+        menu->addEntry(UTF8String(title), -1, flags);
+    }
+    const CRect at = preset_button_->getViewSize();
+    const std::weak_ptr<bool> alive = alive_;
+    menu->popup(frame, CPoint(at.left, at.bottom), [this, alive](COptionMenu* chosen) {
+        Guarded([&] {
+            const auto still = alive.lock();
+            if(!still || !*still || !chosen)
+                return;
+            const int32_t index = chosen->getLastResult();
+            if(IsGuiPreset(index) && PresetInfo(static_cast<GuiPreset>(index)).delivered)
+                SetGuiPreset(static_cast<GuiPreset>(index));
+        });
+    });
+}
+
+void Editor::ShowSizeMenu() {
+    if(!frame || !size_button_)
+        return;
+    auto menu = makeOwned<COptionMenu>();
+    for(const double zoom : kMenuZooms) {
+        char title[16];
+        std::snprintf(title, sizeof title, "%d %%", static_cast<int>(std::lround(zoom * 100)));
+        const bool current = std::abs(zoom - settings_.zoom) < 0.005;
+        menu->addEntry(UTF8String(title), -1, current ? CMenuItem::kChecked : CMenuItem::kNoFlags);
+    }
+    const CRect at = size_button_->getViewSize();
+    const std::weak_ptr<bool> alive = alive_;
+    menu->popup(frame, CPoint(at.left, at.bottom), [this, alive](COptionMenu* chosen) {
+        Guarded([&] {
+            const auto still = alive.lock();
+            if(!still || !*still || !chosen)
+                return;
+            const int32_t index = chosen->getLastResult();
+            if(index >= 0 && index < static_cast<int32_t>(std::size(kMenuZooms)))
+                SetZoom(kMenuZooms[index]);
+        });
+    });
 }
 
 void Editor::SetStop(bool on) {
@@ -526,11 +649,14 @@ CMessageResult Editor::notify(CBaseObject* sender, const char* message) {
         });
     }
     // The controller asks the processor for the file status while a load runs.
-    if(message == CVSTGUITimer::kMsgTimer)
+    if(message == CVSTGUITimer::kMsgTimer) {
         Guarded([&] {
             if(callbacks_.poll)
                 callbacks_.poll();
         });
+        if(map_view_)
+            map_view_->Tick(); // the nebula drifts (0.2.0)
+    }
     return result;
 }
 
@@ -582,6 +708,18 @@ tresult Editor::OnSizeUnchecked(ViewRect* newSize) {
 void Editor::ApplySettings(const EditorSettings& settings) {
     const double zoom = ClampEditorZoom(settings.zoom);
     const int transpose = ClampKeyboardTranspose(settings.transpose);
+    const GuiPreset preset =
+        IsGuiPreset(static_cast<std::int32_t>(settings.preset)) ? settings.preset : GuiPreset::kSlate;
+    if(preset != settings_.preset) {
+        // A loaded project brings its look. If it cannot be made, the old one stays.
+        if(frame) {
+            skin_ = std::make_shared<const Skin>(preset);
+            settings_.preset = preset;
+            ApplySkin();
+        } else {
+            settings_.preset = preset;
+        }
+    }
     if(zoom == settings_.zoom && settings.keyboard == settings_.keyboard
        && transpose == settings_.transpose)
         return;
@@ -726,6 +864,17 @@ void Editor::ShowDisplay(const EngineDisplay& display, std::shared_ptr<const Wav
     shown_wave_ = std::move(wave);
     if(map_view_)
         map_view_->Show(shown_display_, shown_wave_);
+    // The catalogue number of the file the core reads (0.2.0), only when it changes.
+    const std::uint64_t number = display.frames > 0 ? display.sequence : 0;
+    if(catalogue_ && number != catalogue_shown_) {
+        Guarded([&] {
+            char text[32] = "";
+            if(number > 0)
+                std::snprintf(text, sizeof text, "No. %llu", static_cast<unsigned long long>(number));
+            catalogue_->setText(text);
+            catalogue_shown_ = number;
+        });
+    }
 }
 
 void Editor::ShowFileStatus(const FileStatus& status) noexcept {
@@ -775,7 +924,8 @@ void Editor::ApplyFileTexts() {
         file_zone_->setTooltipText(file_tooltip_.c_str());
     if(file_info_) {
         file_info_->setText(file_info_text_.c_str());
-        file_info_->setFontColor(file_warning_ ? kWarning : kDimText);
+        if(skin_)
+            file_info_->setFontColor(file_warning_ ? skin_->Colours().warning : skin_->Colours().dim);
     }
 }
 
@@ -818,6 +968,10 @@ void Editor::ParameterChanged(ParamID id, ParamValue normalized) {
             freeze_button_->SetOn(IsOn(normalized));
         return;
     }
+    if(id == kParamStart && map_view_)
+        map_view_->SetStart(normalized); // the slider under the plate (0.2.0)
+    if(id == kParamBlend && map_view_)
+        map_view_->SetBlend(normalized);
     for(Knob& knob : knobs_) {
         if(knob.id != id || !knob.knob)
             continue;
@@ -869,4 +1023,3 @@ tresult PLUGIN_API Editor::setContentScaleFactor(ScaleFactor factor) {
 }
 
 } // namespace messier
-

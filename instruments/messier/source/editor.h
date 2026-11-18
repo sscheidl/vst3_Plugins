@@ -1,5 +1,7 @@
 #pragma once
 
+#include "gui_layout.h"
+#include "gui_skin.h"
 #include "looper_engine.h"
 #include "view_layout.h"
 #include "wave_overview.h"
@@ -27,6 +29,8 @@ namespace messier {
 struct FileStatus;
 class KeyboardView;
 class MapView;
+class MetalKnob;
+class PanelView;
 class ResizeGrip;
 class ToggleButton;
 class WindowShapeView;
@@ -35,12 +39,12 @@ class WindowShapeView;
 // for the file status). About 33 times a second.
 constexpr std::chrono::milliseconds kDisplayInterval{30};
 
-// Window size at zoom 1 on a display without scaling: title, file line, the
-// primary and secondary knobs, and below them the keyboard when it is shown.
-constexpr double kEditorWidth = 700;
-constexpr double kEditorMapHeight = 130; // the map of the sample (0.1.4)
-constexpr double kEditorTopHeight = 306 + kEditorMapHeight;
-constexpr double kKeyboardSectionHeight = 86;
+// Window size at zoom 1 on a display without scaling (0.2.0, the window study): header,
+// file line, the measuring plate with waveform and START slider, the two rows of knobs,
+// and below them the keyboard when it is shown (gui_layout.h).
+constexpr double kEditorWidth = layout::kWidth;
+constexpr double kEditorTopHeight = layout::kTopHeight;
+constexpr double kKeyboardSectionHeight = layout::kKeyboardSection;
 // Limits of the window zoom the user can choose by resizing.
 constexpr double kMinEditorZoom = 0.5;
 constexpr double kMaxEditorZoom = 2.0;
@@ -117,7 +121,11 @@ struct EditorSettings {
     double zoom = 1.0;
     bool keyboard = true;
     int transpose = kKeyboardDefaultTranspose; // of the keyboard, in semitones
+    GuiPreset preset = GuiPreset::kSlate;       // since 0.2.0
 };
+
+// The sizes the window's size menu offers (0.2.0), as zoom.
+constexpr double kMenuZooms[] = {0.5, 0.75, 1.0, 1.25, 1.5, 2.0};
 
 // How the window talks back to the controller.
 struct EditorCallbacks {
@@ -138,14 +146,18 @@ struct EditorCallbacks {
     std::function<void()> reset;
 };
 
-// The plug-in window: the sample's file line with its LOAD button, eight knobs
-// for the pots' primary functions and Volume, below them six small knobs for the
-// secondary functions under the pot they belong to, the FREEZE switch and the
-// RESET button, and an on-screen keyboard that a button shows and hides, with two
-// octave keys beside it. The layout is fixed and drawn as vectors, so the window
-// scales as a whole: by the zoom the user picks when resizing it, times the host's
-// display scale factor. The aspect ratio stays the same. Window, keyboard and
-// sizing code are Kekule's (Torus Classic 0.3.1).
+// The plug-in window (0.2.0, after the window study, version 3): a header with STOP,
+// KEYS and the menus for the window size and the GUI preset; the sample's file line
+// with its LOAD button; the measuring plate (MapView) with the waveform and the START
+// slider on one time axis; seven knobs for the other pots' primary functions and
+// Volume, below them six small knobs for the secondary functions under the pot they
+// belong to, the FREEZE switch and the RESET button; and an on-screen keyboard that
+// KEYS shows and hides, with LATCH and two octave keys beside it. Surfaces come from
+// the GUI preset's bitmaps (gui_skin.h); everything that carries information is drawn.
+// The layout is fixed, so the window scales as a whole: by the zoom the user picks
+// (resizing, the grip or the size menu), times the host's display scale factor. The
+// aspect ratio stays the same. Keyboard and sizing code are Kekule's (Torus Classic
+// 0.3.1).
 //
 // The window never changes its own size. It asks the host (Resize()) and
 // changes in onSize(), once the host has agreed.
@@ -153,7 +165,8 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
                public VSTGUI::IControlListener,
                public Steinberg::IPlugViewContentScaleSupport {
   public:
-    static constexpr std::size_t kKnobCount = 15; // 8 primaries, Volume, 6 secondaries
+    // 7 primaries (START is the slider under the plate since 0.2.0), Volume, 6 secondaries.
+    static constexpr std::size_t kKnobCount = 14;
 
     Editor(Steinberg::Vst::EditController* controller, const EditorSettings& settings,
            EditorCallbacks callbacks);
@@ -171,6 +184,11 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // project like the window size.
     void SetKeyboardTranspose(int semitones);
     const EditorSettings& Settings() const { return settings_; }
+    // The GUI preset, as its menu sets it (0.2.0): saved with the project. A preset whose
+    // bitmaps are not delivered yet is kept as the setting and shown as Slate.
+    void SetGuiPreset(GuiPreset preset);
+    // The window size as its menu sets it (0.2.0). If the host refuses, nothing changes.
+    void SetZoom(double zoom);
     // Freeze as the window's switch does: an edit the host records.
     void SetFreeze(bool on);
     // RESET as the window's button does: a message to the processor through the
@@ -225,9 +243,14 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
   private:
     struct Knob {
         Steinberg::Vst::ParamID id = 0;
-        VSTGUI::CKnob* knob = nullptr; // owned by the frame
+        MetalKnob* knob = nullptr; // owned by the frame
         VSTGUI::CTextLabel* value = nullptr;
     };
+    // The menus of the header (0.2.0).
+    void ShowPresetMenu();
+    void ShowSizeMenu();
+    // Hands the current skin to every view and label; draws the window anew.
+    void ApplySkin();
     void ShowValue(Knob& knob, Steinberg::Vst::ParamValue normalized);
     // Puts the file texts into the labels, if the window is open.
     void ApplyFileTexts();
@@ -286,6 +309,13 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     ToggleButton* latch_button_ = nullptr;
     ToggleButton* stop_button_ = nullptr; // since 0.1.8
     ResizeGrip* grip_ = nullptr;          // since 0.1.11
+    // Since 0.2.0: the background, the header's menus, the catalogue number of the file.
+    PanelView* panel_ = nullptr;
+    ToggleButton* size_button_ = nullptr;
+    ToggleButton* preset_button_ = nullptr;
+    VSTGUI::CTextLabel* catalogue_ = nullptr;
+    std::uint64_t catalogue_shown_ = ~std::uint64_t(0);
+    std::shared_ptr<const Skin> skin_; // the look of the open window
     bool latch_ = false;
     EngineDisplay shown_display_{};             // the newest display, also while closed
     std::shared_ptr<const WaveOverview> shown_wave_;

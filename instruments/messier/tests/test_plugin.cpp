@@ -13,6 +13,8 @@
 #include "display_data.h"
 #include "editor.h"
 #include "file_drop.h"
+#include "gui_layout.h"
+#include "gui_skin.h"
 #include "map_view.h"
 #include "parameters.h"
 #include "plugin_ids.h"
@@ -1404,18 +1406,18 @@ void TestViewLayout() {
     CHECK(white == kKeyboardWhiteKeys && black == 10);
     CHECK(ClampKeyboardTranspose(-36) == -24 && ClampKeyboardTranspose(13) == 12);
     const auto same = [](EditorSize a, EditorSize b) { return a.width == b.width && a.height == b.height; };
-    CHECK(same(EditorSizeFor(1.0, false), {700, 436}) && same(EditorSizeFor(1.0, true), {700, 522}));
+    CHECK(same(EditorSizeFor(1.0, false), {880, 640}) && same(EditorSizeFor(1.0, true), {880, 724}));
     using Clock = DragConstraint::Clock;
     Clock::time_point now{};
     DragConstraint drag;
     now += std::chrono::milliseconds(10);
-    CHECK(same(drag.Apply({1050, 436}, {700, 436}, 1.0, false, now), {1050, 654}));
+    CHECK(same(drag.Apply({1320, 640}, {880, 640}, 1.0, false, now), {1320, 960}));
     for(const bool keyboard : {false, true})
         for(int w = 200; w <= 1600; w += 7)
             for(int h = 80; h <= 900; h += 31) {
                 const EditorSize size = ConstrainEditorSize({w, h}, EditorSizeFor(1.0, keyboard), 1.0, keyboard, true);
                 CHECK(std::abs(size.height - size.width * EditorBaseHeight(keyboard) / kEditorWidth) < 1.0);
-                CHECK(size.width >= 350 && size.width <= 1400);
+                CHECK(size.width >= 440 && size.width <= 1760);
             }
     for(const bool keyboard : {false, true})
         for(const double scale : {1.0, 1.5, 2.0})
@@ -1423,7 +1425,7 @@ void TestViewLayout() {
                 const EditorSize size = EditorSizeFor(scale * zoom, keyboard);
                 CHECK(std::fabs(EditorZoomForSize(size.width, size.height, scale, keyboard) - zoom) < 0.005);
             }
-    std::printf("layout: 25 keys where they are drawn; window 700 x 436 (522 with keys), aspect "
+    std::printf("layout: 25 keys where they are drawn; window 880 x 640 (724 with keys), aspect "
                 "ratio and zoom limits kept\n");
 }
 
@@ -1476,6 +1478,75 @@ class CoalescingHandler : public IComponentHandler, public IComponentHandler2 {
 // engine must always run one complete project: the file and the values of the
 // same load, never the new values with the old file. In the end the last project
 // plays, also as the first block of an export.
+// The GUI presets (0.2.0): the bitmaps the window asks for are in the plug-in's
+// resource folder (and so in the bundle) with the pixel sizes of the brief, at 1x and
+// 2x; presets whose bitmaps are not delivered show as Slate. The window settings carry
+// the preset (controller state version 2); a song of version 1 opens with Slate, and a
+// preset number not known is refused.
+void TestGuiPresets() {
+    int checked = 0;
+    for(std::size_t i = 0; i < kSkinImageCount; ++i) {
+        const auto id = static_cast<SkinImageId>(i);
+        for(int scale : {1, 2}) {
+            const std::filesystem::path file =
+                std::filesystem::path(MESSIER_GUI_DIR) / SkinImageFileName(GuiPreset::kSlate, id, scale);
+            std::ifstream in(file, std::ios::binary);
+            unsigned char head[24] = {};
+            in.read(reinterpret_cast<char*>(head), sizeof head);
+            CHECK(in.gcount() == 24 && std::memcmp(head + 12, "IHDR", 4) == 0);
+            const auto be = [&](int at) {
+                return (std::uint32_t(head[at]) << 24) | (std::uint32_t(head[at + 1]) << 16)
+                       | (std::uint32_t(head[at + 2]) << 8) | std::uint32_t(head[at + 3]);
+            };
+            const VSTGUI::CPoint size = SkinImageSize(id);
+            CHECK(be(16) == std::uint32_t(size.x) * scale && be(20) == std::uint32_t(size.y) * scale);
+            ++checked;
+        }
+    }
+    CHECK(checked == 26);
+    CHECK(SkinImageFileName(GuiPreset::kPhotoPlate, SkinImageId::kChassis, 2) == "messier_plate_chassis@2x.png");
+    CHECK(SkinImageFileName(GuiPreset::kCopper, SkinImageId::kNebulaA, 1) == "messier_nebula_a@1x.png");
+    CHECK(PresetInfo(GuiPreset::kSlate).delivered && ShownPreset(GuiPreset::kSilver) == GuiPreset::kSlate);
+    CHECK(ShownPreset(static_cast<GuiPreset>(9)) == GuiPreset::kSlate);
+    // The seconds axis: labels at least 64 units apart on the 840 of the plate.
+    CHECK(layout::AxisStep(8.0, 840) == 1 && layout::AxisStep(0.5, 840) == 0.05 && layout::AxisStep(600, 840) == 60);
+    CHECK(layout::AxisLabel(1.5, 0.5) == "1.5 s" && layout::AxisLabel(0.25, 0.25) == "0.25 s"
+          && layout::AxisLabel(90, 60) == "1:30" && layout::AxisLabel(3, 1) == "3 s");
+
+    IPtr<HostApplication> app = owned(new HostApplication());
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(app) == kResultOk);
+    auto load = [&](std::int32_t version, double zoom, std::int8_t keys, std::int32_t transpose, const std::int32_t* preset) {
+        MemoryStream stream;
+        int32 written = 0;
+        stream.write(&version, 4, &written);
+        stream.write(&zoom, 8, &written);
+        stream.write(&keys, 1, &written);
+        stream.write(&transpose, 4, &written);
+        if(preset)
+            stream.write(const_cast<std::int32_t*>(preset), 4, &written);
+        stream.seek(0, IBStream::kIBSeekSet, nullptr);
+        return controller->setState(&stream);
+    };
+    const std::int32_t copper = 2, unknown = 7;
+    CHECK(load(2, 1.25, 0, 12, &copper) == kResultOk);
+    CHECK(controller->WindowSettings().preset == GuiPreset::kCopper && controller->WindowSettings().zoom == 1.25);
+    MemoryStream own;
+    CHECK(controller->getState(&own) == kResultOk);
+    int64 length = 0;
+    own.seek(0, IBStream::kIBSeekEnd, &length);
+    CHECK(length == 21);
+    CHECK(load(1, 1.0, 1, -12, nullptr) == kResultOk); // a song of 0.1.x
+    CHECK(controller->WindowSettings().preset == GuiPreset::kSlate && controller->WindowSettings().keyboard);
+    CHECK(load(2, 1.0, 1, 0, &unknown) == kResultFalse);
+    CHECK(load(2, 1.0, 1, 0, nullptr) == kResultFalse); // version 2 without its preset
+    CHECK(load(3, 1.0, 1, 0, &copper) == kResultFalse);
+    CHECK(controller->WindowSettings().preset == GuiPreset::kSlate);
+    CHECK(controller->terminate() == kResultOk);
+    std::printf("gui presets: 26 Slate bitmaps in the resources at the brief's sizes; presets not "
+                "delivered show as Slate; the preset saved with the window (state 2), state 1 read as Slate\n");
+}
+
 void TestProjectBackpressure() {
     const FileImage small = MakeImage(101, 48000, 2, 21), large = MakeImage(202, 48000, 2, 22);
     const std::string small_path = WriteWav("small.wav", small), large_path = WriteWav("large.wav", large);
@@ -2274,6 +2345,11 @@ void TestDisplayPath() {
     wave->frames = 1000;
     wave->columns = 1000;
     CHECK(ReadOverviewBytes(wave.get(), sizeof(WaveOverview), good) != nullptr);
+    wave->rate = 44100; // 0.2.0: the file's rate for the seconds axis
+    CHECK(ReadOverviewBytes(wave.get(), sizeof(WaveOverview), good) != nullptr);
+    wave->rate = 5;
+    CHECK(!ReadOverviewBytes(wave.get(), sizeof(WaveOverview), good));
+    wave->rate = 0;
     wave->sequence = 6;
     CHECK(!ReadOverviewBytes(wave.get(), sizeof(WaveOverview), good)); // another file's
     wave->sequence = 5;
@@ -2552,6 +2628,7 @@ int main() {
     TestLongPause();
     TestDialogStart();
     TestResizeGrip();
+    TestGuiPresets();
     TestState();
     TestExportStart();
     TestMessagesAndKeyboard();

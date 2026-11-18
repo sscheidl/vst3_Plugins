@@ -127,7 +127,7 @@ None yet (2026-11-17).
       off, the full path is the tooltip).
 - [ ] The amber colour of error lines is readable.
 
-The map strip (0.1.4, provisional: judge whether it shows the right things, not its look):
+The plate (since 0.1.4 the map strip; judge whether it shows the right things):
 
 - [ ] With a file loaded, the waveform appears under the map; with no file, "no sample".
 - [ ] START and SIZE move the shaded loop; the white playhead runs inside it and jumps
@@ -139,6 +139,33 @@ The map strip (0.1.4, provisional: judge whether it shows the right things, not 
       the new one appears; a failed load leaves the old waveform.
 - [ ] The map moves smoothly enough at 100 % and 200 % zoom; the host's CPU meter does
       not rise noticeably with the window open compared with it closed.
+
+The new window (0.2.0, Slate; judge the look as well as what it shows):
+
+- [ ] Material: chassis, bezel, glass, knob caps, buttons, screws and keys look as the
+      delivered bitmaps, at 100 % and at 150 or 200 % (2x bitmaps): no seams in the
+      bezel or the buttons, no dark or light fringes round caps, thumb, keys or nebula.
+- [ ] The nebula drifts slowly (minutes per cycle), violet and blue, not too much red; it
+      fades as BLEND goes to Granular.
+- [ ] The seconds axis above the plate fits the file's length; the grid's faint lines
+      stand at its labels.
+- [ ] Grains as shooting stars: a head that flares and burns out, a horizontal tail
+      behind it, against the direction it reads, longer with higher PITCH; no tail on
+      a grain's first appearance (its speed is measured from two displays).
+- [ ] FREEZE: the playhead turns dashed with a snowflake on the plate.
+- [ ] The START slider's thumb follows START (also from automation) and stands where
+      the loop's bracket begins; a click or drag on plate, waveform or slider sets START;
+      the START row shows seconds and percent.
+- [ ] The size menu (window symbol) offers 50 to 200 % and ticks the current size;
+      the palette menu ticks Slate, the other three are greyed "(bitmaps to come)".
+- [ ] A song saved with 0.1.x opens with Slate and its saved size; a song saved with
+      0.2.0 keeps preset, size, keyboard and octave.
+- [ ] STOP (header) and LATCH (beside the keyboard) work as before; LATCH and the
+      octave keys hide with the keyboard.
+- [ ] Texts: brand, subtitle, knob names and values readable and not cut at 50 %, 100 %
+      and 200 %; "TAUREON 0.2.0" does not touch STOP.
+- [ ] CPU: the window open costs no more than with 0.1.11 (the plate is drawn about
+      every 30 ms while playing, every 120 ms otherwise).
 
 ## 7. Listening
 

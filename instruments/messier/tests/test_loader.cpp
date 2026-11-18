@@ -458,6 +458,7 @@ void TestOverview() {
     std::unique_ptr<FileData> b = loader.LoadProject(short_file, 1);
     std::shared_ptr<const WaveOverview> wb = b ? loader.Overview(b->sequence) : nullptr;
     CHECK(wb && wb->columns == 441 && SameOverview(*wb, *b));
+    CHECK(wb && wa && wb->rate == 44100 && wa->rate == a->rate); // 0.2.0: for the seconds axis
     CHECK(loader.Overview(a->sequence) == wa); // still kept
     // A project without a file, or with one that is missing: no overview.
     std::unique_ptr<FileData> none = loader.LoadProject("", 2);

@@ -10,7 +10,7 @@ namespace messier {
 static_assert(std::is_trivially_copyable_v<EngineDisplay>);
 static_assert(std::is_trivially_copyable_v<WaveOverview>);
 static_assert(sizeof(EngineDisplay) == 288, "no padding: the bytes travel to the controller");
-static_assert(sizeof(WaveOverview) == 8208, "no padding: the bytes travel to the controller");
+static_assert(sizeof(WaveOverview) == 8216, "no padding: the bytes travel to the controller");
 
 namespace {
 bool Within(double value, double low, double high) {
@@ -52,12 +52,14 @@ std::shared_ptr<const WaveOverview> ReadOverviewBytes(const void* data, std::uin
     // The header first, so that a wrong overview costs no allocation.
     const auto* bytes = static_cast<const unsigned char*>(data);
     std::uint64_t sequence = 0;
-    std::uint32_t frames = 0, columns = 0;
+    std::uint32_t frames = 0, columns = 0, rate = 0;
     std::memcpy(&sequence, bytes + offsetof(WaveOverview, sequence), sizeof sequence);
     std::memcpy(&frames, bytes + offsetof(WaveOverview, frames), sizeof frames);
     std::memcpy(&columns, bytes + offsetof(WaveOverview, columns), sizeof columns);
+    std::memcpy(&rate, bytes + offsetof(WaveOverview, rate), sizeof rate);
     if(sequence != display.sequence || frames != display.frames || columns == 0
-       || columns > WaveOverview::kMaxColumns || columns > frames)
+       || columns > WaveOverview::kMaxColumns || columns > frames
+       || (rate != 0 && (rate < 1000 || rate > 768000))) // 0.2.0: the rate, if known, is a rate
         return nullptr;
     std::shared_ptr<WaveOverview> overview;
     try {

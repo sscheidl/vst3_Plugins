@@ -1,5 +1,5 @@
-// Copied from Kekule (Torus Classic) 0.3.1, source/widgets.cpp: the keyboard and
-// the switch; only the namespace is changed.
+// The keyboard's and the switches' behaviour copied from Kekule (Torus Classic) 0.3.1,
+// source/widgets.cpp; drawn since 0.2.0 with the GUI preset's bitmaps (gui_skin.h).
 #include "widgets.h"
 
 #include "guard.h"
@@ -10,12 +10,13 @@
 
 #include "vstgui/lib/ccolor.h"
 #include "vstgui/lib/cdrawcontext.h"
+#include "vstgui/lib/cframe.h"
 #include "vstgui/lib/cgraphicspath.h"
 #include "vstgui/lib/clinestyle.h"
-#include "vstgui/lib/cframe.h"
 #include "vstgui/lib/events.h"
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <utility>
 
@@ -25,6 +26,7 @@ using namespace VSTGUI;
 
 namespace {
 
+// Without a skin (tests, or a window that could not load one).
 constexpr CColor kWhiteKey(232, 232, 236);
 constexpr CColor kBlackKey(44, 46, 54);
 constexpr CColor kGap(28, 30, 36);
@@ -32,6 +34,8 @@ constexpr CColor kPressed(236, 172, 64);
 constexpr CColor kLabel(120, 124, 136);
 constexpr CColor kOffFrame(64, 68, 80);
 constexpr CColor kOffText(150, 156, 168);
+constexpr CColor kKeyLabel(96, 92, 84); // the Cs on the key bitmap
+constexpr double kPi = 3.14159265358979323846;
 
 CRect ToCRect(const KeyRect& key, const CRect& origin) {
     return CRect(origin.left + key.left, origin.top + key.top, origin.left + key.right,
@@ -57,6 +61,12 @@ void StrokeRoundRect(CDrawContext* context, CRect rect, CCoord radius, CColor co
     context->drawGraphicsPath(path, CDrawContext::kPathStroked);
 }
 
+// A point at `angle` degrees clockwise from twelve o'clock.
+CPoint Polar(const CPoint& centre, double angle, double radius) {
+    const double a = angle * kPi / 180.0;
+    return CPoint(centre.x + std::sin(a) * radius, centre.y - std::cos(a) * radius);
+}
+
 } // namespace
 
 KeyboardView::KeyboardView(const CRect& size, std::function<void(int)> strike,
@@ -65,6 +75,11 @@ KeyboardView::KeyboardView(const CRect& size, std::function<void(int)> strike,
   strike_(std::move(strike)),
   release_(std::move(release)),
   label_font_(makeOwned<CFontDesc>("Segoe UI", 9)) {}
+
+void KeyboardView::SetSkin(std::shared_ptr<const Skin> skin) {
+    skin_ = std::move(skin);
+    invalid();
+}
 
 void KeyboardView::ReleaseHeld() {
     Release();
@@ -94,18 +109,29 @@ void KeyboardView::DrawUnchecked(CDrawContext* context) {
     const double width = area.getWidth();
     const double height = area.getHeight();
     context->setDrawMode(kAntiAliasing | kNonIntegralMode);
+    const SkinImage* white = skin_ ? &skin_->Image(SkinImageId::kKeyWhite) : nullptr;
+    const SkinImage* black = skin_ ? &skin_->Image(SkinImageId::kKeyBlack) : nullptr;
+    const CColor pressed = skin_ ? WithAlpha(skin_->Colours().accent, 0.55) : kPressed;
 
     for(int note = kKeyboardLowNote; note <= kKeyboardHighNote; ++note) {
         if(IsBlackKey(note))
             continue;
-        CRect key = ToCRect(KeyRectFor(note, width, height), area);
-        key.inset(0.75, 0.0); // the gap between white keys
-        FillRoundRect(context, key, 3.0, note + transpose_ == pressed_ ? kPressed : kWhiteKey);
+        const CRect key = ToCRect(KeyRectFor(note, width, height), area);
+        const bool down = note + transpose_ == pressed_;
+        if(white && *white) {
+            DrawSkinImage(context, *white, key);
+            if(down)
+                FillRoundRect(context, CRect(key).inset(2.0, 1.0), 3.0, pressed);
+        } else {
+            CRect plain = key;
+            plain.inset(0.75, 0.0); // the gap between white keys
+            FillRoundRect(context, plain, 3.0, down ? kPressed : kWhiteKey);
+        }
         if(note % 12 == 0) { // name the Cs
-            context->setFont(label_font_);
-            context->setFontColor(kLabel);
+            context->setFont(skin_ ? skin_->Mono(9) : label_font_.get());
+            context->setFontColor(skin_ ? kKeyLabel : kLabel);
             const std::string name = "C" + std::to_string((note + transpose_) / 12 - 1);
-            CRect label(key.left, key.bottom - 14.0, key.right, key.bottom - 2.0);
+            CRect label(key.left, key.bottom - 15.0, key.right, key.bottom - 3.0);
             context->drawString(name.c_str(), label, kCenterText);
         }
     }
@@ -113,11 +139,18 @@ void KeyboardView::DrawUnchecked(CDrawContext* context) {
         if(!IsBlackKey(note))
             continue;
         CRect key = ToCRect(KeyRectFor(note, width, height), area);
+        const bool down = note + transpose_ == pressed_;
+        if(black && *black) {
+            DrawSkinImage(context, *black, key);
+            if(down)
+                FillRoundRect(context, CRect(key).inset(2.0, 1.5), 2.0, pressed);
+            continue;
+        }
         // A dark outline sets the black key off against a pressed white one.
         FillRoundRect(context, key, 2.5, kGap);
         key.inset(1.0, 0.0);
         key.bottom -= 1.0;
-        FillRoundRect(context, key, 2.0, note + transpose_ == pressed_ ? kPressed : kBlackKey);
+        FillRoundRect(context, key, 2.0, down ? kPressed : kBlackKey);
     }
     setDirty(false);
 }
@@ -240,6 +273,11 @@ void WindowShapeView::SetValue(float pot) {
     invalid();
 }
 
+void WindowShapeView::SetColour(CColor colour) {
+    colour_ = colour;
+    invalid();
+}
+
 void WindowShapeView::draw(CDrawContext* context) {
     Guarded([&] { DrawUnchecked(context); }); // MS-R37
 }
@@ -260,7 +298,7 @@ void WindowShapeView::DrawUnchecked(CDrawContext* context) {
             path->addLine(p);
         }
         path->addLine(CPoint(area.right, area.bottom - 1.0));
-        context->setFrameColor(CColor(232, 232, 236));
+        context->setFrameColor(colour_);
         context->setLineWidth(1.4);
         context->drawGraphicsPath(path, CDrawContext::kPathStroked);
     }
@@ -283,6 +321,16 @@ void ToggleButton::SetOn(bool on) {
     invalid();
 }
 
+void ToggleButton::SetSkin(std::shared_ptr<const Skin> skin) {
+    skin_ = std::move(skin);
+    invalid();
+}
+
+void ToggleButton::SetIcon(Icon icon) {
+    icon_ = icon;
+    invalid();
+}
+
 void ToggleButton::draw(CDrawContext* context) {
     Guarded([&] { DrawUnchecked(context); }); // MS-R37
 }
@@ -290,13 +338,56 @@ void ToggleButton::draw(CDrawContext* context) {
 void ToggleButton::DrawUnchecked(CDrawContext* context) {
     const CRect area = getViewSize();
     context->setDrawMode(kAntiAliasing | kNonIntegralMode);
-    if(on_)
-        FillRoundRect(context, area, area.getHeight() / 2.0, kPressed);
-    else
-        StrokeRoundRect(context, area, area.getHeight() / 2.0 - 1.0, kOffFrame);
-    context->setFont(font_);
-    context->setFontColor(on_ ? kGap : (getMouseEnabled() ? kOffText : kLabel));
-    context->drawString(title_, area, kCenterText);
+    const bool down = on_ && style_ == Style::Toggle;
+    if(!skin_) {
+        if(on_)
+            FillRoundRect(context, area, area.getHeight() / 2.0, kPressed);
+        else
+            StrokeRoundRect(context, area, area.getHeight() / 2.0 - 1.0, kOffFrame);
+        context->setFont(font_);
+        context->setFontColor(on_ ? kGap : (getMouseEnabled() ? kOffText : kLabel));
+        context->drawString(title_, area, kCenterText);
+        setDirty(false);
+        return;
+    }
+    const SkinColours& c = skin_->Colours();
+    const SkinImage& face = skin_->Image(down ? SkinImageId::kButtonDown : SkinImageId::kButton);
+    if(face) {
+        DrawNinePart(context, face, area, 8);
+    } else {
+        FillRoundRect(context, area, 3.0, down ? c.stain : c.metal);
+        StrokeRoundRect(context, area, 3.0, c.rule_dark);
+    }
+    const CColor ink = !getMouseEnabled() ? WithAlpha(c.dim, 0.6) : (down ? c.accent : c.button_text);
+    if(icon_ == Icon::kNone) {
+        CRect text = area;
+        if(down)
+            text.offset(0, 1); // pressed in
+        DrawTracked(context, title_, text, kCenterText, 1.6, skin_->Caps(11.5), ink);
+        setDirty(false);
+        return;
+    }
+    // The symbols, 16 units square in the middle.
+    const CPoint o(std::round(area.left + area.getWidth() / 2 - 8), std::round(area.top + area.getHeight() / 2 - 8));
+    context->setFrameColor(ink);
+    context->setFillColor(ink);
+    context->setLineWidth(1.4);
+    if(icon_ == Icon::kSize) {
+        // A window with an arrow out of its corner.
+        context->drawRect(CRect(o.x + 2, o.y + 4, o.x + 14, o.y + 13), kDrawStroked);
+        context->drawLine(CPoint(o.x + 9, o.y + 4), CPoint(o.x + 9, o.y + 2));
+        context->drawLine(CPoint(o.x + 9, o.y + 2), CPoint(o.x + 15, o.y + 2));
+        context->drawLine(CPoint(o.x + 14, o.y + 2), CPoint(o.x + 14, o.y + 6));
+        context->drawLine(CPoint(o.x + 14, o.y + 2), CPoint(o.x + 10, o.y + 6));
+    } else {
+        // A painter's palette: a round board and three dabs of colour.
+        context->drawEllipse(CRect(o.x + 2, o.y + 2, o.x + 14, o.y + 14), kDrawStroked);
+        for(const CPoint dab : {CPoint(5, 7), CPoint(7.5, 4.8), CPoint(10.6, 5.6)})
+            context->drawEllipse(CRect(o.x + dab.x - 0.9, o.y + dab.y - 0.9, o.x + dab.x + 0.9, o.y + dab.y + 0.9),
+                                 kDrawFilled);
+        context->setFillColor(skin_->Colours().metal);
+        context->drawEllipse(CRect(o.x + 8.5, o.y + 9, o.x + 12, o.y + 12.5), kDrawFilled); // the thumb hole
+    }
     setDirty(false);
 }
 
@@ -307,8 +398,8 @@ void ToggleButton::onMouseDownEvent(MouseDownEvent& event) {
         on_ = !on_;
     event.consumed = true;
     // MS-R37: what the button does (LOAD..., KEYS, LATCH, STOP, FREEZE, RESET, the
-    // octave keys) runs inside the window's exception boundary. If it could not be
-    // done, the button shows its old state again.
+    // octave keys, the menus) runs inside the window's exception boundary. If it could
+    // not be done, the button shows its old state again.
     const bool done = Guarded(false, [&] {
         if(toggled_)
             toggled_(on_);
@@ -319,10 +410,79 @@ void ToggleButton::onMouseDownEvent(MouseDownEvent& event) {
     Guarded([&] { invalid(); });
 }
 
+MetalKnob::MetalKnob(const CRect& size, IControlListener* listener, int32_t tag, bool small, bool bipolar)
+: CKnob(size, listener, tag, nullptr, nullptr), small_(small), bipolar_(bipolar) {}
+
+void MetalKnob::SetSkin(std::shared_ptr<const Skin> skin) {
+    skin_ = std::move(skin);
+    invalid();
+}
+
+void MetalKnob::draw(CDrawContext* context) {
+    Guarded([&] { DrawUnchecked(context); }); // MS-R37
+}
+
+void MetalKnob::DrawUnchecked(CDrawContext* context) {
+    setDirty(false);
+    if(!skin_)
+        return;
+    const SkinColours& c = skin_->Colours();
+    const CRect area = getViewSize();
+    const CPoint centre = area.getCenter();
+    context->setDrawMode(kAntiAliasing | kNonIntegralMode);
+    context->setLineStyle(CLineStyle(CLineStyle::kLineCapRound));
+    // Geometry for the delivered caps: 48 units across on 72 (large), 30 on 48 (small).
+    const double outer = area.getWidth() / 2 - 1.5;
+    const double cap = small_ ? 15.0 : 24.0;
+    const double arc = small_ ? 17.6 : 28.0;
+    const double first = -140.0, last = 140.0;
+    const double level = std::clamp(static_cast<double>(getValueNormalized()), 0.0, 1.0);
+    const double at = first + level * (last - first);
+
+    // The scale.
+    const int ticks = small_ ? 10 : 20;
+    for(int i = 0; i <= ticks; ++i) {
+        const double a = first + (last - first) * i / ticks;
+        const bool major = i % 5 == 0;
+        context->setFrameColor(c.tick);
+        context->setLineWidth(major ? 1.1 : 0.7);
+        context->drawLine(Polar(centre, a, outer), Polar(centre, a, outer - (major ? (small_ ? 3.0 : 4.0) : 2.2)));
+    }
+    // The value as an arc.
+    const double from = bipolar_ ? 0.0 : first;
+    const double low = std::min(from, at), high = std::max(from, at);
+    if(high - low >= 0.5) {
+        if(auto path = owned(context->createGraphicsPath())) {
+            path->addArc(CRect(centre.x - arc, centre.y - arc, centre.x + arc, centre.y + arc), low - 90.0,
+                         high - 90.0, true);
+            context->setFrameColor(c.accent);
+            context->setLineWidth(small_ ? 1.8 : 2.4);
+            context->drawGraphicsPath(path, CDrawContext::kPathStroked);
+        }
+    }
+    // The cap and the pointer over it.
+    const SkinImage& image = skin_->Image(small_ ? SkinImageId::kKnobSmall : SkinImageId::kKnobLarge);
+    if(image) {
+        DrawSkinImage(context, image, area);
+    } else {
+        context->setFillColor(c.dim);
+        context->drawEllipse(CRect(centre.x - cap, centre.y - cap, centre.x + cap, centre.y + cap), kDrawFilled);
+    }
+    context->setFrameColor(c.pointer);
+    context->setLineWidth(small_ ? 1.8 : 2.6);
+    context->drawLine(Polar(centre, at, cap * 0.2), Polar(centre, at, cap - 2.5));
+    context->setLineStyle(kLineSolid);
+}
+
 ResizeGrip::ResizeGrip(const CRect& size, CColor colour, std::function<void()> begin,
                        std::function<void(double, double)> drag)
 : CView(size), colour_(colour), begin_(std::move(begin)), drag_(std::move(drag)) {
     setTooltipText("Drag to resize the window");
+}
+
+void ResizeGrip::SetColour(CColor colour) {
+    colour_ = colour;
+    invalid();
 }
 
 double ResizeGrip::Zoom() const {

@@ -17,6 +17,9 @@ struct WaveOverview {
     std::uint64_t sequence = 0; // FileData::sequence of the file it shows
     std::uint32_t frames = 0;   // that file's length
     std::uint32_t columns = 0;  // kMaxColumns, or frames for a shorter file
+    // Since 0.2.0: the file's sample rate, for the window's seconds axis; 0 unknown.
+    std::uint32_t rate = 0;
+    std::uint32_t reserved = 0; // no padding: every byte that travels is set
     // Column c covers the frames [c * frames / columns, (c + 1) * frames / columns).
     std::int16_t low[kMaxColumns] = {};
     std::int16_t high[kMaxColumns] = {};

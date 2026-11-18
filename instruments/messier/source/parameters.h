@@ -275,7 +275,9 @@ constexpr std::int32_t kStateVersion = 2;
 constexpr std::int32_t kMaxPathBytes = 32768;
 // The controller's own state: version, the editor zoom as a double, the keyboard
 // as one byte (1 for shown), its transposition in semitones as int32.
-constexpr std::int32_t kControllerStateVersion = 1;
+// Version 2 (0.2.0): the same with the GUI preset as int32 (GuiPreset); version 1 is
+// still read, with Slate.
+constexpr std::int32_t kControllerStateVersion = 2;
 
 // Messages between the two halves of the plug-in.
 // Controller -> processor: a key of the screen keyboard. Velocity 1..127 is a

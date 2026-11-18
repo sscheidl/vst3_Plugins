@@ -20,6 +20,7 @@ std::shared_ptr<WaveOverview> MakeOverview(const FileData& file) noexcept {
     const std::int16_t* pcm = file.pcm.get();
     overview->frames = file.frames;
     overview->columns = columns;
+    overview->rate = file.rate;
     for(std::uint32_t c = 0; c < columns; ++c) {
         const std::uint64_t first = c * frames / columns, last = (c + 1) * frames / columns;
         std::int16_t low = pcm[first * channels], high = low;

@@ -1,5 +1,28 @@
 # Changes
 
+## 0.2.0 (2026-11-18)
+
+The window of the window study, version 3, with the user's decisions of 2026-11-18;
+details in `docs/BUILD_REPORT_0.2.0.md`. The sound is unchanged.
+
+* New window, 880 x 640 units (724 with the keyboard): old metal, a measuring plate of
+  glass in a bezel with a seconds axis and a grid of crosses, the waveform and the wide
+  START slider below it on the same time axis. The grains are shooting stars: the head
+  flares with the grain's window and burns out, the tail follows the grain's measured
+  motion through the file. The nebula drifts and fades towards Granular. While Freeze
+  holds, the playhead is dashed and carries a snowflake.
+* START is the slider under the plate (no knob any more); BLEND is a knob. The knob
+  columns follow the study: Window before Blend; the places of input gain and grain FM
+  are marked "(0.3.0)".
+* GUI presets: the palette symbol in the header; saved with the song (controller state
+  version 2; songs of 0.1.x open with Slate). Slate is built from Codex' bitmaps at 1x and
+  2x; Silver, Copper and Photo plate are listed, disabled until their bitmaps come.
+* Window size menu (50 to 200 %) in the header, beside the grip of 0.1.11.
+* STOP sits left of KEYS; LATCH beside the keyboard, which keeps its 15 keys.
+* The waveform overview carries the file's sample rate, for the seconds axis.
+* The input features planned for 0.2.0 (live, overdub, circular, dry blend, input gain,
+  grain FM) move to 0.3.0.
+
 ## 0.1.11 (2026-11-18)
 
 The two edge cases of Codex' check of 0.1.10 (`docs/CODEX_REVIEW_0.1.10.md`), and a

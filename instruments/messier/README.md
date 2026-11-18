@@ -9,12 +9,12 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 0.1.9, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 0.2.0, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.1.11:** builds, passes Steinberg's validator, tested automatically (bit for
+**Status 0.2.0:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
@@ -32,22 +32,32 @@ them. Its check of 0.1.7 four more ([check](docs/CODEX_REVIEW_0.1.7.md),
 files. Its checks of 0.1.8 and 0.1.9 four more ([0.1.8](docs/CODEX_REVIEW_0.1.8.md),
 [0.1.9](docs/CODEX_REVIEW_0.1.9.md), [report](docs/BUILD_REPORT_0.1.10.md)); 0.1.10 fixes
 them. Codex released 0.1.10 for the DAW test ([check](docs/CODEX_REVIEW_0.1.10.md)); 0.1.11
-fixes its two remaining edge cases ([report](docs/BUILD_REPORT_0.1.11.md)). The user has tried 0.1.7 and 0.1.8 in Studio One
+fixes its two remaining edge cases ([report](docs/BUILD_REPORT_0.1.11.md)). 0.2.0 brings
+the window of the window study ([report](docs/BUILD_REPORT_0.2.0.md)); Codex' check of it
+is open. The user has tried 0.1.7 and 0.1.8 in Studio One
 (operation and sound). The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
 
-**The window is provisional.** The build order's window (section 8: an Atlas nebula map
-with the waveform, loop bounds, playhead, spray and the real grains, Orion as the visual
-theme, a broad Blend slider above seven knobs) is not built yet; it follows once its
-layout and colours are settled. Its data path is there since 0.1.4: a plain strip above
-the knobs shows the loop, the spray range, the playhead, the sounding grains (across
-their read position, down their panorama) and the waveform of the file the engine plays.
-Until the design is settled the window is that strip and the plain knob layout described
-below.
+**The window** (since 0.2.0, after the window study the user settled on 2026-11-18):
+old metal with patina, a measuring plate of dark glass in a milled bezel, and below it
+the waveform and the wide START slider, all on one time axis with the seconds of the file
+above the plate. On the plate a nebula drifts slowly and fades as BLEND goes towards
+Granular; a grid of crosses marks the seconds and the quarters of the panorama; the loop,
+the spray range around the playhead and the sounding grains are drawn from the engine's
+real state. Each grain is a shooting star: its head flares with the grain's window and
+burns out, its tail follows the grain's real motion through the file (across only; down
+is its panorama, left at the top). While Freeze holds the playhead, it is dashed and
+carries a snowflake. Seven knobs and Volume, six small knobs for the secondary functions,
+FREEZE and RESET lie below; KEYS shows a keyboard with LATCH and two octave keys.
+Surfaces are bitmaps at 1x and 2x (in the bundle's `Contents/Resources`), everything
+that carries information is drawn by the plug-in. Four GUI presets are planned (Slate,
+Silver, Copper, Photo plate); only Slate's bitmaps are delivered, the menu shows the
+others disabled until theirs come.
 
-Only the file source in 0.1.0. Live recording, overdub, circular recording, the dry
-blend of the input, input gain and grain FM follow in 0.2.0, through the sidechain input
-that is already there (see [Sidechain](#sidechain)).
+Only the file source so far. Live recording, overdub, circular recording, the dry
+blend of the input, input gain and grain FM follow in 0.3.0 (planned for 0.2.0 before the
+window took that number), through the sidechain input that is already there (see
+[Sidechain](#sidechain)).
 
 ## Sound
 
@@ -85,7 +95,7 @@ firmware passes with the same pot positions).
 
 The secondaries are the firmware's SOURCE page under their pot. Speed's and Blend's
 secondaries (input gain, grain FM) need the audio input; their IDs 111 and 116 are kept
-free for 0.2.0, as are 124 to 126 (Source, Record, Circular). As in the firmware, the
+free for 0.3.0, as are 124 to 126 (Source, Record, Circular). As in the firmware, the
 secondaries have no MIDI controller.
 
 A step of a control, from automation or MIDI, takes effect on the next 64-sample
@@ -152,22 +162,25 @@ window asks for the status until that load has finished, and every half second a
 so the file line always follows. The LOAD... dialog opens in the folder of the file
 playing.
 
-**STOP** (in the header): pauses the sound with a 5 ms fade; pressed again, it goes on
+**STOP** (in the header, left of KEYS): pauses the sound with a 5 ms fade; pressed again, it goes on
 where it stopped. While stopped or bypassed, new notes are not kept for later, from the
 host or the screen keyboard (no MIDI goes out for them either); releases and parameter
 changes made meanwhile act when the sound goes on. Automated STOP and Bypass act on
 their own sample, so the output does not depend on the host's block size (since
 0.1.10).
 
-**On the map** (since 0.1.8): a click or drag sets START to that place in the file (an
-edit the host records like a knob turn), the mouse wheel widens or narrows SPRAY (finer
-with Shift).
+**On the plate** (since 0.1.8): a click or drag on the plate, the waveform or the START
+slider sets START to that place in the file (an edit the host records like a knob turn),
+the mouse wheel widens or narrows SPRAY (finer with Shift).
 
-**Window size:** drag the hatched grip in the lower right corner (since 0.1.11), or the
-window's edge; the window keeps its aspect ratio, from 50 to 200 %. The size is saved
-with the song.
+**Window size:** the window symbol in the header offers 50 to 200 % (since 0.2.0); or drag
+the hatched grip in the lower right corner (since 0.1.11) or the window's edge. The window
+keeps its aspect ratio, from 50 to 200 %. The size is saved with the song.
 
-**LATCH** (next to KEYS): a key struck on the screen keyboard stays held after the mouse
+**GUI preset:** the palette symbol in the header chooses the look (since 0.2.0); saved
+with the song. A song of 0.1.x opens with Slate.
+
+**LATCH** (beside the keyboard, left of the octave keys): a key struck on the screen keyboard stays held after the mouse
 is let go, so the pitch stays changed. Clicking another key moves the hold there;
 clicking the held key again, switching LATCH off or closing the window lets it go.
 LATCH is not saved with the song.
@@ -227,7 +240,7 @@ vocoder.
 
 The plug-in has a stereo audio input of type aux, "Sidechain", inactive by default. It
 takes stereo, mono or no input. 0.1.0 does not read it: the core gets silence. It exists
-now so that the bus layout of 0.2.0 is the same and projects keep loading. The adapter
+now so that the bus layout of 0.3.0 is the same and projects keep loading. The adapter
 already passes an input pair to the engine on the quantum grid.
 
 ## Install
@@ -297,6 +310,7 @@ plug-in's code; the plug-in ships as a Release build.
 | [`engine/`](engine/) | 2: the looper engine around `neb::Engine` |
 | [`adapter/`](adapter/) | 3: sample rate, quanta, event time (from Kekulé) |
 | [`source/`](source/) | 4: processor, controller, state, editor, WAV reader, file loader |
+| [`resource/gui/`](resource/gui/) | the window's bitmaps (Slate, 1x and 2x; [brief](docs/GRAFIKAUFTRAG_GUI.md)) |
 | [`tests/`](tests/) | tests, the reference copies, the bench |
 | [`tools/`](tools/) | `update_provenance.ps1`, `stage_result.ps1` |
 | [`docs/`](docs/) | build report, DAW test list, review brief |

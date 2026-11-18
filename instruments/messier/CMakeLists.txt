@@ -10,7 +10,7 @@
 #
 # Its own version; moduleinfo.json takes it from here. Keep it equal to
 # FULL_VERSION_STR in source/version.h and to components.json.
-project(Messier VERSION 0.1.11 LANGUAGES CXX)
+project(Messier VERSION 0.2.0 LANGUAGES CXX)
 
 # The SDK compiles everything with /fp:fast. The DSP, the adapter and their tests
 # use /fp:precise: the bit-exact comparison with the reference needs IEEE semantics.
@@ -74,8 +74,13 @@ add_library(messier_shell STATIC
     source/latest_value.h
     source/file_drop.cpp
     source/file_drop.h
+    source/gui_layout.h
+    source/gui_skin.cpp
+    source/gui_skin.h
     source/map_view.cpp
     source/map_view.h
+    source/panel_view.cpp
+    source/panel_view.h
     source/parameter_state.h
     source/parameters.h
     source/plugin_ids.h
@@ -107,6 +112,22 @@ smtg_add_vst3plugin(Messier
     SOURCES_LIST source/factory.cpp)
 target_link_libraries(Messier PRIVATE messier_shell sdk)
 set_target_properties(Messier PROPERTIES FOLDER "Messier")
+
+# The window's bitmaps (0.2.0): surfaces and materials of the GUI presets at 1x and 2x,
+# painted by Codex/GPT after docs/GRAFIKAUFTRAG_GUI.md, into the bundle's
+# Contents/Resources. Only Slate is delivered so far; gui_skin.cpp knows the names.
+set(MESSIER_GUI_IMAGES
+    messier_slate_chassis messier_slate_bezel messier_slate_plate messier_nebula_a
+    messier_nebula_b messier_slate_knob_l messier_slate_knob_s messier_slate_thumb
+    messier_slate_button messier_slate_button_down messier_slate_screw messier_keys_white
+    messier_keys_black)
+set(MESSIER_GUI_BITMAPS "")
+foreach(image IN LISTS MESSIER_GUI_IMAGES)
+    list(APPEND MESSIER_GUI_BITMAPS
+        "${CMAKE_CURRENT_SOURCE_DIR}/resource/gui/${image}@1x.png"
+        "${CMAKE_CURRENT_SOURCE_DIR}/resource/gui/${image}@2x.png")
+endforeach()
+smtg_target_add_plugin_resources(Messier RESOURCES ${MESSIER_GUI_BITMAPS})
 
 if(BUILD_TESTING)
     # The firmware's own vocoder test, unchanged: this FFT backend against the
@@ -162,6 +183,9 @@ if(BUILD_TESTING)
     target_compile_options(test_messier_plugin PRIVATE ${MESSIER_FP} /permissive-)
     target_link_libraries(test_messier_plugin PRIVATE
         messier_shell messier_reference sdk_hosting)
+    # The bitmaps the window asks for are those the bundle gets (0.2.0).
+    target_compile_definitions(test_messier_plugin PRIVATE
+        "MESSIER_GUI_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/resource/gui\"")
     add_test(NAME messier.plugin COMMAND test_messier_plugin)
 
     # The copies from Daisy-Seed are what the manifest and the hash list say, and the

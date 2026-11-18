@@ -1,17 +1,26 @@
-// The map of the sample (since 0.1.4, provisional until the Atlas/Orion window):
-// across, the position in the file; in the upper part the panorama of the sounding
-// grains (left at the top), the loop, the spray range around the playhead and the
-// playhead itself; below, in the same scale, the waveform overview of the file the
-// engine reads. It draws what the controller last received; since 0.1.8 a click or
-// drag sets START, the wheel SPRAY, and a WAV can be dropped on it.
+// The measuring plate (0.2.0; the map strip of 0.1.4 to 0.1.11 before it): across, the
+// position in the file, on one time axis for everything in the view. From the top: the
+// seconds axis on the metal; the plate of glass in its bezel with the drifting nebula, a
+// grid of crosses, the loop, the spray range around the playhead and the sounding grains
+// as shooting stars (down: their panorama, L at the top); the waveform of the file in
+// the same scale with the loop's brackets; the START slider; and the row with START's
+// value and the legend. The playhead runs from the axis through plate and waveform, with
+// a snowflake while Freeze holds it.
+//
+// It draws what the controller last received. A click or drag anywhere on it sets START
+// to that place in the file, the wheel widens or narrows SPRAY (since 0.1.8), and a WAV
+// can be dropped on it.
 #pragma once
 
+#include "gui_skin.h"
 #include "looper_engine.h"
 #include "wave_overview.h"
 
-#include "vstgui/lib/cfont.h"
 #include "vstgui/lib/cview.h"
 
+#include <array>
+#include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -20,10 +29,21 @@ namespace messier {
 
 class MapView : public VSTGUI::CView {
   public:
-    explicit MapView(const VSTGUI::CRect& size);
+    // `time_inset`: how far the time axis stays inside the view's left and right edges
+    // (the bezel's width in the window).
+    explicit MapView(const VSTGUI::CRect& size, VSTGUI::CCoord time_inset = 0);
 
     // New data; redraws if it differs from what is shown. Never throws.
     void Show(const EngineDisplay& display, std::shared_ptr<const WaveOverview> wave) noexcept;
+    void SetSkin(std::shared_ptr<const Skin> skin) noexcept;
+    // BLEND (normalized): the nebula fades and the grains brighten towards Granular.
+    void SetBlend(double blend) noexcept;
+    // START (normalized): where the slider's thumb stands.
+    void SetStart(double start) noexcept;
+    // The window's timer: the nebula drifts, so the plate is drawn again now and then
+    // even when no new display comes.
+    void Tick() noexcept;
+
     void draw(VSTGUI::CDrawContext* context) override;
     void DrawUnchecked(VSTGUI::CDrawContext* context);
     // A drag over the window's sample area (since 0.1.8): a usable WAV shows a frame
@@ -33,9 +53,6 @@ class MapView : public VSTGUI::CView {
     void SetDropState(DropShown state, const std::string& reason) noexcept;
     DropShown DropState() const { return drop_state_; }
 
-    // Since 0.1.8 the map takes the mouse (the user's wish): a click or drag sets START
-    // to that place in the file, the wheel widens or narrows SPRAY. The editor turns
-    // these into parameter edits.
     struct Edits {
         std::function<void()> start_begin;
         std::function<void(double share)> start; // 0..1 of the file
@@ -58,17 +75,37 @@ class MapView : public VSTGUI::CView {
     // For tests: what the view would draw.
     const EngineDisplay& Shown() const { return display_; }
     bool ShowsWave() const { return wave_ != nullptr; }
+    // The speed (frames per second, signed) the view has measured for a sounding grain
+    // from two displays in a row, 0 while it has seen the grain once. Its tail is drawn
+    // from that: the grain's real motion through the file.
+    double GrainSpeed(std::uint32_t index) const;
 
   private:
+    // What the view keeps of a grain between two displays.
+    struct Trail {
+        float pan = 0, phase = 0;
+        double position = 0;
+        double speed = 0; // frames per second
+        bool measured = false;
+    };
+    void FollowGrains(const EngineDisplay& before, const EngineDisplay& now, double seconds);
+    double Share(double x) const;
+    void DrawDropHighlight(VSTGUI::CDrawContext* context);
+
     EngineDisplay display_{};
     std::shared_ptr<const WaveOverview> wave_;
+    std::shared_ptr<const Skin> skin_;
+    std::array<Trail, EngineDisplay::kMaxGrains> trails_{};
+    std::chrono::steady_clock::time_point shown_at_{};
+    std::chrono::steady_clock::time_point born_ = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point drawn_at_{};
+    VSTGUI::CCoord inset_ = 0;
+    double blend_ = 0.5;
+    double start_ = 0.0;
     DropShown drop_state_ = DropShown::kNone;
     std::string drop_reason_;
     Edits edits_;
     bool dragging_ = false;
-    double Share(double x) const;
-    void DrawDropHighlight(VSTGUI::CDrawContext* context);
-    VSTGUI::SharedPointer<VSTGUI::CFontDesc> font_;
 };
 
 } // namespace messier

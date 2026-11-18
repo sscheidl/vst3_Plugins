@@ -238,7 +238,8 @@ tresult PLUGIN_API Controller::getState(IBStream* state) {
         return kInvalidArgument;
     IBStreamer stream(state, kLittleEndian);
     if(!stream.writeInt32(kControllerStateVersion) || !stream.writeDouble(editor_.zoom)
-       || !stream.writeInt8(editor_.keyboard ? 1 : 0) || !stream.writeInt32(editor_.transpose))
+       || !stream.writeInt8(editor_.keyboard ? 1 : 0) || !stream.writeInt32(editor_.transpose)
+       || !stream.writeInt32(static_cast<int32>(editor_.preset)))
         return kResultFalse;
     return kResultOk;
 }
@@ -251,15 +252,18 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
     double zoom = 1.0;
     int8 keyboard = 1;
     int32 transpose = kKeyboardDefaultTranspose;
-    if(!stream.readInt32(version) || version != kControllerStateVersion || !stream.readDouble(zoom)
-       || !stream.readInt8(keyboard) || !stream.readInt32(transpose))
+    int32 preset = static_cast<int32>(GuiPreset::kSlate); // version 1 (before 0.2.0)
+    if(!stream.readInt32(version) || (version != 1 && version != kControllerStateVersion)
+       || !stream.readDouble(zoom) || !stream.readInt8(keyboard) || !stream.readInt32(transpose)
+       || (version >= 2 && !stream.readInt32(preset)))
         return kResultFalse;
     if(!std::isfinite(zoom) || (keyboard != 0 && keyboard != 1) || transpose % 12 != 0
-       || transpose < -kKeyboardTransposeLimit || transpose > kKeyboardTransposeLimit)
+       || transpose < -kKeyboardTransposeLimit || transpose > kKeyboardTransposeLimit || !IsGuiPreset(preset))
         return kResultFalse;
     editor_.zoom = ClampEditorZoom(zoom);
     editor_.keyboard = keyboard != 0;
     editor_.transpose = transpose;
+    editor_.preset = static_cast<GuiPreset>(preset);
     try {
         for(const OpenEditor& open : editors_)
             open.editor->ApplySettings(editor_);
