@@ -639,7 +639,13 @@ void TestLaws() {
         CHECK(std::fabs(DensityRate(DensityNormalized(rate)) / rate - 1.0) < 1e-4);
         checked += 8;
     }
-    CHECK(SpeedFactor(0.5) == 1.0 && SpeedFactor(0.0) == -4.0 && SpeedFactor(1.0) == 4.0);
+    // Since 0.1.8 (the user's layout): Speed 0x at the centre, +1x at 7/12; Pitch Random
+    // +-12 semitones at the top. The core gets the pot position PotOf, its laws unchanged.
+    CHECK(SpeedFactor(0.5) == 0.0 && SpeedFactor(7.0 / 12.0) == 1.0 && SpeedFactor(0.0) == -4.0
+          && SpeedFactor(1.0) == 4.0);
+    CHECK(PotOf(kParamSpeed, 0.5) == 0.4f && PotOf(kParamSpeed, 0.0) == 0.0f && PotOf(kParamSpeed, 1.0) == 1.0f);
+    CHECK(PitchRandomSemitones(1.0) == 12.0 && PitchRandomSemitones(0.0) == 0.0 && PotOf(kParamPitchRandom, 1.0) == 0.5f);
+    CHECK(PotOf(kParamDensity, 0.3) == 0.3f); // the others pass through
     CHECK(PitchOctaves(0.5) == 0.0 && std::fabs(PitchOctaves(0.0) + 3.0) < 1e-6
           && std::fabs(PitchOctaves(1.0) - 2.0) < 1e-6);
     std::printf("laws: display functions equal the core's for %d values; inverses round-trip; "

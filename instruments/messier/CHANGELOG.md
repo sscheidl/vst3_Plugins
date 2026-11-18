@@ -1,5 +1,65 @@
 # Changes
 
+## 0.1.9 (2026-11-18)
+
+From the user's DAW test of 0.1.8; details in `docs/BUILD_REPORT_0.1.9.md`. The sound is
+unchanged while playing.
+
+* The file line follows a drop: after a load from the window, the open window asks for
+  the status until that load has finished (and every half second anyway). The LOAD...
+  dialog opens in the folder of the file playing.
+* A drag over the window is judged by the WAV's headers while it hovers: a file Messier
+  cannot play is refused at once, with the "not allowed" pointer and the reason on the
+  map.
+* New: STOP in the header (parameter 131, not saved), a pause with a 5 ms fade that goes
+  on where it stopped; and Bypass (parameter 130, the VST3 bypass flag, saved: state
+  version 2, version 1 still read), which Studio One's bypass now switches.
+
+## 0.1.8 (2026-11-18)
+
+The four findings of Codex' check of 0.1.7 (`docs/CODEX_REVIEW_0.1.7.md`), and drag and
+drop of WAV files; details in `docs/BUILD_REPORT_0.1.8.md`. The sound is unchanged.
+
+* New: a WAV file dragged from the Explorer onto the map or the file line loads as with
+  LOAD... (the first .wav of a drop; other files are refused). While a WAV is over the
+  window, the map shows "Drop WAV to load".
+* New: the map takes the mouse: a click or drag sets START to that place in the file,
+  the wheel widens or narrows SPRAY (finer with Shift). The map now also takes drops
+  (it took no mouse before, so VSTGUI would not have offered it the drop).
+* New: LATCH next to KEYS: a key struck on the screen keyboard stays held until another
+  key, the same key again or LATCH off.
+* From the user's DAW test of 0.1.7: Speed has 0x exactly at 12 o'clock (-4x .. +4x;
+  +1x, the default, at 7/12), Pitch Random reaches +-12 semitones and shows semitones,
+  and the WINDOW knob shows the mixed grain window as a small curve instead of text (the
+  host shows the nearest shape's name). The core is unchanged: the plug-in gives it the
+  pot position that belongs to the value. Songs saved with 0.1.7 or earlier keep their
+  pot values, so Speed and Pitch Random sound different there.
+* MS-R30, MS-R31: every request of the controller carries the moment it was made. The
+  processor refuses requests made before it was last disconnected, and loads made
+  before its last project load; on a disconnect it releases the screen keys the old
+  connection still holds, so no late release is needed or taken.
+* MS-R32: the controller keeps the count of files of the last eight processors, so a
+  return to a processor seen before marks only what it loaded since.
+* MS-R33: the offsets on parameter 199 are spaced 4099 apart for the processors of one
+  process; equal values of two processors need thousands of loads in between.
+
+## 0.1.7 (2026-11-18)
+
+The four findings of Codex' check of 0.1.6 (`docs/CODEX_REVIEW_0.1.6.md`), fixed as a
+class rather than case by case; details in `docs/BUILD_REPORT_0.1.7.md`. The sound is
+unchanged.
+
+* MS-R26, MS-R27: marking the project as changed is simpler and can no longer be hidden.
+  Every change of parameter 199 marks it, and so does every status with more files than
+  the last of the same processor; nothing is subtracted. A file may be marked twice,
+  once on each way, which changes nothing for a host. Each processor adds its own offset
+  to parameter 199, so a late value of an old processor rarely equals a new one's.
+* MS-R28: connection generations grow across all controllers of the process; the
+  processor refuses requests of an older connection (a key release excepted) before
+  they change anything, and stamps each reply with the generation of its request.
+* MS-R29: the WAV reader gives the caller's stream back its exception mask in every
+  case.
+
 ## 0.1.6 (2026-11-18)
 
 The six findings of Codex' check of 0.1.5 (`docs/CODEX_REVIEW_0.1.5.md`), fixed; details

@@ -6,6 +6,7 @@
 #include "pluginterfaces/vst/ivstmidicontrollers.h"
 #include "public.sdk/source/vst/vsteditcontroller.h"
 
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
@@ -124,37 +125,47 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
     }
     // A message with the current generation attached; null without memory.
     Steinberg::IPtr<Steinberg::Vst::IMessage> NewMessage(const char* id);
-    // MS-R04, MS-R12, MS-R17, MS-R20: setDirty for the files from the window that
-    // became the sound, counted from parameter 199 (the count modulo 65536) and from
-    // the status (the full count and the processor it belongs to). The contract: at
-    // least one call for every change the host passes on, one per file up to
-    // kMostDirtyCalls for one report; a host needs one to know.
-    void CountFromParameter(std::uint32_t count) noexcept;
+    // MS-R04, MS-R12, MS-R17, MS-R20, MS-R26, MS-R27: the project is marked changed
+    // when a file from the window became the sound. The contract (0.1.7): one setDirty
+    // for every change of parameter 199 the host passes on, and one for every status
+    // whose count of such files is higher than the last of the same processor (or, for
+    // a processor not seen before, above zero). A file may so be marked twice, once on
+    // each way; nothing is subtracted, so that no change can be hidden by another.
+    // setDirty(true) only marks; a second call changes nothing for a host.
     void CountFromStatus(std::uint64_t processor, std::uint32_t count) noexcept;
-    void MarkChanged(std::uint32_t loads) noexcept;
+    void MarkChanged() noexcept;
     // Forgets the display of another processor's files.
     void ForgetDisplay() noexcept;
 
     std::vector<OpenEditor> editors_;
     EditorSettings editor_;
     FileStatus file_;
-    // The loads of processor counted_for_ (0: none named yet) that have been counted.
-    std::uint32_t user_loads_counted_ = 0;
-    std::uint64_t counted_for_ = 0;
-    // From connect() until the first status of that connection (MS-R20): which
-    // processor sends parameter 199 is not known. Every change then marks the project,
-    // and marked_since_connect_ says how many loads that stood for, so that the status
-    // adds only what is missing.
-    bool peer_unconfirmed_ = true;
-    std::uint32_t marked_since_connect_ = 0;
-    bool parameter_since_connect_ = false;
-    std::uint32_t last_parameter_ = 0;
-    // The connection generation (MS-R21) and, within it, the newest status serial and
-    // display reply taken.
-    Steinberg::int64 generation_ = 1;
+    // The processor of the last status taken, and (MS-R32) the count of files from the
+    // window last seen of each of the most recent processors, so that a return to a
+    // processor seen before marks only what it loaded since.
+    std::uint64_t status_from_ = 0;
+    struct Known {
+        std::uint64_t processor = 0;
+        std::uint32_t loads = 0;
+    };
+    static constexpr std::size_t kKnownProcessors = 8;
+    std::array<Known, kKnownProcessors> known_{};
+    std::size_t known_next_ = 0;
+    // The connection generation (MS-R21, MS-R28): taken from a counter shared by all
+    // controllers of the process, so it grows with every connect, also across
+    // controller instances. Within it, the newest status serial and display reply.
+    Steinberg::int64 generation_ = 0;
     std::uint32_t last_status_serial_ = 0;
     std::uint64_t last_reply_ = 0;
-    static constexpr std::uint32_t kMostDirtyCalls = 64;
+    // Since 0.1.8 (the user's DAW test: after a drop the name stayed old): after a
+    // load request from the window, the open window asks for the status on every tick
+    // until a status shows that request finished, at most kAwaitTicks; and every
+    // kStatusEveryTicks anyway, so the file line cannot stay old.
+    std::string awaiting_;
+    int await_ticks_ = 0;
+    unsigned poll_ticks_ = 0;
+    static constexpr int kAwaitTicks = 400;          // about 12 s at 30 ms
+    static constexpr unsigned kStatusEveryTicks = 16; // about 0.5 s
     EngineDisplay display_{};
     std::shared_ptr<const WaveOverview> wave_; // may belong to an older file than display_
 };

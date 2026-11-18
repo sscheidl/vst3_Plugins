@@ -78,6 +78,9 @@ class Processor : public Steinberg::Vst::AudioEffect {
     // Screen keyboard notes, load requests and status requests arrive here, on the
     // host's UI thread; status replies go back from here.
     Steinberg::tresult PLUGIN_API notify(Steinberg::Vst::IMessage* message) SMTG_OVERRIDE;
+    // MS-R30, MS-R31: the old connection is closed here. Requests made before this
+    // moment are refused, and the screen keys still held are released.
+    Steinberg::tresult PLUGIN_API disconnect(Steinberg::Vst::IConnectionPoint* other) SMTG_OVERRIDE;
 
     static constexpr std::size_t kKeyboardQueueSize = 256;
     static constexpr std::chrono::milliseconds kKeyboardNoteLifetime{500};
@@ -129,11 +132,12 @@ class Processor : public Steinberg::Vst::AudioEffect {
     void ReadEvents(Steinberg::Vst::IEventList& events, Steinberg::int32 num_samples);
     void Render(Steinberg::Vst::ProcessData& data);
     // Tells the controller what the loader knows. UI thread. Never throws.
-    void SendFileStatus() noexcept;
-    void SendFileStatusUnchecked();
+    // Replies carry the generation of the request they answer (MS-R28).
+    void SendFileStatus(Steinberg::int64 generation) noexcept;
+    void SendFileStatusUnchecked(Steinberg::int64 generation);
     // Answers a display request (since 0.1.4). UI thread. Never throws.
-    void SendDisplay(Steinberg::Vst::IMessage* request) noexcept;
-    void SendDisplayUnchecked(Steinberg::Vst::IMessage* request);
+    void SendDisplay(Steinberg::Vst::IMessage* request, Steinberg::int64 generation) noexcept;
+    void SendDisplayUnchecked(Steinberg::Vst::IMessage* request, Steinberg::int64 generation);
     Steinberg::tresult NotifyUnchecked(Steinberg::Vst::IMessage* message);
     // StreamAdapter::Prepare that keeps a RESET press waiting in the adapter (MS-R22).
     bool PrepareAdapter(double rate) noexcept;
@@ -146,6 +150,13 @@ class Processor : public Steinberg::Vst::AudioEffect {
     std::atomic<Steinberg::uint32> latency_{0};
     ParameterState state_;
     bool reset_pressed_ = false; // the Reset button as the audio thread last saw it
+    // Bypass and Stop (since 0.1.8), audio thread: the output's gain glides to 0 while
+    // either is on (step per sample, 5 ms); at 0 the engine is not rendered.
+    bool bypass_ = false, stopped_ = false;
+    float out_gain_ = 1.0f;
+    float fade_step_ = 1.0f / (0.005f * 48000.0f);
+    bool Resting() const { return (bypass_ || stopped_) && out_gain_ == 0.0f; }
+    void SetFadeRate(double rate);
     // A loaded project not yet in the engine because its file could not be taken
     // (MS-R02). Owned by the audio side.
     ParameterState::Loaded pending_project_;
@@ -161,16 +172,23 @@ class Processor : public Steinberg::Vst::AudioEffect {
     std::uint32_t reported_user_loads_ = 0; // audio thread
     // Tells this instance from others in the status (MS-R17); never 0.
     const std::uint64_t instance_id_;
+    // The offset on parameter 199 (MS-R26, MS-R33): spaced 4099 apart for the
+    // processors of one process, from a random start per process.
+    const std::uint64_t sample_offset_;
     // The window's display (since 0.1.4). A request sets display_wanted_; the audio
     // thread then publishes the engine's state once after its next block. Without
     // requests (no window open) it publishes nothing.
     std::atomic<bool> display_wanted_{false};
     LatestValue<EngineDisplay> display_;
     EngineDisplay last_display_{}; // UI thread: the newest taken
-    // UI thread (MS-R20, MS-R21): the controller's connection generation heard last,
-    // stamped on every status and display reply, and the number of the last display
-    // reply.
-    Steinberg::int64 peer_generation_ = 0;
+    // UI thread (MS-R21, MS-R28): the newest connection generation a request came
+    // with. Requests of an older one are refused (a note-off excepted), replies carry
+    // the generation of their request. And the number of the last display reply.
+    Steinberg::int64 latest_generation_ = 0;
+    // MS-R30: requests made (kAttrIssued) up to the last disconnect are refused, and
+    // loads made up to the last project load. Ticks of std::chrono::steady_clock.
+    Steinberg::int64 closed_until_ = 0;
+    std::atomic<Steinberg::int64> project_loaded_at_{0};
     std::uint64_t display_replies_ = 0;
 
     FileExchange exchange_;      // files from the window

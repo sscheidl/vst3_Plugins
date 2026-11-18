@@ -4,6 +4,8 @@
 
 #include "view_layout.h"
 
+#include "reference_dsp.h"
+
 #include "vstgui/lib/ccolor.h"
 #include "vstgui/lib/cdrawcontext.h"
 #include "vstgui/lib/cgraphicspath.h"
@@ -63,6 +65,12 @@ KeyboardView::KeyboardView(const CRect& size, std::function<void(int)> strike,
 
 void KeyboardView::ReleaseHeld() {
     Release();
+}
+
+void KeyboardView::SetLatch(bool on) {
+    latch_ = on;
+    if(!on)
+        Release(); // the held key ends with the latch
 }
 
 void KeyboardView::SetTranspose(int semitones) {
@@ -135,34 +143,110 @@ void KeyboardView::Release() {
     }
 }
 
+void KeyboardView::MouseDownOn(int note) {
+    if(latch_) {
+        // The held key again: let go. Another key: the hold moves there.
+        if(note >= 0 && note == pressed_) {
+            Release();
+        } else if(note >= 0) {
+            Press(note);
+            dragging_ = true;
+        }
+        return;
+    }
+    Release(); // a key still held, should a mouse-up have been lost
+    dragging_ = true;
+    Press(note);
+}
+
+void KeyboardView::MouseMoveTo(int note) {
+    if(!dragging_ || (latch_ && note < 0)) // latched: off the keyboard keeps the last key
+        return;
+    if(note != pressed_)
+        Press(note); // off the keyboard: nothing lit, nothing struck
+}
+
+void KeyboardView::MouseUp() {
+    if(latch_)
+        dragging_ = false; // the key stays held
+    else
+        Release();
+}
+
 void KeyboardView::onMouseDownEvent(MouseDownEvent& event) {
     if(!event.buttonState.isLeft())
         return;
-    Release(); // a key still held, should a mouse-up have been lost
-    dragging_ = true;
-    Press(NoteAtPoint(event.mousePosition));
+    MouseDownOn(NoteAtPoint(event.mousePosition));
     event.consumed = true;
 }
 
 void KeyboardView::onMouseMoveEvent(MouseMoveEvent& event) {
     if(!dragging_)
         return;
-    const int note = NoteAtPoint(event.mousePosition);
-    if(note != pressed_)
-        Press(note); // off the keyboard: nothing lit, nothing struck
+    MouseMoveTo(NoteAtPoint(event.mousePosition));
     event.consumed = true;
 }
 
 void KeyboardView::onMouseUpEvent(MouseUpEvent& event) {
     if(!dragging_)
         return;
-    Release();
+    MouseUp();
     event.consumed = true;
 }
 
 void KeyboardView::onMouseCancelEvent(MouseCancelEvent& event) {
-    Release();
+    MouseUp();
     event.consumed = true;
+}
+
+namespace {
+
+// The core's window bank, built once (about 14 KB).
+const float (&WindowBank())[neb::W_BANK][neb::WIN_LEN + 1] {
+    static float bank[neb::W_BANK][neb::WIN_LEN + 1];
+    static const bool built = (neb::BuildWindows(bank), true);
+    (void)built;
+    return bank;
+}
+
+} // namespace
+
+float WindowShapeView::Sample(float pot, float share) {
+    float mixed[neb::WIN_LEN + 1];
+    neb::WinMix(WindowBank(), std::clamp(pot, 0.0f, 1.0f), mixed);
+    const int i = std::clamp(static_cast<int>(share * neb::WIN_LEN + 0.5f), 0, neb::WIN_LEN);
+    return mixed[i];
+}
+
+void WindowShapeView::SetValue(float pot) {
+    pot = std::clamp(pot, 0.0f, 1.0f);
+    if(pot == pot_)
+        return;
+    pot_ = pot;
+    invalid();
+}
+
+void WindowShapeView::draw(CDrawContext* context) {
+    float mixed[neb::WIN_LEN + 1];
+    neb::WinMix(WindowBank(), pot_, mixed);
+    const CRect area = getViewSize();
+    context->setDrawMode(kAntiAliasing | kNonIntegralMode);
+    if(auto path = owned(context->createGraphicsPath())) {
+        constexpr int kPoints = 48;
+        for(int k = 0; k <= kPoints; ++k) {
+            const float y = mixed[k * neb::WIN_LEN / kPoints];
+            const CPoint p(area.left + area.getWidth() * k / kPoints,
+                           area.bottom - 1.0 - (area.getHeight() - 2.0) * std::clamp(y, 0.0f, 1.0f));
+            if(k == 0)
+                path->beginSubpath(CPoint(area.left, area.bottom - 1.0));
+            path->addLine(p);
+        }
+        path->addLine(CPoint(area.right, area.bottom - 1.0));
+        context->setFrameColor(CColor(232, 232, 236));
+        context->setLineWidth(1.4);
+        context->drawGraphicsPath(path, CDrawContext::kPathStroked);
+    }
+    setDirty(false);
 }
 
 ToggleButton::ToggleButton(const CRect& size, const char* title, bool on,

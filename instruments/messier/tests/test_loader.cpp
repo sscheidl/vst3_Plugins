@@ -538,6 +538,34 @@ void TestStreamErrors() {
         const WavResult result = DecodeWav(in, bytes.size());
         CHECK(result.error == WavError::kNone && result.file && result.file->frames == 2000);
     }
+    // MS-R29: the caller's exception mask comes back in every case: a stream without a
+    // buffer (arming the guard throws), and a mask with failbit and eofbit set by the
+    // caller on a file cut short (clearing the state throws).
+    {
+        std::istream in(nullptr);
+        const WavResult result = DecodeWav(in, bytes.size());
+        CHECK(result.error == WavError::kReadError && in.exceptions() == std::ios::goodbit);
+    }
+    {
+        std::istringstream in(bytes.substr(0, bytes.size() / 2));
+        const std::ios::iostate mask = std::ios::failbit | std::ios::eofbit;
+        in.exceptions(mask);
+        const WavResult result = DecodeWav(in, bytes.size());
+        CHECK(result.error != WavError::kNone && in.exceptions() == mask);
+    }
+    // ProbeWavFile (0.1.8, for a drag over the window): the header checks of the reader
+    // without the audio data.
+    {
+        const std::string good = Write("probe.wav", wav);
+        const WavResult fine = ProbeWavFile(good);
+        CHECK(fine.error == WavError::kNone && !fine.file && fine.source_bits == 16);
+        CHECK(ProbeWavFile(good, 100).error == WavError::kTooLarge);
+        Format eight;
+        eight.bits = 8;
+        const std::string old = Write("probe-8bit.wav", Riff({FmtChunk(eight), DataChunk(std::vector<std::uint8_t>(400, 128))}));
+        CHECK(ProbeWavFile(old).error == WavError::kInvalid);
+        CHECK(ProbeWavFile((g_dir / "probe-missing.wav").string()).error == WavError::kMissing);
+    }
     // A directory is no file; a missing one is missing.
     CHECK(ReadWavFile(g_dir.string()).error == WavError::kMissing);
     CHECK(ReadWavFile((g_dir / "no-such-dir" / "x.wav").string()).error == WavError::kMissing);

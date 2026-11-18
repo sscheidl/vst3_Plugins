@@ -1,5 +1,7 @@
 #include "map_view.h"
 
+#include "vstgui/lib/events.h"
+
 #include "vstgui/lib/cdrawcontext.h"
 #include "vstgui/lib/ccolor.h"
 
@@ -20,15 +22,19 @@ constexpr CColor kWave(120, 170, 200);
 constexpr CColor kWaveOutside(70, 90, 110);
 constexpr CColor kGrain(255, 214, 150);
 constexpr CColor kDim(150, 156, 168);
+constexpr CColor kDropFrame(255, 214, 150);
+constexpr CColor kDropShade(10, 12, 18, 170);
+constexpr CColor kDropRefused(240, 150, 60);
 constexpr CCoord kWaveHeight = 34; // the waveform strip at the bottom
 constexpr CCoord kGap = 4;
 constexpr double kPi = 3.14159265358979323846;
 } // namespace
 
 MapView::MapView(const CRect& size) : CView(size) {
-    font_ = makeOwned<CFontDesc>(*kNormalFontSmall);
-    font_->setSize(11);
-    setMouseEnabled(false);
+    font_ = makeOwned<CFontDesc>("Segoe UI", 11);
+    // Since 0.1.8 the map takes the mouse: START, SPRAY, and drops (VSTGUI looks for
+    // drop targets only among views that take the mouse).
+    setMouseEnabled(true);
 }
 
 void MapView::Show(const EngineDisplay& display, std::shared_ptr<const WaveOverview> wave) noexcept {
@@ -49,7 +55,8 @@ void MapView::draw(CDrawContext* context) {
     if(d.frames == 0) {
         context->setFont(font_);
         context->setFontColor(kDim);
-        context->drawString("no sample", all, kCenterText);
+        context->drawString("no sample  -  drop a WAV here or use LOAD...", all, kCenterText);
+        DrawDropHighlight(context);
         setDirty(false);
         return;
     }
@@ -129,7 +136,124 @@ void MapView::draw(CDrawContext* context) {
     context->setFontColor(kDim);
     context->drawString("L", CRect(map.left + 4, map.top + 2, map.left + 20, map.top + 16), kLeftText);
     context->drawString("R", CRect(map.left + 4, map.bottom - 16, map.left + 20, map.bottom - 2), kLeftText);
+    DrawDropHighlight(context);
     setDirty(false);
+}
+
+void MapView::SetDropState(DropShown state, const std::string& reason) noexcept {
+    try {
+        if(state == drop_state_ && reason == drop_reason_)
+            return;
+        drop_reason_ = reason;
+    } catch(...) {
+        drop_reason_.clear();
+    }
+    drop_state_ = state;
+    invalid();
+}
+
+void MapView::DrawDropHighlight(CDrawContext* context) {
+    if(drop_state_ == DropShown::kNone)
+        return;
+    const bool usable = drop_state_ == DropShown::kUsable;
+    const CColor colour = usable ? kDropFrame : kDropRefused;
+    CRect all = getViewSize();
+    context->setFillColor(kDropShade);
+    context->drawRect(all, kDrawFilled);
+    CRect frame = all;
+    frame.inset(2, 2);
+    context->setFrameColor(colour);
+    context->setLineWidth(2);
+    const CCoord dash[] = {6, 4};
+    context->setLineStyle(CLineStyle(CLineStyle::kLineCapButt, CLineStyle::kLineJoinMiter, 0, 2, dash));
+    context->drawRect(frame, kDrawStroked);
+    context->setLineStyle(kLineSolid);
+    context->setFont(font_);
+    context->setFontColor(colour);
+    const std::string text = usable ? std::string("Drop WAV to load") : "Can't load: " + drop_reason_;
+    context->drawString(text.c_str(), all, kCenterText);
+}
+
+double MapView::Share(double x) const {
+    const double width = getViewSize().getWidth();
+    return width > 0 ? std::clamp(x / width, 0.0, 1.0) : 0.0;
+}
+
+bool MapView::PressAt(double x) {
+    if(display_.frames == 0 || !edits_.start) // no file: nothing to place START in
+        return false;
+    try {
+        if(edits_.start_begin)
+            edits_.start_begin();
+        dragging_ = true;
+        edits_.start(Share(x));
+    } catch(...) {
+    }
+    return true;
+}
+
+void MapView::DragTo(double x) {
+    if(!dragging_)
+        return;
+    try {
+        edits_.start(Share(x));
+    } catch(...) {
+    }
+}
+
+void MapView::Release() {
+    if(!dragging_)
+        return;
+    dragging_ = false;
+    try {
+        if(edits_.start_end)
+            edits_.start_end();
+    } catch(...) {
+    }
+}
+
+bool MapView::Wheel(double delta, bool fine) {
+    if(delta == 0.0 || !edits_.spray)
+        return false;
+    try {
+        edits_.spray((delta > 0 ? 1.0 : -1.0) * (fine ? 0.005 : 0.025));
+    } catch(...) {
+    }
+    return true;
+}
+
+void MapView::onMouseDownEvent(MouseDownEvent& event) {
+    if(!event.buttonState.isLeft())
+        return;
+    if(PressAt(event.mousePosition.x - getViewSize().left))
+        event.consumed = true;
+}
+
+void MapView::onMouseMoveEvent(MouseMoveEvent& event) {
+    if(!dragging_)
+        return;
+    DragTo(event.mousePosition.x - getViewSize().left);
+    event.consumed = true;
+}
+
+void MapView::onMouseUpEvent(MouseUpEvent& event) {
+    if(!dragging_)
+        return;
+    Release();
+    event.consumed = true;
+}
+
+void MapView::onMouseCancelEvent(MouseCancelEvent& event) {
+    Release();
+    event.consumed = true;
+}
+
+void MapView::onMouseWheelEvent(MouseWheelEvent& event) {
+    double delta = event.deltaY;
+    if(event.flags & MouseWheelEvent::DirectionInvertedFromDevice)
+        delta = -delta;
+    if(Wheel(delta, event.modifiers.has(ModifierKey::Shift)))
+        event.consumed = true;
 }
 
 } // namespace messier

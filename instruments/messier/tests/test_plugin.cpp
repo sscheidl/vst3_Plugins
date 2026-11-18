@@ -11,6 +11,8 @@
 #include "controller.h"
 #include "display_data.h"
 #include "editor.h"
+#include "file_drop.h"
+#include "map_view.h"
 #include "parameters.h"
 #include "plugin_ids.h"
 #include "processor.h"
@@ -18,6 +20,7 @@
 #include "state_io.h"
 #include "value_display.h"
 #include "view_layout.h"
+#include "widgets.h"
 #include "wav_reader.h"
 
 #include "public.sdk/source/common/memorystream.h"
@@ -386,11 +389,12 @@ std::vector<float> RenderFirmware(const HostScore& score, std::int64_t total, co
     FirmwareLooper firmware(image.pcm.size());
     const std::array<double, kSavedParamCount> start = StartValues();
     float primary[8], secondary[8] = {};
+    // The pots as the plug-in gives them to the core (PotOf, since 0.1.8).
     for(int i = 0; i < 8; ++i)
-        primary[i] = static_cast<float>(start[static_cast<std::size_t>(i)]);
+        primary[i] = PotOf(kFirstPrimary + static_cast<std::uint32_t>(i), start[static_cast<std::size_t>(i)]);
     const int secondary_index[6] = {0, 2, 3, 4, 5, 7};
     for(int i = 0; i < 6; ++i)
-        secondary[secondary_index[i]] = static_cast<float>(start[static_cast<std::size_t>(8 + i)]);
+        secondary[secondary_index[i]] = PotOf(kParamIds[static_cast<std::size_t>(8 + i)], start[static_cast<std::size_t>(8 + i)]);
     firmware.Reset(&image, primary, secondary);
     for(std::uint8_t c = 0; c < 16; ++c)
         firmware.Midi(0xe0, c, 0, 64); // the wheel's centre, as the plug-in sends it
@@ -408,7 +412,7 @@ std::vector<float> RenderFirmware(const HostScore& score, std::int64_t total, co
                 firmware.Midi(0x80, static_cast<std::uint8_t>(ev.channel), static_cast<std::uint8_t>(ev.a), 0);
             } else {
                 const auto id = static_cast<std::uint32_t>(ev.a);
-                const float value = static_cast<float>(ev.value);
+                const float value = PotOf(id, ev.value);
                 if(IsPrimary(id))
                     firmware.SetPrimary(id - kFirstPrimary, value);
                 else if(IsSecondary(id))
@@ -583,7 +587,7 @@ void TestState() {
         std::memcpy(s.data() + at, bytes, n);
         return s;
     };
-    const int32 version2 = 2, minus = -1, huge = kMaxPathBytes + 1;
+    const int32 version2 = 3, minus = -1, huge = kMaxPathBytes + 1; // 3: a version not known (2 is current since 0.1.8)
     const double nan = std::nan(""), big = 1.5, negative = -0.25;
     bad.push_back(patched(0, &version2, 4));
     bad.push_back(patched(4, &nan, 8));
@@ -725,10 +729,16 @@ void TestController() {
             const std::string shown = Text(*controller, info.id, v);
             ParamValue back = -1.0;
             CHECK(controller->getParamValueByString(info.id, const_cast<TChar*>(StringConvert::convert(shown).c_str()) , back) == kResultOk);
-            CHECK(Text(*controller, info.id, back) == shown);
+            // Window between two shapes shows the nearest with "~"; typing that picks the shape.
+            if(info.id == kParamWindow && shown.front() == '~')
+                CHECK(Text(*controller, info.id, back) == shown.substr(1));
+            else
+                CHECK(Text(*controller, info.id, back) == shown);
         }
     }
-    CHECK(Text(*controller, kParamSpeed, 0.5) == "+1.00");
+    CHECK(Text(*controller, kParamSpeed, 0.5) == "+0.00" && Text(*controller, kParamSpeed, 7.0 / 12.0) == "+1.00");
+    CHECK(Text(*controller, kParamPitchRandom, 1.0) == "\xC2\xB1" "12.0" && Text(*controller, kParamPitchRandom, 0.25) == "\xC2\xB1" "3.0");
+    CHECK(Text(*controller, kParamWindow, 0.55) == "~Bartlett" && Text(*controller, kParamWindow, 0.6) == "~Ramp Up");
     CHECK(Text(*controller, kParamPitch, 0.5) == "+0.00");
     CHECK(Text(*controller, kParamPitch, 0.0) == "-3.00" && Text(*controller, kParamPitch, 1.0) == "+2.00");
     CHECK(Text(*controller, kParamWindow, 0.0) == "Gaussian" && Text(*controller, kParamWindow, 1.0) == "Rectangle");
@@ -737,7 +747,10 @@ void TestController() {
     CHECK(Text(*controller, kParamSpray, 0.5) == "\xC2\xB1" "25.0");
     CHECK(Text(*controller, kParamFreeze, 1.0) == "On");
     double v = -1;
-    CHECK(ParseValue(kParamSpeed, "1x", v) && v == 0.5);
+    CHECK(ParseValue(kParamSpeed, "1x", v) && std::fabs(v - 7.0 / 12.0) < 1e-12);
+    CHECK(ParseValue(kParamSpeed, "0", v) && v == 0.5);
+    CHECK(ParseValue(kParamPitchRandom, "+-6 st", v) && v == 0.5);
+    CHECK(ParseValue(kParamWindow, "~Ramp Up", v) && std::fabs(v - 4.0 / 6.0) < 1e-12);
     CHECK(ParseValue(kParamWindow, "rect", v) && v == 1.0);
     CHECK(ParseValue(kParamWindow, "4", v) && v == 0.5);
     CHECK(ParseValue(kParamSpray, "+-25 %", v) && std::fabs(v - 0.5) < 1e-12);
@@ -844,6 +857,222 @@ void TestBuses() {
 }
 
 // --- The window's geometry (from Kekule's test, for Messier's sizes) --------
+
+// Drag and drop (0.1.8): which file a drop loads, and what the drop target tells the
+// window while a drag passes. The real drag from the Explorer is the DAW test's.
+class FakePackage : public VSTGUI::IDataPackage {
+  public:
+    std::vector<std::pair<Type, std::string>> items;
+    uint32_t getCount() const override { return static_cast<uint32_t>(items.size()); }
+    uint32_t getDataSize(uint32_t i) const override { return static_cast<uint32_t>(items[i].second.size()); }
+    Type getDataType(uint32_t i) const override { return items[i].first; }
+    uint32_t getData(uint32_t i, const void*& buffer, Type& type) const override {
+        buffer = items[i].second.data();
+        type = items[i].first;
+        return static_cast<uint32_t>(items[i].second.size());
+    }
+};
+
+void TestFileDrop() {
+    using VSTGUI::IDataPackage;
+    FakePackage none;
+    CHECK(PickDroppedWav(&none).empty() && PickDroppedWav(nullptr).empty());
+    FakePackage mixed;
+    mixed.items = {{IDataPackage::kText, "C:/text/looks-like.wav"},
+                   {IDataPackage::kFilePath, "C:/samples/readme.txt"},
+                   {IDataPackage::kFilePath, std::string("C:/samples/Gr\xc3\xbc" "n.WAV") + '\0'},
+                   {IDataPackage::kFilePath, "C:/samples/second.wav"},
+                   {IDataPackage::kFilePath, "C:/samples/.wa"}};
+    CHECK(PickDroppedWav(&mixed) == "C:/samples/Gr\xc3\xbc" "n.WAV"); // the first WAV, any case, UTF-8
+    FakePackage text;
+    text.items = {{IDataPackage::kFilePath, "C:/a.wave"}, {IDataPackage::kFilePath, "C:/b.wav.txt"}};
+    CHECK(PickDroppedWav(&text).empty());
+
+    // Judged by the WAV's headers while it hovers (0.1.8): a damaged WAV, a missing one
+    // and a text file are refused with a reason, before anything is dropped.
+    const std::string bad = Utf8(g_dir / "drop-bad.wav");
+    {
+        std::ofstream out(fs::path(g_dir / "drop-bad.wav"), std::ios::binary);
+        out << "RIFF0000WAVEnothing";
+    }
+    FakePackage usable;
+    usable.items = {{IDataPackage::kText, "C:/text/looks-like.wav"},
+                    {IDataPackage::kFilePath, bad},
+                    {IDataPackage::kFilePath, Utf8(g_dir / "readme.txt")},
+                    {IDataPackage::kFilePath, g_path}};
+    const DropVerdict ok = JudgeDrop(&usable);
+    CHECK(ok.usable && ok.path == g_path); // the first WAV that would load
+    FakePackage damaged;
+    damaged.items = {{IDataPackage::kFilePath, bad}};
+    const DropVerdict refused = JudgeDrop(&damaged);
+    CHECK(!refused.usable && refused.reason.find("not a valid WAV") == 0);
+    FakePackage missing;
+    missing.items = {{IDataPackage::kFilePath, Utf8(g_dir / "gone.wav")}};
+    CHECK(JudgeDrop(&missing).reason.find("file not found") == 0);
+    CHECK(JudgeDrop(&text).reason == "not a WAV file" && !JudgeDrop(nullptr).usable);
+
+    std::vector<std::pair<FileDropTarget::Hover, std::string>> shown;
+    std::string dropped;
+    auto target = VSTGUI::makeOwned<FileDropTarget>(
+        [&](FileDropTarget::Hover state, const std::string& reason) { shown.push_back({state, reason}); },
+        [&](const std::string& path) { dropped = path; });
+    const VSTGUI::DragEventData with{&usable, VSTGUI::CPoint(), VSTGUI::Modifiers()};
+    const VSTGUI::DragEventData without{&damaged, VSTGUI::CPoint(), VSTGUI::Modifiers()};
+    CHECK(target->onDragEnter(without) == VSTGUI::DragOperation::None);
+    CHECK(shown.back().first == FileDropTarget::Hover::kRefused && shown.back().second == refused.reason);
+    CHECK(target->onDragMove(without) == VSTGUI::DragOperation::None);
+    target->onDragLeave(without);
+    CHECK(shown.back().first == FileDropTarget::Hover::kNone);
+    CHECK(!target->onDrop(without) && dropped.empty());
+    CHECK(target->onDragEnter(with) == VSTGUI::DragOperation::Copy && shown.back().first == FileDropTarget::Hover::kUsable);
+    CHECK(target->onDragMove(with) == VSTGUI::DragOperation::Copy);
+    CHECK(target->onDrop(with) && dropped == g_path && shown.back().first == FileDropTarget::Hover::kNone);
+    dropped.clear();
+    CHECK(target->onDrop(with) && dropped == g_path); // a drop without an enter is judged too
+    // Callbacks that throw: the drop reports failure, nothing leaves.
+    auto throwing = VSTGUI::makeOwned<FileDropTarget>(
+        [](FileDropTarget::Hover, const std::string&) { throw std::bad_alloc(); },
+        [](const std::string&) { throw std::bad_alloc(); });
+    CHECK(throwing->onDragEnter(with) == VSTGUI::DragOperation::Copy);
+    CHECK(!throwing->onDrop(with));
+    std::printf("drag and drop: the first .wav that would load is taken; damaged, missing and other "
+                "files are refused while they hover, with the reason\n");
+}
+
+// LATCH on the screen keyboard (0.1.8): a struck key stays held after the mouse is
+// let go; another key moves the hold, the same key or LATCH off lets go. Without
+// latch, letting go of the mouse lets go of the key, as before.
+void TestKeyboardLatch() {
+    using namespace VSTGUI;
+    std::vector<std::pair<char, int>> calls;
+    auto view = makeOwned<KeyboardView>(CRect(0, 0, 700, 60), [&](int n) { calls.push_back({'+', n}); },
+                                        [&](int n) { calls.push_back({'-', n}); });
+    auto click = [&](int note) {
+        view->MouseDownOn(note);
+        view->MouseUp();
+    };
+    click(60); // no latch: struck and let go
+    CHECK(view->Held() == -1 && calls.size() == 2 && calls[0] == std::make_pair('+', 60) && calls[1] == std::make_pair('-', 60));
+    calls.clear();
+    view->SetLatch(true);
+    click(64); // held after the mouse is let go
+    CHECK(view->Held() == 64 && calls.size() == 1 && calls[0] == std::make_pair('+', 64));
+    click(67); // the hold moves: 64 let go, 67 struck
+    CHECK(view->Held() == 67 && calls.size() == 3 && calls[1] == std::make_pair('-', 64) && calls[2] == std::make_pair('+', 67));
+    click(67); // the same key again: let go
+    CHECK(view->Held() == -1 && calls.size() == 4 && calls[3] == std::make_pair('-', 67));
+    click(72);
+    view->SetLatch(false); // LATCH off: let go
+    CHECK(view->Held() == -1 && calls.size() == 6 && calls[5] == std::make_pair('-', 72));
+    std::printf("keyboard latch: held after the mouse, moved by another key, let go by the same key "
+                "or LATCH off; without it, as before\n");
+}
+
+// Stop and Bypass (0.1.8): the output fades out in 5 ms, then the engine rests (its
+// time stands); released, it goes on where it stopped and fades in. Bypass is saved
+// (state version 2), Stop is not; a state of version 1 opens without bypass.
+void TestStopAndBypass() {
+    for(const ParamID id : {kParamStop, kParamBypass}) {
+        PluginHost host({});
+        CHECK(LoadState(*host.processor, MakeState(StartValues(), g_path)) == kResultOk);
+        host.Run(4800, 64);
+        ParameterChanges changes(4);
+        host.external_changes = &changes;
+        auto set = [&](double value) {
+            int32 index = 0;
+            changes.clearQueue();
+            changes.addParameterData(id, index)->addPoint(0, value, index);
+            host.Process(64);
+            changes.clearQueue();
+        };
+        host.Clear();
+        set(1.0);
+        host.Run(480, 64); // 5 ms at 48 kHz and more
+        const std::int64_t resting_at = host.processor->Adapter().RenderedSamples();
+        host.Clear();
+        host.Run(4800, 64);
+        CHECK(Peak(host.left) == 0.0f && Peak(host.right) == 0.0f);
+        CHECK(host.processor->Adapter().RenderedSamples() == resting_at); // the engine rests
+        host.Clear();
+        set(0.0);
+        host.Run(4800, 64);
+        CHECK(Peak(host.left) > 0.01f);
+        CHECK(std::fabs(host.left[0]) <= 0.01f); // faded in, no step
+        CHECK(host.processor->Adapter().RenderedSamples() > resting_at);
+        host.external_changes = nullptr;
+        CHECK(host.allocations == 0);
+    }
+    // Saved: Bypass in version 2, not Stop; version 1 still read, without bypass.
+    {
+        PluginHost host({});
+        std::array<double, kSavedParamCount> values = StartValues();
+        values[kSavedParamCount - 1] = 1.0; // Bypass
+        CHECK(LoadState(*host.processor, MakeState(values, g_path)) == kResultOk);
+        host.Run(4800, 64);
+        CHECK(Peak(host.left) == 0.0f); // opens bypassed, without a fade-out
+        MemoryStream stream;
+        CHECK(host.processor->getState(&stream) == kResultOk);
+        stream.seek(0, IBStream::kIBSeekSet, nullptr);
+        SavedState saved;
+        CHECK(ReadSavedState(&stream, saved) && saved.values[kSavedParamCount - 1] == 1.0);
+        // A version 1 state: 16 values.
+        MemoryStream v1;
+        IBStreamer out(&v1, kLittleEndian);
+        CHECK(out.writeInt32(1));
+        const std::array<double, kSavedParamCount> start = StartValues();
+        for(int i = 0; i < kSavedParamCountV1; ++i)
+            CHECK(out.writeDouble(start[static_cast<std::size_t>(i)]));
+        CHECK(out.writeInt32(static_cast<int32>(g_path.size())));
+        CHECK(out.writeRaw(g_path.data(), static_cast<int32>(g_path.size())) == static_cast<TSize>(g_path.size()));
+        v1.seek(0, IBStream::kIBSeekSet, nullptr);
+        CHECK(host.processor->setState(&v1) == kResultOk);
+        host.Clear();
+        host.Run(4800, 64);
+        CHECK(Peak(host.left) > 0.01f); // not bypassed
+    }
+    std::printf("stop and bypass: faded out in 5 ms, the engine rests and goes on where it stopped, "
+                "faded in; Bypass saved (state 2), version 1 still read\n");
+}
+
+// The map takes the mouse (0.1.8): a click or drag sets START to that place in the
+// file, the wheel steps SPRAY; without a file a click does nothing.
+void TestMapEdits() {
+    auto map = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 120));
+    std::vector<std::string> calls;
+    MapView::Edits edits;
+    edits.start_begin = [&] { calls.push_back("begin"); };
+    edits.start = [&](double share) { char t[32]; std::snprintf(t, sizeof t, "start %.3f", share); calls.push_back(t); };
+    edits.start_end = [&] { calls.push_back("end"); };
+    edits.spray = [&](double step) { char t[32]; std::snprintf(t, sizeof t, "spray %+.3f", step); calls.push_back(t); };
+    map->SetEdits(std::move(edits));
+    CHECK(!map->PressAt(420) && calls.empty()); // no file yet
+    EngineDisplay display;
+    display.sequence = 1;
+    display.frames = 48000;
+    display.loop_length = 48000;
+    map->Show(display, nullptr);
+    CHECK(map->PressAt(420));
+    map->DragTo(-30);
+    map->DragTo(2000);
+    map->DragTo(210);
+    map->Release();
+    map->Release(); // a second release does nothing
+    CHECK(map->Wheel(1.0, false) && map->Wheel(-3.0, true) && !map->Wheel(0.0, false));
+    const std::vector<std::string> expected = {"begin", "start 0.500", "start 0.000", "start 1.000", "start 0.250",
+                                               "end", "spray +0.025", "spray -0.005"};
+    CHECK(calls == expected);
+    std::printf("map edits: a click or drag places START in the file (an edit with begin and end), "
+                "the wheel steps SPRAY (finer with Shift); nothing without a file\n");
+}
+
+// The WINDOW symbol (0.1.8) draws the core's mixed window: Rectangle flat at the top,
+// Bartlett a triangle, Gaussian highest in the middle.
+void TestWindowSymbol() {
+    CHECK(WindowShapeView::Sample(1.0f, 0.1f) == 1.0f && WindowShapeView::Sample(1.0f, 0.9f) == 1.0f);
+    CHECK(std::fabs(WindowShapeView::Sample(0.5f, 0.25f) - 0.5f) < 0.02f);
+    CHECK(WindowShapeView::Sample(0.0f, 0.5f) > 0.95f && WindowShapeView::Sample(0.0f, 0.05f) < 0.2f);
+    std::printf("window symbol: the core's shapes, mixed as the core mixes them\n");
+}
 
 void TestViewLayout() {
     constexpr double width = 620.0, height = 68.0;
@@ -1195,24 +1424,29 @@ void TestFileChangeMarksProject() {
     // No window was ever opened: nothing polls.
     CHECK(controller->LoadFile(g_path));
     settle();
-    CHECK(reported == 1 && controller->File().path == g_path && handler.dirty == 1);
+    // The contract since 0.1.7 (MS-R26, MS-R27): every load marks the project, once
+    // on each way that reports it (parameter 199, status), so once or twice; nothing
+    // else marks it.
+    CHECK(reported == 1 && controller->File().path == g_path && handler.dirty >= 1 && handler.dirty <= 2);
+    int marked = handler.dirty;
     for(int i = 0; i < 5; ++i) {
         CHECK(controller->RequestFileStatus());
         block();
     }
-    CHECK(handler.dirty == 1);
+    CHECK(handler.dirty == marked);
     const std::string bad = Utf8(g_dir / "bad.wav");
     CHECK(controller->LoadFile(bad));
     settle();
-    CHECK(handler.dirty == 1 && reported == 1);
-    // Two files finished before the host delivers anything: two changes reported.
+    CHECK(handler.dirty == marked && reported == 1);
+    // Two files finished before the host delivers anything: marked again.
     CHECK(controller->LoadFile(g_path_mono));
     CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
     CHECK(controller->LoadFile(g_path));
     CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
     block();
     block();
-    CHECK(handler.dirty == 3);
+    CHECK(handler.dirty > marked);
+    marked = handler.dirty;
     // MS-R12: the status reply does not come back (the processor's way to the
     // controller is cut); parameter 199 alone marks the project.
     CHECK(processor_point->disconnect(controller_point) == kResultOk);
@@ -1220,11 +1454,13 @@ void TestFileChangeMarksProject() {
     CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
     block();
     block();
-    CHECK(handler.dirty == 4);
+    CHECK(handler.dirty == marked + 1);
+    marked = handler.dirty;
     CHECK(processor_point->connect(controller_point) == kResultOk);
-    CHECK(controller->RequestFileStatus()); // the late status counts nothing twice
+    CHECK(controller->RequestFileStatus()); // the late status may mark the same load again
     block();
-    CHECK(handler.dirty == 4);
+    CHECK(handler.dirty <= marked + 1);
+    marked = handler.dirty;
     // A project brings its own file: restoring is no change.
     const std::vector<char> project = MakeState(StartValues(), g_path_mono);
     CHECK(LoadState(*host.processor, project) == kResultOk);
@@ -1235,7 +1471,7 @@ void TestFileChangeMarksProject() {
     CHECK(controller->setComponentState(&stream) == kResultOk);
     block();
     block();
-    CHECK(controller->File().path == g_path_mono && handler.dirty == 4);
+    CHECK(controller->File().path == g_path_mono && handler.dirty == marked);
     CHECK(processor_point->disconnect(controller_point) == kResultOk);
     CHECK(controller_point->disconnect(processor_point) == kResultOk);
     CHECK(controller->terminate() == kResultOk);
@@ -1257,11 +1493,12 @@ void PassSampleChanges(PluginHost& host, Controller& controller) {
     }
 }
 
-// MS-R17, MS-R20: a host that keeps the controller and gives it new processors, in
-// every order of connect, parameter 199 and status: the status first; parameter 199
-// first with the status late (and its first value equal to the old processor's last);
-// a reconnect to the same processor; no status at all. Every file from the window
-// marks the project once, none twice; the old processor's display is let go.
+// MS-R17, MS-R20, MS-R26, MS-R27: a host that keeps the controller and gives it new
+// processors, in every order of connect, parameter 199 and status: the status first;
+// parameter 199 first with the status late; a value of the old processor delivered
+// after the connect (MS-R26); a reconnect to the same processor; no status at all.
+// Every load marks the project (once or twice, once on each way), nothing else does;
+// the old processor's display is let go.
 void TestNewProcessorSameController() {
     IPtr<HostApplication> app = owned(new HostApplication());
     IPtr<Controller> controller = owned(new Controller());
@@ -1269,29 +1506,60 @@ void TestNewProcessorSameController() {
     CoalescingHandler handler;
     CHECK(controller->setComponentHandler(&handler) == kResultOk);
     auto* controller_point = static_cast<IConnectionPoint*>(controller.get());
-    int expected = 0;
-    auto expect = [&](const char* when) {
-        if(handler.dirty != expected)
-            std::printf("FAIL %s: %d setDirty, %d expected\n", when, handler.dirty, expected);
-        CHECK(handler.dirty == expected);
+    int before = 0;
+    auto marked = [&](const char* when) {
+        if(handler.dirty <= before || handler.dirty > before + 2)
+            std::printf("FAIL %s: %d setDirty after %d\n", when, handler.dirty, before);
+        CHECK(handler.dirty > before && handler.dirty <= before + 2);
+        before = handler.dirty;
     };
-    auto load = [&](PluginHost& host, const std::string& path) {
+    auto unmarked = [&](const char* when) {
+        if(handler.dirty != before)
+            std::printf("FAIL %s: %d setDirty, %d expected\n", when, handler.dirty, before);
+        CHECK(handler.dirty == before);
+    };
+    // The values of parameter 199 a processor put out; passed to the controller now or,
+    // as a host may do, later.
+    auto outputs = [&](PluginHost& host) {
+        std::vector<double> values;
+        ParameterChanges& out = host.OutChanges();
+        for(int32 i = 0; i < out.getParameterCount(); ++i) {
+            IParamValueQueue* queue = out.getParameterData(i);
+            int32 offset = 0;
+            ParamValue value = 0.0;
+            if(queue && queue->getParameterId() == kParamSampleChanges
+               && queue->getPoint(queue->getPointCount() - 1, offset, value) == kResultOk)
+                values.push_back(value);
+        }
+        return values;
+    };
+    auto load = [&](PluginHost& host, const std::string& path, std::vector<double>* held = nullptr) {
         CHECK(controller->LoadFile(path));
         CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
         for(int i = 0; i < 2; ++i) {
             host.Process(256);
-            PassSampleChanges(host, *controller);
+            for(const double value : outputs(host)) {
+                if(held)
+                    held->push_back(value);
+                else
+                    controller->setParamNormalized(kParamSampleChanges, value);
+            }
         }
     };
+    std::vector<double> late; // A's value, held back by the host until after the connect
     {
-        // A: status first. One load, and a waveform in the controller.
+        // A: status first. One load; the host holds its value of parameter 199 back (A's
+        // count 1, the same count B's first load will have: Codex' case in MS-R26), the
+        // status marks it.
         PluginHost a({});
         auto* a_point = static_cast<IConnectionPoint*>(a.processor.get());
         CHECK(a_point->connect(controller_point) == kResultOk);
         CHECK(controller_point->connect(a_point) == kResultOk);
-        load(a, g_path);
-        ++expected;
-        expect("A, first load");
+        unmarked("A, connected");
+        load(a, g_path, &late);
+        CHECK(!late.empty());
+        CHECK(controller->RequestFileStatus());
+        marked("A, first load, by its status");
         CHECK(controller->RequestDisplay());
         a.Process(256);
         CHECK(controller->RequestDisplay());
@@ -1302,33 +1570,35 @@ void TestNewProcessorSameController() {
     PluginHost b({});
     auto* b_point = static_cast<IConnectionPoint*>(b.processor.get());
     {
-        // B: parameter 199 first, the status late (Codex' case in MS-R20). Its first
-        // value, 1, equals A's last.
+        // B: parameter 199 first, the status late. Before B loads anything, the host
+        // delivers A's held value (MS-R26): it may mark, but must hide nothing.
         CHECK(controller_point->connect(b_point) == kResultOk); // no way back yet
         CHECK(!controller->Wave() && controller->Display().frames == 0);
+        for(const double value : late)
+            controller->setParamNormalized(kParamSampleChanges, value);
+        before = handler.dirty;
         load(b, g_path_mono);
-        ++expected;
-        expect("B, first load before its status");
+        marked("B, first load after A's late value");
         load(b, g_path);
-        ++expected;
-        expect("B, second load before its status");
+        marked("B, second load before its status");
         CHECK(b_point->connect(controller_point) == kResultOk);
+        CHECK(controller->RequestFileStatus()); // B's first status: may mark its loads again
+        CHECK(handler.dirty <= before + 1);
+        before = handler.dirty;
         CHECK(controller->RequestFileStatus());
-        expect("B, its first status");
+        unmarked("B, a second status");
         load(b, g_path_mono);
-        ++expected;
-        expect("B, a load after its status");
+        marked("B, a load after its status");
     }
     {
         // B again: the controller reconnects to the same processor.
         CHECK(controller_point->disconnect(b_point) == kResultOk);
         CHECK(controller_point->connect(b_point) == kResultOk);
-        expect("B, reconnected");
+        unmarked("B, reconnected");
         load(b, g_path);
-        ++expected;
-        expect("B, a load after the reconnect");
+        marked("B, a load after the reconnect");
         CHECK(controller->RequestFileStatus());
-        expect("B, status after the reconnect");
+        unmarked("B, status after the reconnect");
         CHECK(b_point->disconnect(controller_point) == kResultOk);
         CHECK(controller_point->disconnect(b_point) == kResultOk);
     }
@@ -1339,14 +1609,143 @@ void TestNewProcessorSameController() {
         CHECK(controller_point->connect(c_point) == kResultOk);
         for(int i = 0; i < 2; ++i) {
             load(c, i ? g_path : g_path_mono);
-            ++expected;
-            expect("C, parameter 199 alone");
+            marked("C, parameter 199 alone");
         }
         CHECK(controller_point->disconnect(c_point) == kResultOk);
     }
     CHECK(controller->terminate() == kResultOk);
-    std::printf("new processor, same controller: each load marks the project once, with the "
-                "status first, late, after a reconnect and never; the old display is let go\n");
+    std::printf("new processor, same controller: every load marks the project, also after a late "
+                "value of the old processor; with the status first, late, after a reconnect and "
+                "never; nothing else marks it; the old display is let go\n");
+}
+
+// MS-R28, MS-R30, MS-R31: requests of an older connection that reach the processor
+// late are refused before they change anything, also before the new connection has
+// sent anything, and across a project load; a late key release cannot end a note of
+// the newer connection.
+IPtr<IMessage> HeldMessage(const char* id, int64 generation) {
+    IPtr<IMessage> message = owned(new HostMessage());
+    message->setMessageID(id);
+    message->getAttributes()->setInt(kAttrGeneration, generation);
+    message->getAttributes()->setInt(kAttrIssued, static_cast<int64>(std::chrono::steady_clock::now().time_since_epoch().count()));
+    return message;
+}
+
+void TestLateRequest() {
+    IPtr<HostApplication> app = owned(new HostApplication());
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(app) == kResultOk);
+    auto* controller_point = static_cast<IConnectionPoint*>(controller.get());
+    PluginHost host({});
+    auto* processor_point = static_cast<IConnectionPoint*>(host.processor.get());
+    CHECK(processor_point->connect(controller_point) == kResultOk);
+    CHECK(controller_point->connect(processor_point) == kResultOk);
+    // 1. A load request the host holds back; the controller reconnects and loads
+    //    another file: the late request is refused (newer generation heard).
+    IPtr<IMessage> held = HeldMessage(kLoadMessageId, controller->Generation());
+    held->getAttributes()->setBinary(kAttrPath, g_path.data(), static_cast<uint32>(g_path.size()));
+    CHECK(controller_point->disconnect(processor_point) == kResultOk);
+    CHECK(controller_point->connect(processor_point) == kResultOk);
+    CHECK(controller->LoadFile(g_path_mono));
+    CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
+    host.Run(512, 256);
+    CHECK(host.processor->Loader().SoundPath() == g_path_mono);
+    CHECK(host.processor->notify(held) == kResultFalse);
+    CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
+    CHECK(host.processor->Loader().SoundPath() == g_path_mono);
+    // 2. Codex' case in MS-R30: a held load; both ways disconnected and connected
+    //    again, nothing of the new connection has reached the processor yet; the host
+    //    restores a project with another file. The late load is refused; the project's
+    //    file stays and is what getState saves.
+    IPtr<IMessage> held2 = HeldMessage(kLoadMessageId, controller->Generation());
+    held2->getAttributes()->setBinary(kAttrPath, g_path.data(), static_cast<uint32>(g_path.size()));
+    CHECK(processor_point->disconnect(controller_point) == kResultOk);
+    CHECK(controller_point->disconnect(processor_point) == kResultOk);
+    CHECK(processor_point->connect(controller_point) == kResultOk);
+    CHECK(LoadState(*host.processor, MakeState(StartValues(), g_path_mono)) == kResultOk);
+    host.Run(512, 256);
+    CHECK(host.processor->notify(held2) == kResultFalse);
+    CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
+    host.Run(512, 256);
+    CHECK(host.processor->Loader().SoundPath() == g_path_mono);
+    // 3. Without a disconnect: a load made before a project load is overtaken by it;
+    //    one made after it is taken.
+    CHECK(controller_point->connect(processor_point) == kResultOk);
+    IPtr<IMessage> before = HeldMessage(kLoadMessageId, controller->Generation());
+    before->getAttributes()->setBinary(kAttrPath, g_path.data(), static_cast<uint32>(g_path.size()));
+    CHECK(LoadState(*host.processor, MakeState(StartValues(), g_path_mono)) == kResultOk);
+    CHECK(host.processor->notify(before) == kResultFalse);
+    CHECK(controller->LoadFile(g_path));
+    CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
+    host.Run(512, 256);
+    CHECK(host.processor->Loader().SoundPath() == g_path);
+    // 4. MS-R31: key 72 held by the old connection; its release is held back. After the
+    //    disconnect (which releases the key) and a reconnect, key 72 is struck again.
+    //    The late release is refused and the new note sounds on.
+    CHECK(controller->PlayNote(72));
+    host.Run(512, 256);
+    IPtr<IMessage> release = HeldMessage(kNoteMessageId, controller->Generation());
+    release->getAttributes()->setInt(kNoteMessageNote, 72);
+    release->getAttributes()->setInt(kNoteMessageVelocity, 0);
+    CHECK(processor_point->disconnect(controller_point) == kResultOk);
+    CHECK(controller_point->disconnect(processor_point) == kResultOk);
+    host.Run(512, 256);
+    const float released = host.processor->Engine().EffectivePitch();
+    CHECK(processor_point->connect(controller_point) == kResultOk);
+    CHECK(controller_point->connect(processor_point) == kResultOk);
+    CHECK(controller->PlayNote(72));
+    host.Run(512, 256);
+    const float held_pitch = host.processor->Engine().EffectivePitch();
+    CHECK(held_pitch > released * 1.5f); // an octave up while key 72 is held
+    CHECK(host.processor->notify(release) == kResultFalse);
+    host.Run(512, 256);
+    CHECK(host.processor->Engine().EffectivePitch() > released * 1.5f); // still the new note
+    CHECK(controller->ReleaseNote(72));
+    host.Run(512, 256);
+    // A second controller instance takes a newer generation.
+    IPtr<Controller> second = owned(new Controller());
+    CHECK(second->initialize(app) == kResultOk);
+    CHECK(second->Generation() > controller->Generation());
+    CHECK(second->terminate() == kResultOk);
+    CHECK(processor_point->disconnect(controller_point) == kResultOk);
+    CHECK(controller_point->disconnect(processor_point) == kResultOk);
+    CHECK(controller->terminate() == kResultOk);
+    std::printf("late requests: refused after a newer generation, after a disconnect before the new "
+                "connection said anything, and before a project load; a late key release cannot "
+                "end a newer note; a new controller takes a newer generation\n");
+}
+
+// MS-R32: the controller goes from processor A to B and back to A. A's status, with
+// no new file since, marks nothing.
+void TestReturnToProcessor() {
+    IPtr<HostApplication> app = owned(new HostApplication());
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(app) == kResultOk);
+    CoalescingHandler handler;
+    CHECK(controller->setComponentHandler(&handler) == kResultOk);
+    auto* controller_point = static_cast<IConnectionPoint*>(controller.get());
+    PluginHost a({}), b({});
+    auto* a_point = static_cast<IConnectionPoint*>(a.processor.get());
+    auto* b_point = static_cast<IConnectionPoint*>(b.processor.get());
+    auto attach = [&](IConnectionPoint* p) { CHECK(p->connect(controller_point) == kResultOk); CHECK(controller_point->connect(p) == kResultOk); };
+    auto detach = [&](IConnectionPoint* p) { CHECK(p->disconnect(controller_point) == kResultOk); CHECK(controller_point->disconnect(p) == kResultOk); };
+    attach(a_point);
+    CHECK(controller->LoadFile(g_path));
+    CHECK(WaitFor([&] { return a.processor->Loader().Idle(); }));
+    a.Run(512, 256);
+    CHECK(controller->RequestFileStatus());
+    const int after_load = handler.dirty;
+    CHECK(after_load >= 1);
+    detach(a_point);
+    attach(b_point);
+    CHECK(handler.dirty == after_load);
+    detach(b_point);
+    attach(a_point); // its status: still one file, nothing new
+    CHECK(controller->RequestFileStatus());
+    CHECK(handler.dirty == after_load);
+    detach(a_point);
+    CHECK(controller->terminate() == kResultOk);
+    std::printf("return to a processor: A -> B -> A marks nothing without a new file\n");
 }
 
 // MS-R21: display replies on their way when the connection changes, or overtaken by
@@ -1618,6 +2017,7 @@ void TestNoExceptionLeavesHostCalls() {
     IPtr<IMessage> load = owned(new HostMessage());
     load->setMessageID(kLoadMessageId);
     load->getAttributes()->setBinary(kAttrPath, g_path.data(), static_cast<uint32>(g_path.size()));
+    load->getAttributes()->setInt(kAttrGeneration, controller->Generation());
     // The display (0.1.4): a request that the processor answers with a frame and the
     // overview of the file playing (the controller claims to hold none), and a reply
     // as the controller receives it.
@@ -1625,6 +2025,7 @@ void TestNoExceptionLeavesHostCalls() {
     host.Run(256, 256);
     IPtr<IMessage> display_request = owned(new HostMessage());
     display_request->setMessageID(kDisplayRequestId);
+    display_request->getAttributes()->setInt(kAttrGeneration, controller->Generation());
     display_request->getAttributes()->setInt(kAttrHaveWave, 0);
     CHECK(host.processor->notify(display_request) == kResultOk);
     host.Run(256, 256);
@@ -1800,6 +2201,11 @@ int main() {
     TestBuses();
     TestController();
     TestViewLayout();
+    TestFileDrop();
+    TestKeyboardLatch();
+    TestWindowSymbol();
+    TestMapEdits();
+    TestStopAndBypass();
     TestState();
     TestExportStart();
     TestMessagesAndKeyboard();
@@ -1812,6 +2218,8 @@ int main() {
     TestNoExceptionLeavesHostCalls();
     TestNewProcessorSameController();
     TestLateDisplayReply();
+    TestLateRequest();
+    TestReturnToProcessor();
     TestProjectWithoutMemory();
     TestActivation();
     TestTwoInstances();

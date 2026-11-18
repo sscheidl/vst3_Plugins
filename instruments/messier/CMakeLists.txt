@@ -10,7 +10,7 @@
 #
 # Its own version; moduleinfo.json takes it from here. Keep it equal to
 # FULL_VERSION_STR in source/version.h and to components.json.
-project(Messier VERSION 0.1.6 LANGUAGES CXX)
+project(Messier VERSION 0.1.9 LANGUAGES CXX)
 
 # The SDK compiles everything with /fp:fast. The DSP, the adapter and their tests
 # use /fp:precise: the bit-exact comparison with the reference needs IEEE semantics.
@@ -72,6 +72,8 @@ add_library(messier_shell STATIC
     source/file_loader.cpp
     source/file_loader.h
     source/latest_value.h
+    source/file_drop.cpp
+    source/file_drop.h
     source/map_view.cpp
     source/map_view.h
     source/parameter_state.h
@@ -96,6 +98,8 @@ target_compile_options(messier_shell PRIVATE ${MESSIER_FP} /W4 /permissive-)
 target_compile_definitions(messier_shell PUBLIC NOMINMAX)
 target_link_libraries(messier_shell PUBLIC
     messier_adapter messier_engine sdk vstgui_support)
+# The window draws the core's own grain windows as the WINDOW symbol (since 0.1.8).
+target_link_libraries(messier_shell PRIVATE messier_core)
 set_target_properties(messier_shell PROPERTIES FOLDER "Messier")
 
 smtg_add_vst3plugin(Messier

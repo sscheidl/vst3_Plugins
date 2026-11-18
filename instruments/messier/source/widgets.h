@@ -21,6 +21,17 @@ class KeyboardView : public VSTGUI::CView {
 
     // Lets go of the key that is held, if any: before the view goes away.
     void ReleaseHeld();
+    // Latch (since 0.1.8, the user's wish): a struck key stays held after the mouse
+    // is let go, so the pitch stays changed. Clicking another key moves the hold
+    // there, clicking the held key again lets it go, and so does switching latch off.
+    void SetLatch(bool on);
+    bool Latch() const { return latch_; }
+    int Held() const { return pressed_; } // the held note, transposed; -1 for none
+    // What the mouse events do, by note (transposed, -1 off the keys); public for tests,
+    // as VSTGUI's events need its platform.
+    void MouseDownOn(int note);
+    void MouseMoveTo(int note);
+    void MouseUp();
     // Moves the keys by whole octaves (see ClampKeyboardTranspose). A key
     // held at that moment is let go first, at its old pitch.
     void SetTranspose(int semitones);
@@ -39,8 +50,24 @@ class KeyboardView : public VSTGUI::CView {
     std::function<void(int)> strike_, release_;
     VSTGUI::SharedPointer<VSTGUI::CFontDesc> label_font_;
     bool dragging_ = false;
+    bool latch_ = false;
     int pressed_ = -1; // the note of the held key, transposed; -1 for none
     int transpose_ = 0;
+};
+
+// The WINDOW knob's value as a symbol (since 0.1.8): the grain window the core
+// mixes from its seven shapes for this pot position, drawn as a small curve. The
+// shapes are the core's own (BuildWindows, WinMix).
+class WindowShapeView : public VSTGUI::CView {
+  public:
+    explicit WindowShapeView(const VSTGUI::CRect& size) : CView(size) { setMouseEnabled(false); }
+    void SetValue(float pot);
+    void draw(VSTGUI::CDrawContext* context) override;
+    // For tests: the curve's height (0..1) at a share of its length.
+    static float Sample(float pot, float share);
+
+  private:
+    float pot_ = 0.0f;
 };
 
 // A small switch drawn as a rounded label: filled when on, outlined when off.

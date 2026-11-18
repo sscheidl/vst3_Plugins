@@ -61,6 +61,7 @@ class ParameterState {
                 saved[static_cast<std::size_t>(i)];
         base_[Index(kParamPitchBend)] = kDefaultPitchBend;
         base_[Index(kParamReset)] = 0.0; // a button, never held by a project
+        base_[Index(kParamStop)] = 0.0;  // a project always opens playing
         ++generation_;
         Loaded loaded;
         loaded.values = base_;

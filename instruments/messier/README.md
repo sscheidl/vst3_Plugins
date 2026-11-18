@@ -9,12 +9,12 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 0.1.6, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 0.1.9, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.1.6:** builds, passes Steinberg's validator, tested automatically (bit for
+**Status 0.1.9:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
@@ -25,7 +25,11 @@ fixes them. 0.1.4 adds the data path of the window and a provisional map
 ([report](docs/BUILD_REPORT_0.1.4.md)). Codex' check of 0.1.3 found four more
 ([check](docs/CODEX_REVIEW_0.1.3.md), [fixes](docs/CODEX_REVIEW_0.1.3_UMSETZUNG.md)); 0.1.5
 fixes them. Its check of 0.1.5 six more ([check](docs/CODEX_REVIEW_0.1.5.md),
-[report](docs/BUILD_REPORT_0.1.6.md)); 0.1.6 fixes them, Codex' next check is open. Not tried in a DAW, not listened to. The [DAW test list](docs/DAW_TEST_0.1.0.md) is
+[report](docs/BUILD_REPORT_0.1.6.md)); 0.1.6 fixes them. Its check of 0.1.6 four more
+([check](docs/CODEX_REVIEW_0.1.6.md), [report](docs/BUILD_REPORT_0.1.7.md)); 0.1.7 fixes
+them. Its check of 0.1.7 four more ([check](docs/CODEX_REVIEW_0.1.7.md),
+[report](docs/BUILD_REPORT_0.1.8.md)); 0.1.8 fixes them and adds drag and drop of WAV
+files, Codex' next check is open. Not tried in a DAW, not listened to. The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
 
 **The window is provisional.** The build order's window (section 8: an Atlas nebula map
@@ -44,29 +48,35 @@ that is already there (see [Sidechain](#sidechain)).
 ## Sound
 
 The eight controls are the pots of the Daisy kit, as values from 0 to 1; the core's
-laws apply, snap bands around the centre included. The host shows the value the law
-makes of the pot; typed text is converted back.
+laws apply, snap bands included. The host shows the value the law makes of the pot;
+typed text is converted back. Two parameters are laid out differently from the module's
+pots (since 0.1.8, the user's decision): Speed has 0x exactly at 12 o'clock, and Pitch
+Random reaches +-12 semitones. The plug-in gives the core the pot position that
+belongs to the value; the core and its laws are unchanged (the comparison with the
+firmware passes with the same pot positions).
 
 | ID | Parameter | Shown | Default | MIDI |
 | --- | --- | --- | --- | --- |
 | 100 | Start | where the loop starts, 0 to 100 % of the file | 0 % | CC 20 |
-| 101 | Speed | playhead speed, -4x to +4x; the centre is +1x | +1x | CC 21 |
+| 101 | Speed | playhead speed, -4x to +4x; 0x at the centre, +1x at about 1 o'clock (the module: +1x at the centre) | +1x | CC 21 |
 | 102 | Size | loop length as a share of the file after Start (the pot squared) | 100 % | CC 22 |
 | 103 | Density | grains per second, 0.125 to 983 (the core's tanh/cubic law) | pot 0.4, 8.8 /s | CC 23 |
 | 104 | Pitch | -3 to +2 octaves; the centre is unchanged | 0 oct | CC 24 |
 | 105 | Overlap | grain length relative to the grain period, 0 to 100 % | 50 % | CC 25 |
 | 106 | Blend | 0 % vocoder only, 100 % grains only, equal-power between | 0 % | CC 26 |
-| 107 | Window | grain shape, seven shapes crossfaded continuously: Gaussian, Blackman-Harris, Ramp Down, Bartlett, Ramp Up, Sinc, Rectangle | Gaussian | CC 27 |
+| 107 | Window | grain shape, seven shapes crossfaded continuously: Gaussian, Blackman-Harris, Ramp Down, Bartlett, Ramp Up, Sinc, Rectangle. The window draws the mixed shape as a small curve; the host shows the nearest shape's name, with "~" between two | Gaussian | CC 27 |
 | 110 | Spray | random grain position, +- share of the file | 0 | - |
 | 112 | Pan Random | random stereo position of the grains | 0 | - |
 | 113 | Displacement | random delay of the grains, up to 10 s | 0 | - |
-| 114 | Pitch Random | random grain pitch, up to +-2 octaves | 0 | - |
+| 114 | Pitch Random | random grain pitch, up to +-12 semitones (the module: +-2 octaves) | 0 | - |
 | 115 | Size Random | random grain length, +- on the squared Overlap | 0 | - |
 | 117 | Mask | probability that a grain stays silent, up to 99 % | 0 | - |
 | 120 | Freeze | the playhead stands still; grains and the vocoder go on (a spectral freeze, not a mute) | off | - |
 | 121 | Reset | playback back to Start, on the rising edge of the value (for automation); the window's RESET button sends its presses directly to the processor and is not recorded as automation. Presses that fall into one 64-sample step of the engine act once; presses while no audio runs are dropped after 0.5 s, also across an activation | - | - |
 | 122 | Volume | behind the core, 0 to 100 %; 100 % leaves the core's output untouched | 100 % | CC 33 |
 | 123 | Pitch Bend | +-2 semitones, from the pitch wheel; not saved | centre | wheel |
+| 130 | Bypass | the host's bypass (VST3 bypass flag): the output fades out in 5 ms, then the engine rests; saved | off | - |
+| 131 | Stop | the STOP button: a pause with the same fade; released, the sound goes on where it stopped; not saved (a song always opens playing) | off | - |
 | 199 | Sample Changes | hidden and read-only: the count of files from the window that became the sound (65536 steps), from which the plug-in tells the host that the project changed; not saved | - | - |
 
 The secondaries are the firmware's SOURCE page under their pot. Speed's and Blend's
@@ -117,8 +127,36 @@ not found, not a valid WAV (with the reason), too large, could not be read, or o
 memory (also then the old file plays on). When Windows cannot open a file stream, the
 standard library gives no reason; that shows as "could not be read (cannot open the
 file)", also if memory was the cause. A file chosen in the window marks the project as
-changed, so that the host offers to save it: at least one `setDirty` for every change the
-host passes on, one per file up to 64 at a time.
+changed, so that the host offers to save it. The processor reports such a file on two
+ways, the hidden parameter 199 and its status; the controller calls `setDirty` once for
+every change of 199 the host passes on and once for every status with more files than the
+last. A file can so be marked twice, which changes nothing for a host; nothing is
+subtracted, so no report can hide another. After the host gives the controller a new
+processor, a late value of the old one can mark the project once more. A limit, for a
+host that passes on parameter 199 but never a status: a late value of an older
+processor equal to a newer one's first value hides that value; the offsets make this
+need thousands of loads in between (see the build report of 0.1.8).
+
+**Drag and drop:** drop a WAV file from the Explorer onto the map or the file line to
+load it, as with LOAD... . Of several files, the first .wav that would load is taken.
+While a drag hovers, Messier reads the WAV's headers (not its audio data): a file it
+cannot play, another kind of file or a missing one is refused at once, with the "not
+allowed" pointer and the reason on the map. After a load from the window, the open
+window asks for the status until that load has finished, and every half second anyway,
+so the file line always follows. The LOAD... dialog opens in the folder of the file
+playing.
+
+**STOP** (in the header): pauses the sound with a 5 ms fade; pressed again, it goes on
+where it stopped. While stopped or bypassed, new notes are not kept for later.
+
+**On the map** (since 0.1.8): a click or drag sets START to that place in the file (an
+edit the host records like a knob turn), the mouse wheel widens or narrows SPRAY (finer
+with Shift).
+
+**LATCH** (next to KEYS): a key struck on the screen keyboard stays held after the mouse
+is let go, so the pitch stays changed. Clicking another key moves the hold there;
+clicking the held key again, switching LATCH off or closing the window lets it go.
+LATCH is not saved with the song.
 
 **Projects** store the file's path (UTF-8), not the audio. Opening a project reads the
 file at once, in the thread that loads the project, so that an export straight after

@@ -28,6 +28,7 @@ struct FileStatus;
 class KeyboardView;
 class MapView;
 class ToggleButton;
+class WindowShapeView;
 
 // The window's timer: how often it asks for the display (and, while a file loads,
 // for the file status). About 33 times a second.
@@ -160,6 +161,10 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // Shows or hides the keyboard, as the KEYS button does. If the host
     // refuses the new window size, nothing changes.
     void SetKeyboardVisible(bool show);
+    void SetLatch(bool on);
+    void SetStop(bool on);
+    // For tests: the screen keyboard while the window is open, else nullptr.
+    KeyboardView* Keyboard() const { return keyboard_view_; }
     bool KeyboardVisible() const { return settings_.keyboard; }
     // Moves the keyboard by octaves, as the octave keys do; saved with the
     // project like the window size.
@@ -262,6 +267,15 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     VSTGUI::CTextLabel* file_name_ = nullptr;
     VSTGUI::CTextLabel* file_info_ = nullptr;
     MapView* map_view_ = nullptr;
+    // Since 0.1.8: the file line as a drop zone for WAV files (it carries the file
+    // name's tooltip, as the labels take no mouse); owned by the frame.
+    VSTGUI::CView* file_zone_ = nullptr;
+    // Since 0.1.8: the WINDOW knob's value as a curve instead of a text; owned by the frame.
+    WindowShapeView* window_shape_ = nullptr;
+    // Since 0.1.8: LATCH for the screen keyboard. Not saved; a window opens unlatched.
+    ToggleButton* latch_button_ = nullptr;
+    ToggleButton* stop_button_ = nullptr; // since 0.1.8
+    bool latch_ = false;
     EngineDisplay shown_display_{};             // the newest display, also while closed
     std::shared_ptr<const WaveOverview> shown_wave_;
     std::string file_name_text_, file_info_text_, file_tooltip_;

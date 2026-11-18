@@ -62,6 +62,11 @@ WavResult DecodeWav(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_
 
 // Opens and decodes the file at a UTF-8 path.
 WavResult ReadWavFile(const std::string& utf8_path, std::uint64_t max_pcm_bytes = kMaxPcmBytes) noexcept;
+// Since 0.1.8: checks the file at a UTF-8 path as ReadWavFile does (headers, format,
+// channels, rate, alignment, length, size limit) without reading the audio data, for
+// a drag over the window. kNone means it would load as far as its headers tell; file
+// stays null. A read error inside the audio data shows only when it is loaded.
+WavResult ProbeWavFile(const std::string& utf8_path, std::uint64_t max_pcm_bytes = kMaxPcmBytes) noexcept;
 
 const char* WavErrorText(WavError error);
 

@@ -119,7 +119,7 @@ EngineSettings SettingsFrom(const Values& values) {
         Control control;
         if(ControlOf(kParamIds[static_cast<std::size_t>(i)], control))
             settings.control[static_cast<unsigned>(control)] =
-                static_cast<float>(Clamp01(values[static_cast<std::size_t>(i)]));
+                PotOf(kParamIds[static_cast<std::size_t>(i)], values[static_cast<std::size_t>(i)]);
     }
     settings.freeze = IsOn(values[static_cast<std::size_t>(Index(kParamFreeze))]);
     settings.bend = static_cast<unsigned>(PitchBendRaw(values[static_cast<std::size_t>(Index(kParamPitchBend))]));

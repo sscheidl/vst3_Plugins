@@ -52,9 +52,19 @@ std::uint64_t MakeInstanceId(const void* address) noexcept {
     return x ? x : 1;
 }
 
+// MS-R33: two processors of one process show the same value of parameter 199 only if
+// the older one's count exceeds the newer one's by 4099 * m, modulo 65535, where m says
+// how many processors later the newer one was made: for the next processor's first
+// load, the one before would need 4100 loads. A random start keeps processes apart.
+std::uint64_t MakeSampleOffset() noexcept {
+    static const std::uint64_t start = MakeInstanceId(&start);
+    static std::atomic<std::uint64_t> made{0};
+    return (start + 4099u * made.fetch_add(1, std::memory_order_relaxed)) % kSampleChangesMask;
+}
+
 } // namespace
 
-Processor::Processor() : instance_id_(MakeInstanceId(this)) {
+Processor::Processor() : instance_id_(MakeInstanceId(this)), sample_offset_(MakeSampleOffset()) {
     setControllerClass(kControllerUID);
 }
 
@@ -132,6 +142,7 @@ tresult PLUGIN_API Processor::setupProcessing(ProcessSetup& setup) {
         return kOutOfMemory;
     }
     latency_.store(static_cast<uint32>(adapter_.LatencySamples()));
+    SetFadeRate(setup.sampleRate);
     return kResultOk;
 }
 
@@ -238,7 +249,15 @@ bool Processor::PrepareAdapter(double rate) noexcept {
     return true;
 }
 
+void Processor::SetFadeRate(double rate) {
+    fade_step_ = rate > 0.0 ? static_cast<float>(1.0 / (0.005 * rate)) : 1.0f / (0.005f * 48000.0f);
+}
+
 void Processor::Restart(const ParameterState::Values& values, const FileData* incoming) {
+    // Bypass and Stop as the values say, without a fade at a new start.
+    bypass_ = IsOn(values[static_cast<std::size_t>(Index(kParamBypass))]);
+    stopped_ = IsOn(values[static_cast<std::size_t>(Index(kParamStop))]);
+    out_gain_ = bypass_ || stopped_ ? 0.0f : 1.0f;
     // MS-R18: a RESET press the adapter has put on a quantum not yet rendered would
     // be dropped by its Reset(); it acts in the first quantum of the new start.
     const bool reset_waiting = adapter_.ControlWaiting(static_cast<int>(kResetControl));
@@ -301,7 +320,7 @@ void Processor::QueueParameter(int32 offset, ParamID id, double value) {
     state_.Write(index, value);
     Control control;
     if(ControlOf(id, control)) {
-        adapter_.AddEvent(offset, ControlEvent(control, static_cast<float>(value)));
+        adapter_.AddEvent(offset, ControlEvent(control, PotOf(id, value)));
         return;
     }
     switch(id) {
@@ -317,6 +336,8 @@ void Processor::QueueParameter(int32 offset, ParamID id, double value) {
         case kParamPitchBend:
             adapter_.AddEvent(offset, BendEvent(static_cast<unsigned>(PitchBendRaw(value))));
             break;
+        case kParamBypass: bypass_ = IsOn(value); break;
+        case kParamStop: stopped_ = IsOn(value); break;
         default: break;
     }
 }
@@ -443,6 +464,8 @@ void Processor::ReadEvents(IEventList& events, int32 num_samples) {
         const int32 offset = std::max(std::clamp<int32>(event.sampleOffset, 0, last), previous);
         previous = offset;
         const float velocity = on ? event.noteOn.velocity : 0.0f;
+        if(on && Resting() && velocity > 0.0f)
+            continue; // paused or bypassed: no new note waits for the end of the pause
         if(!on || !(velocity > 0.0f) || !std::isfinite(velocity)) {
             adapter_.AddEvent(offset, NoteOffEvent(midi_channel, static_cast<unsigned>(pitch)));
             continue;
@@ -470,7 +493,23 @@ void Processor::Render(ProcessData& data) {
     bool audible = false;
     for(int32 done = 0; done < data.numSamples; done += kChunk) {
         const int32 frames = std::min<int32>(kChunk, data.numSamples - done);
-        adapter_.Process(chunk_left_.data(), chunk_right_.data(), frames);
+        // Bypass and Stop (0.1.8): faded out, the engine rests; it goes on where it
+        // stopped. In between, the gain glides; at full gain nothing is touched, so the
+        // sound stays bit for bit the engine's.
+        const float gain_target = bypass_ || stopped_ ? 0.0f : 1.0f;
+        if(gain_target == 0.0f && out_gain_ == 0.0f) {
+            std::fill(chunk_left_.begin(), chunk_left_.begin() + frames, 0.0f);
+            std::fill(chunk_right_.begin(), chunk_right_.begin() + frames, 0.0f);
+        } else {
+            adapter_.Process(chunk_left_.data(), chunk_right_.data(), frames);
+            if(out_gain_ != 1.0f || gain_target != 1.0f)
+                for(int32 i = 0; i < frames; ++i) {
+                    out_gain_ = gain_target > out_gain_ ? std::min(gain_target, out_gain_ + fade_step_)
+                                                        : std::max(gain_target, out_gain_ - fade_step_);
+                    chunk_left_[i] *= out_gain_;
+                    chunk_right_[i] *= out_gain_;
+                }
+        }
         for(int32 channel = 0; channel < channels; ++channel) {
             const float* source =
                 channel == 0 ? chunk_left_.data() : (channel == 1 ? chunk_right_.data() : nullptr);
@@ -501,7 +540,7 @@ void Processor::ReportSampleChanges(IParameterChanges* output) {
     int32 index = 0;
     IParamValueQueue* queue = output->addParameterData(kParamSampleChanges, index);
     int32 point = 0;
-    if(queue && queue->addPoint(0, SampleChangesValue(loads), point) == kResultOk)
+    if(queue && queue->addPoint(0, SampleChangesValue(SampleChangesStep(sample_offset_, loads)), point) == kResultOk)
         reported_user_loads_ = loads; // else again in the next block
 }
 
@@ -583,6 +622,8 @@ tresult Processor::LoadState(IBStream* state) {
     // The sample now, before the values: the audio thread restarts with both
     // (MS-R02). Both carry the same number of this project load.
     const std::uint64_t project = ++project_serial_;
+    // MS-R30: a load request of the window made before this moment is overtaken.
+    project_loaded_at_.store(static_cast<int64>(Clock::now().time_since_epoch().count()), std::memory_order_release);
     std::unique_ptr<FileData> file = loader_.LoadProject(saved.path, project);
     if(!file)
         return kOutOfMemory; // not even an empty file: the old project stays
@@ -593,15 +634,15 @@ tresult Processor::LoadState(IBStream* state) {
     return kResultOk;
 }
 
-void Processor::SendFileStatus() noexcept {
+void Processor::SendFileStatus(int64 generation) noexcept {
     try {
-        SendFileStatusUnchecked();
+        SendFileStatusUnchecked(generation);
     } catch(...) {
         // No memory for the message: the window asks again on its next poll.
     }
 }
 
-void Processor::SendFileStatusUnchecked() {
+void Processor::SendFileStatusUnchecked(int64 generation) {
     IPtr<IMessage> message = owned(allocateMessage());
     if(!message || !message->getAttributes())
         return;
@@ -616,19 +657,19 @@ void Processor::SendFileStatusUnchecked() {
     attributes->setInt(kAttrSerial, status.serial);
     attributes->setInt(kAttrUserLoads, status.user_loads);
     attributes->setInt(kAttrProcessor, static_cast<int64>(instance_id_));
-    attributes->setInt(kAttrGeneration, peer_generation_);
+    attributes->setInt(kAttrGeneration, generation);
     sendMessage(message);
 }
 
-void Processor::SendDisplay(IMessage* request) noexcept {
+void Processor::SendDisplay(IMessage* request, int64 generation) noexcept {
     try {
-        SendDisplayUnchecked(request);
+        SendDisplayUnchecked(request, generation);
     } catch(...) {
         // No memory for the reply: the window asks again on its next tick.
     }
 }
 
-void Processor::SendDisplayUnchecked(IMessage* request) {
+void Processor::SendDisplayUnchecked(IMessage* request, int64 generation) {
     display_wanted_.store(true, std::memory_order_release);
     EngineDisplay newest;
     if(display_.Take(newest))
@@ -641,7 +682,7 @@ void Processor::SendDisplayUnchecked(IMessage* request) {
         return;
     message->setMessageID(kDisplayMessageId);
     IAttributeList* attributes = message->getAttributes();
-    attributes->setInt(kAttrGeneration, peer_generation_);
+    attributes->setInt(kAttrGeneration, generation);
     attributes->setInt(kAttrReply, static_cast<int64>(++display_replies_));
     attributes->setBinary(kAttrFrame, &last_display_, sizeof(EngineDisplay));
     // The overview of the very file the core reads, if the controller lacks it. One
@@ -653,6 +694,25 @@ void Processor::SendDisplayUnchecked(IMessage* request) {
     if(overview)
         attributes->setBinary(kAttrWave, overview.get(), sizeof(WaveOverview));
     sendMessage(message);
+}
+
+tresult PLUGIN_API Processor::disconnect(IConnectionPoint* other) {
+    const tresult result = AudioEffect::disconnect(other);
+    // MS-R30: nothing made before now is taken any more. MS-R31: the keys the old
+    // connection still holds are released here, so that no late release is needed
+    // (and none can end a note of a newer connection).
+    closed_until_ = static_cast<int64>(Clock::now().time_since_epoch().count());
+    for(int note = 0; note < 128 && keyboard_keys_down_count_ > 0; ++note) {
+        const auto key = static_cast<std::size_t>(note);
+        if(!keyboard_keys_down_.test(key))
+            continue;
+        // The queue always keeps room for every release (see notify).
+        if(keyboard_notes_.Push(KeyboardNote{static_cast<std::uint8_t>(note), 0, Clock::now()})) {
+            keyboard_keys_down_.reset(key);
+            --keyboard_keys_down_count_;
+        }
+    }
+    return result;
 }
 
 tresult PLUGIN_API Processor::notify(IMessage* message) {
@@ -673,12 +733,30 @@ tresult Processor::NotifyUnchecked(IMessage* message) {
                      || std::strcmp(id, kNoteMessageId) == 0;
     if(!own)
         return AudioEffect::notify(message);
-    // The controller's connection generation, for the replies (MS-R21).
+    // MS-R21, MS-R28, MS-R30, MS-R31: a request delivered late is refused before it
+    // changes anything (no load, no reset, no note, no reply), when
+    // * it was made before this processor was last disconnected: the old connection is
+    //   closed, whatever arrives from it later (its held keys were released then);
+    // * it is a load made before the last project load: the project overtakes it;
+    // * its connection generation is older than one already heard (generations grow
+    //   across all controllers of the process).
+    // A message without these attributes is not one of this controller's and is
+    // judged by the generation alone.
+    int64 generation = 0, issued = 0;
+    bool has_issued = false;
     if(IAttributeList* attributes = message->getAttributes()) {
-        int64 generation = 0;
-        if(attributes->getInt(kAttrGeneration, generation) == kResultOk)
-            peer_generation_ = generation;
+        if(attributes->getInt(kAttrGeneration, generation) != kResultOk)
+            generation = 0;
+        has_issued = attributes->getInt(kAttrIssued, issued) == kResultOk;
     }
+    if(has_issued && issued <= closed_until_)
+        return kResultFalse;
+    if(has_issued && std::strcmp(id, kLoadMessageId) == 0
+       && issued <= project_loaded_at_.load(std::memory_order_acquire))
+        return kResultFalse;
+    if(generation < latest_generation_)
+        return kResultFalse;
+    latest_generation_ = generation;
     if(std::strcmp(id, kLoadMessageId) == 0) {
         std::string path;
         try {
@@ -691,15 +769,15 @@ tresult Processor::NotifyUnchecked(IMessage* message) {
            || path.size() > static_cast<std::size_t>(kMaxPathBytes) || !IsValidUtf8(path))
             return kInvalidArgument;
         loader_.Request(path);
-        SendFileStatus();
+        SendFileStatus(generation);
         return kResultOk;
     }
     if(std::strcmp(id, kStatusRequestId) == 0) {
-        SendFileStatus();
+        SendFileStatus(generation);
         return kResultOk;
     }
     if(std::strcmp(id, kDisplayRequestId) == 0) {
-        SendDisplay(message);
+        SendDisplay(message, generation);
         return kResultOk;
     }
     if(std::strcmp(id, kResetMessageId) == 0) {

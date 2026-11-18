@@ -1,4 +1,5 @@
 #include "editor.h"
+#include "file_drop.h"
 
 #include "file_loader.h"
 #include "map_view.h"
@@ -146,6 +147,10 @@ void Editor::ForgetViews() {
     file_name_ = nullptr;
     file_info_ = nullptr;
     map_view_ = nullptr;
+    file_zone_ = nullptr;
+    window_shape_ = nullptr;
+    latch_button_ = nullptr;
+    stop_button_ = nullptr;
 }
 
 tresult PLUGIN_API Editor::attached(void* parent, FIDString type) {
@@ -193,11 +198,20 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
 
     Add(MakeLabel(CRect(kMargin, 14, 200, 42), stringPluginName, title_font, kText, kLeftText));
     const CCoord button_left = kWidth - kMargin - kButtonWidth;
-    Add(MakeLabel(CRect(kWidth / 2, 18, button_left - 12, 40),
+    Add(MakeLabel(CRect(kWidth / 2 - 100, 18, button_left - 152, 40),
                   stringCompanyName "  " FULL_VERSION_STR, name_font, kDimText, kRightText));
     keyboard_button_ = Add(new ToggleButton(CRect(button_left, 18, kWidth - kMargin, 40), "KEYS",
                                             settings_.keyboard,
                                             [this](bool on) { SetKeyboardVisible(on); }));
+    latch_button_ = Add(new ToggleButton(CRect(button_left - 70, 18, button_left - 8, 40), "LATCH", latch_,
+                                         [this](bool on) { SetLatch(on); }));
+    latch_button_->setTooltipText("Latch: a struck key stays held; click it again, another key or LATCH to let go");
+    {
+        const bool stopped = controller && IsOn(controller->getParamNormalized(kParamStop));
+        stop_button_ = Add(new ToggleButton(CRect(button_left - 140, 18, button_left - 78, 40), "STOP", stopped,
+                                            [this](bool on) { SetStop(on); }));
+        stop_button_->setTooltipText("Stop: pauses the sound with a short fade; press again to go on where it stopped");
+    }
 
     // The sample: LOAD, its name, its format or what went wrong.
     auto* load = Add(new ToggleButton(CRect(kMargin, kFileTop, kMargin + 72, kFileTop + 22), "LOAD...",
@@ -211,6 +225,59 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
 
     map_view_ = Add(new MapView(CRect(kMargin, kMapTop, kWidth - kMargin, kMapBottom)));
     map_view_->Show(shown_display_, shown_wave_);
+    // Since 0.1.8: on the map a click or drag sets START, the wheel SPRAY, as edits the
+    // host can record (begin, perform, end), as a knob would.
+    {
+        MapView::Edits edits;
+        edits.start_begin = [this] {
+            if(controller)
+                controller->beginEdit(kParamStart);
+        };
+        edits.start = [this](double share) {
+            if(!controller)
+                return;
+            controller->setParamNormalized(kParamStart, share);
+            controller->performEdit(kParamStart, controller->getParamNormalized(kParamStart));
+        };
+        edits.start_end = [this] {
+            if(controller)
+                controller->endEdit(kParamStart);
+        };
+        edits.spray = [this](double step) {
+            if(!controller)
+                return;
+            const double value = std::clamp(controller->getParamNormalized(kParamSpray) + step, 0.0, 1.0);
+            controller->beginEdit(kParamSpray);
+            controller->setParamNormalized(kParamSpray, value);
+            controller->performEdit(kParamSpray, value);
+            controller->endEdit(kParamSpray);
+        };
+        map_view_->SetEdits(std::move(edits));
+    }
+    // Drag and drop (since 0.1.8): a WAV dropped on the file line or the map loads as
+    // with LOAD... . The target outlives no editor: it checks alive_ first.
+    {
+        const std::weak_ptr<bool> alive = alive_;
+        auto drop = makeOwned<FileDropTarget>(
+            [this, alive](FileDropTarget::Hover state, const std::string& reason) {
+                const auto still = alive.lock();
+                if(!still || !*still || !map_view_)
+                    return;
+                map_view_->SetDropState(state == FileDropTarget::Hover::kUsable    ? MapView::DropShown::kUsable
+                                        : state == FileDropTarget::Hover::kRefused ? MapView::DropShown::kRefused
+                                                                                   : MapView::DropShown::kNone,
+                                        reason);
+            },
+            [this, alive](const std::string& path) {
+                const auto still = alive.lock();
+                if(still && *still && callbacks_.load)
+                    callbacks_.load(path);
+            });
+        map_view_->setDropTarget(drop);
+        file_zone_ = Add(new CView(CRect(kMargin + 84, kFileTop, kWidth - kMargin, kInfoTop + 18)));
+        file_zone_->setDropTarget(drop);
+        ApplyFileTexts(); // its tooltip
+    }
 
     keyboard_view_ = Add(new KeyboardView(CRect(kMargin + 40, kKeyboardTop, kWidth - kMargin - 40,
                                             kKeyboardBottom),
@@ -223,6 +290,7 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
                                               callbacks_.release(note);
                                       }));
     keyboard_view_->SetTranspose(settings_.transpose);
+    keyboard_view_->SetLatch(latch_);
     keyboard_view_->setVisible(settings_.keyboard);
     octave_down_ = Add(new ToggleButton(CRect(kMargin, kKeyboardTop + 22, kMargin + 32,
                                           kKeyboardTop + 46),
@@ -263,6 +331,9 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
         knob->setWheelInc(0.01f);
         auto* value = Add(MakeLabel(CRect(left, value_top, left + kColumnWidth, value_top + 18), "",
                                     spec.small ? small_value_font : value_font, kText, kCenterText));
+        if(spec.id == kParamWindow) // the mixed window as a symbol (0.1.8)
+            window_shape_ = Add(new WindowShapeView(CRect(left + (kColumnWidth - 46) / 2, value_top + 2,
+                                                          left + (kColumnWidth + 46) / 2, value_top + 16)));
         knobs_[i] = {spec.id, knob, value};
         const ParamValue normalized = controller ? controller->getParamNormalized(spec.id) : 0.0;
         knob->setValue(static_cast<float>(normalized));
@@ -365,6 +436,24 @@ void Editor::SetKeyboardVisible(bool show) {
         return;
     }
     UserChanged();
+}
+
+void Editor::SetStop(bool on) {
+    if(!controller)
+        return;
+    const ParamValue normalized = on ? 1.0 : 0.0;
+    controller->beginEdit(kParamStop);
+    controller->setParamNormalized(kParamStop, normalized);
+    controller->performEdit(kParamStop, normalized);
+    controller->endEdit(kParamStop);
+}
+
+void Editor::SetLatch(bool on) {
+    latch_ = on;
+    if(keyboard_view_)
+        keyboard_view_->SetLatch(on);
+    if(latch_button_)
+        latch_button_->SetOn(on);
 }
 
 void Editor::SetKeyboardTranspose(int semitones) {
@@ -478,6 +567,8 @@ void PLUGIN_API Editor::close() {
                 knob.knob->endEdit();
     if(keyboard_view_)
         keyboard_view_->ReleaseHeld();
+    if(map_view_)
+        map_view_->Release(); // a START drag still going: its edit ends here (0.1.8)
     ForgetViews();
     if(frame) {
         frame->removeAll(true);
@@ -522,6 +613,13 @@ void Editor::ChooseFile() {
     if(!selector)
         return;
     selector->setTitle("Load a WAV file");
+    // Since 0.1.8: start in the folder of the file playing, also one dropped onto the
+    // window (Windows remembers only what was chosen through the dialog).
+    {
+        const std::size_t slash = file_tooltip_.find_last_of("/\\");
+        if(slash != std::string::npos)
+            selector->setInitialDirectory(file_tooltip_.substr(0, slash).c_str());
+    }
     selector->addFileExtension(CFileExtension("WAVE", "wav"));
     dialog_open_ = true;
     // The dialog may call back after this window has gone: then nothing happens.
@@ -587,6 +685,8 @@ void Editor::ApplyFileTexts() {
         file_name_->setText(file_name_text_.c_str());
         file_name_->setTooltipText(file_tooltip_.c_str());
     }
+    if(file_zone_)
+        file_zone_->setTooltipText(file_tooltip_.c_str());
     if(file_info_) {
         file_info_->setText(file_info_text_.c_str());
         file_info_->setFontColor(file_warning_ ? kWarning : kDimText);
@@ -622,6 +722,11 @@ float Editor::ShownKnobValue(ParamID id) const {
 }
 
 void Editor::ParameterChanged(ParamID id, ParamValue normalized) {
+    if(id == kParamStop) {
+        if(stop_button_)
+            stop_button_->SetOn(IsOn(normalized));
+        return;
+    }
     if(id == kParamFreeze) {
         if(freeze_button_)
             freeze_button_->SetOn(IsOn(normalized));
@@ -654,6 +759,14 @@ void Editor::ShowValue(Knob& knob, ParamValue normalized) {
                 display += " " + units;
             break;
         }
+    }
+    if(knob.id == kParamWindow && window_shape_) {
+        // The curve says it; the name of the nearest shape is the knob's tooltip.
+        window_shape_->SetValue(PotOf(kParamWindow, normalized));
+        knob.value->setText("");
+        if(knob.knob)
+            knob.knob->setTooltipText(display.c_str());
+        return;
     }
     knob.value->setText(display.c_str());
 }

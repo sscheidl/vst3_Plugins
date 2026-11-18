@@ -35,14 +35,20 @@ enum ParamId : std::uint32_t {
     kParamReset = 121,        // a button: 0 to 1 sends playback back to START; not saved
     kParamVolume = 122,
     kParamPitchBend = 123,    // fed by the MIDI pitch wheel; not saved
+    // Since 0.1.8 (the user's DAW test): the host's bypass (VST3 kIsBypass, saved, as
+    // Steinberg asks), and STOP, a pause of the sound (not saved: a song never opens
+    // silent). Both fade the output out in 5 ms; then the engine rests and goes on
+    // where it stopped.
+    kParamBypass = 130,
+    kParamStop = 131,
     // Since 0.1.2 (MS-R09): read-only and hidden, written by the processor whenever a
     // file chosen in the window has become the sound, so that the controller learns of
     // it through the host on its own thread, window open or not. Not saved.
     kParamSampleChanges = 199,
 };
-constexpr int kParamCount = 19;
+constexpr int kParamCount = 21;
 constexpr std::array<std::uint32_t, kParamCount> kParamIds = {
-    100, 101, 102, 103, 104, 105, 106, 107, 110, 112, 113, 114, 115, 117, 120, 121, 122, 123, 199};
+    100, 101, 102, 103, 104, 105, 106, 107, 110, 112, 113, 114, 115, 117, 120, 121, 122, 123, 130, 131, 199};
 
 // The position of a parameter in kParamIds, or -1 for an ID that is not one.
 constexpr int Index(std::uint32_t id) {
@@ -64,10 +70,12 @@ constexpr bool IsSecondary(std::uint32_t id) {
 }
 
 // The parameters a project stores, as indices into kParamIds, in the order of the
-// state: all but Reset and the pitch wheel.
-constexpr int kSavedParamCount = 16;
+// state: all but Reset, the pitch wheel, Stop and the sample changes; Bypass since
+// state version 2.
+constexpr int kSavedParamCount = 17;
 constexpr std::array<int, kSavedParamCount> kSavedIndex = {0, 1, 2,  3,  4,  5,  6,  7,
-                                                           8, 9, 10, 11, 12, 13, 14, 16};
+                                                           8, 9, 10, 11, 12, 13, 14, 16, 18};
+constexpr int kSavedParamCountV1 = 16; // version 1 ends before Bypass
 
 // MIDI controllers the host routes to the parameters, on every channel: those of
 // the firmware (CC 20 to 27 for the pots in order) and 33 for Volume, as in
@@ -79,18 +87,26 @@ constexpr int kMidiCcVolume = 33;
 // at 0, Volume at 100 %.
 constexpr double kDefaultPitchBend = 0.5;
 constexpr std::array<double, kParamCount> kDefaults = {
-    0.0, 0.5, 1.0, 0.4, 0.5, 0.5, 0.0, 0.0, // Start .. Window
+    0.0, 7.0 / 12.0, 1.0, 0.4, 0.5, 0.5, 0.0, 0.0, // Start .. Window (Speed: +1x)
     0.0, 0.0, 0.0, 0.0, 0.0, 0.0,           // secondaries
     0.0,                                    // Freeze off
     0.0,                                    // Reset
     1.0,                                    // Volume
     kDefaultPitchBend,
+    0.0,                                    // Bypass off
+    0.0,                                    // Stop off: playing
     0.0};                                   // sample changes
 
 // The value of kParamSampleChanges for a count of files loaded from the window, and
-// back (MS-R12). 65536 steps: the count survives a host that keeps values as float
-// (24 bits of mantissa), and the controller counts the difference to the last one.
+// back (MS-R12). 65536 steps: the value survives a host that keeps values as float
+// (24 bits of mantissa). Since 0.1.7 (MS-R26) the controller only needs a change of
+// the value; the processor adds its own offset (SampleChangesStep), so that two
+// processors rarely show the same value for their loads, and never 0, the value a
+// controller starts from after a connect.
 constexpr std::uint32_t kSampleChangesMask = 0xFFFF;
+inline std::uint32_t SampleChangesStep(std::uint64_t instance, std::uint32_t loads) {
+    return 1u + static_cast<std::uint32_t>((instance + loads) % kSampleChangesMask);
+}
 inline double SampleChangesValue(std::uint32_t loads) {
     return static_cast<double>(loads & kSampleChangesMask) / kSampleChangesMask;
 }
@@ -135,18 +151,36 @@ inline float Density(float g) {
 }
 } // namespace law
 
-// Speed: -4x .. +4x, the centre at +1x.
-inline double SpeedFactor(double normalized) {
-    return law::Speed(law::KnobSpeed(static_cast<float>(Clamp01(normalized))));
+// --- From the parameter to the pot the core reads (since 0.1.8) ------------
+// Two parameters are laid out differently from the module's pots, at the user's
+// wish of 2026-11-18; the core and its laws are unchanged, only the pot position it
+// is given differs:
+// * Speed: 0x exactly at 12 o'clock (the module has +1x there, 0x at 40 % of the
+//   travel). The parameter's lower half covers the pot's 0..0.4 (-4x .. 0x), the upper
+//   half 0.4..1 (0x .. +4x); +1x lies at 7/12 of the travel.
+// * Pitch Random: +-12 semitones at the top instead of +-2 octaves (half the pot).
+inline float PotOf(std::uint32_t id, double normalized) {
+    const double u = Clamp01(normalized);
+    switch(id) {
+        case kParamSpeed: return static_cast<float>(u <= 0.5 ? u * 0.8 : 0.4 + (u - 0.5) * 1.2);
+        case kParamPitchRandom: return static_cast<float>(u * 0.5);
+        default: return static_cast<float>(u);
+    }
 }
-// The pot position for a factor: the inverse of the knob curve, on the straight
-// part of the law (inside a snap band it lands on the band's centre value).
+
+// Speed: -4x .. +4x, 0x at the centre, +1x at 7/12.
+inline double SpeedFactor(double normalized) {
+    return law::Speed(law::KnobSpeed(PotOf(kParamSpeed, normalized)));
+}
+// The parameter for a factor: the inverse of the pot and knob curves, on the
+// straight part of the law (inside a snap band it lands on the band's centre value).
 inline double SpeedNormalized(double factor) {
     if(!(factor > -4.0))
         return 0.0;
     if(factor >= 4.0)
         return 1.0;
-    return factor <= 1.0 ? (factor + 4.0) / 10.0 : 0.5 + (factor - 1.0) / 6.0;
+    const double pot = factor <= 1.0 ? (factor + 4.0) / 10.0 : 0.5 + (factor - 1.0) / 6.0;
+    return pot <= 0.4 ? pot / 0.8 : 0.5 + (pot - 0.4) / 1.2;
 }
 
 // Pitch: -3 .. +2 octaves, the centre at 0.
@@ -202,8 +236,8 @@ inline double SpraySpan(double normalized) {        // +- share of the file leng
 inline double DisplacementSeconds(double normalized) { // longest random delay
     return 10.0 * SizeShare(normalized);
 }
-inline double PitchRandomOctaves(double normalized) { // +- octaves
-    return 2.0 * Clamp01(normalized);
+inline double PitchRandomSemitones(double normalized) { // +- semitones (since 0.1.8)
+    return 24.0 * static_cast<double>(PotOf(kParamPitchRandom, normalized)); // the core: +- 2 octaves per pot
 }
 inline double SizeRandomSpan(double normalized) {   // +- on the squared Overlap
     return SizeShare(normalized);
@@ -235,7 +269,9 @@ inline double PitchBendNormalized(double semitones) {
 //   Version 1 (0.1.0): int32 version, the normalized values of the saved
 //   parameters (kSavedIndex) as doubles, int32 length of the sample's path in
 //   bytes (0 for none, at most kMaxPathBytes), the path in UTF-8.
-constexpr std::int32_t kStateVersion = 1;
+//   Version 2 (0.1.8): the same with Bypass as a 17th value (kSavedIndex); version 1
+//   is still read, with Bypass off.
+constexpr std::int32_t kStateVersion = 2;
 constexpr std::int32_t kMaxPathBytes = 32768;
 // The controller's own state: version, the editor zoom as a double, the keyboard
 // as one byte (1 for shown), its transposition in semitones as int32.
@@ -270,6 +306,11 @@ constexpr const char* kAttrProcessor = "processor";
 // connection. kAttrReply numbers the display replies of one processor, so that one
 // overtaken by a newer one is not taken.
 constexpr const char* kAttrGeneration = "generation";
+// Since 0.1.8 (MS-R30, MS-R31): when the controller made the message, in ticks of
+// std::chrono::steady_clock (one clock for the whole process). The processor refuses
+// a request made before it was last disconnected, and a load made before its last
+// project load.
+constexpr const char* kAttrIssued = "issued";
 constexpr const char* kAttrReply = "reply";
 // Controller -> processor (since 0.1.2, MS-R08): the window's RESET button was pressed.
 // A message, not an edit of parameter 121: the host may merge a press and a release

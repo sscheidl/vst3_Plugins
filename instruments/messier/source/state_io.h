@@ -82,12 +82,15 @@ inline bool IsValidUtf8(const std::string& text) {
 inline bool ReadSavedState(Steinberg::IBStream* state, SavedState& saved) {
     Steinberg::IBStreamer stream(state, kLittleEndian);
     Steinberg::int32 version = 0;
-    if(!stream.readInt32(version) || version != kStateVersion)
+    if(!stream.readInt32(version) || (version != kStateVersion && version != 1))
         return false;
     SavedState read;
-    for(double& value : read.values)
+    const int count = version == 1 ? kSavedParamCountV1 : kSavedParamCount;
+    for(int i = 0; i < count; ++i) {
+        double& value = read.values[static_cast<std::size_t>(i)];
         if(!stream.readDouble(value) || !std::isfinite(value) || value < 0.0 || value > 1.0)
             return false;
+    }
     Steinberg::int32 length = -1;
     if(!stream.readInt32(length) || length < 0 || length > kMaxPathBytes)
         return false;
@@ -98,7 +101,8 @@ inline bool ReadSavedState(Steinberg::IBStream* state, SavedState& saved) {
     if(!IsValidUtf8(read.path))
         return false;
     for(int i = 0; i < kSavedParamCount; ++i)
-        if(kSavedIndex[static_cast<std::size_t>(i)] == Index(kParamFreeze))
+        if(kSavedIndex[static_cast<std::size_t>(i)] == Index(kParamFreeze)
+           || kSavedIndex[static_cast<std::size_t>(i)] == Index(kParamBypass))
             read.values[static_cast<std::size_t>(i)] = IsOn(read.values[static_cast<std::size_t>(i)]) ? 1.0 : 0.0;
     saved = std::move(read);
     return true;

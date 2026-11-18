@@ -6,6 +6,7 @@
 #include "parameters.h"
 #include "value_text.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -26,8 +27,8 @@ inline const char* UnitOf(std::uint32_t id) {
         case kParamVolume: return "%";
         case kParamSpeed: return "x";
         case kParamDensity: return "/s";
-        case kParamPitch:
-        case kParamPitchRandom: return "oct";
+        case kParamPitch: return "oct";
+        case kParamPitchRandom: return "st";
         case kParamDisplacement: return "s";
         case kParamPitchBend: return "st";
         default: return "";
@@ -81,23 +82,21 @@ inline std::string FormatValue(std::uint32_t id, double normalized) {
         case kParamPanRandom:
         case kParamVolume: return Printed("%.1f", 100.0 * v);
         case kParamWindow: {
-            // On a shape: its name; between two: both and how far along.
+            // Since 0.1.8 short: the name of the nearest shape, with "~" between two
+            // (the window draws the mixed shape itself).
             const double position = detail::WindowPosition(v);
-            const int below = static_cast<int>(position);
-            const double along = position - below;
-            if(below >= kWindowCount - 1 || along < 0.005)
-                return kWindowNames[below < kWindowCount ? below : kWindowCount - 1];
-            if(along > 0.995)
-                return kWindowNames[below + 1];
-            return std::string(kWindowShortNames[below]) + ">" + kWindowShortNames[below + 1] + " "
-                   + Printed("%.0f", 100.0 * along) + "%";
+            const int nearest = static_cast<int>(position + 0.5);
+            const bool on = std::fabs(position - nearest) < 0.005;
+            return (on ? std::string() : std::string("~")) + kWindowNames[nearest < kWindowCount ? nearest : kWindowCount - 1];
         }
         case kParamSpray: return pm + Printed("%.1f", 100.0 * SpraySpan(v));
         case kParamDisplacement: return Printed("%.2f", DisplacementSeconds(v));
-        case kParamPitchRandom: return pm + Printed("%.2f", PitchRandomOctaves(v));
+        case kParamPitchRandom: return pm + Printed("%.1f", PitchRandomSemitones(v));
         case kParamSizeRandom: return pm + Printed("%.1f", 100.0 * SizeRandomSpan(v));
         case kParamMask: return Printed("%.1f", 100.0 * MaskShare(v));
-        case kParamFreeze: return IsOn(v) ? "On" : "Off";
+        case kParamFreeze:
+        case kParamBypass: return IsOn(v) ? "On" : "Off";
+        case kParamStop: return IsOn(v) ? "Stopped" : "Playing";
         case kParamReset: return IsOn(v) ? "Pressed" : "Off";
         case kParamPitchBend: return Printed("%+.2f", PitchBendSemitones(v));
         default: return Printed("%.3f", v);
@@ -113,18 +112,23 @@ inline bool ParseValue(std::uint32_t id, std::string_view text, double& normaliz
     double x = 0.0;
     switch(id) {
         case kParamFreeze:
-        case kParamReset: {
+        case kParamReset:
+        case kParamBypass:
+        case kParamStop: {
             const std::string_view word = StripUnit(text, "");
-            if(EqualsIgnoringCase(word, "on") || word == "1" || EqualsIgnoringCase(word, "pressed"))
+            if(EqualsIgnoringCase(word, "on") || word == "1" || EqualsIgnoringCase(word, "pressed")
+               || EqualsIgnoringCase(word, "stopped"))
                 normalized = 1.0;
-            else if(EqualsIgnoringCase(word, "off") || word == "0")
+            else if(EqualsIgnoringCase(word, "off") || word == "0" || EqualsIgnoringCase(word, "playing"))
                 normalized = 0.0;
             else
                 return false;
             return true;
         }
         case kParamWindow: {
-            const std::string_view name = StripUnit(text, "");
+            std::string_view name = StripUnit(text, "");
+            if(!name.empty() && name.front() == '~')
+                name.remove_prefix(1); // as shown between two shapes: the nearest
             for(int i = 0; i < kWindowCount; ++i)
                 if(EqualsIgnoringCase(name, kWindowNames[i]) || EqualsIgnoringCase(name, kWindowShortNames[i])) {
                     normalized = static_cast<double>(i) / (kWindowCount - 1);
@@ -182,7 +186,7 @@ inline bool ParseValue(std::uint32_t id, std::string_view text, double& normaliz
         case kParamSpray:
         case kParamSizeRandom: normalized = SizeNormalized(x / 100.0); break;
         case kParamDisplacement: normalized = SizeNormalized(x / 10.0); break;
-        case kParamPitchRandom: normalized = Clamp01(x / 2.0); break;
+        case kParamPitchRandom: normalized = Clamp01(x / 12.0); break;
         case kParamMask: normalized = Clamp01(x / 99.0); break;
         case kParamPitchBend: normalized = PitchBendNormalized(x); break;
         default: normalized = Clamp01(x); break;

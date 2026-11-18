@@ -11,10 +11,10 @@ None yet (2026-11-17).
 ## Before starting
 
 * Not before Codex has released a build for the DAW test (0.1.0 was not released;
-  0.1.1 to 0.1.3, 0.1.5 and 0.1.6 fix the findings of five reviews; 0.1.4 adds the
+  0.1.1 to 0.1.3 and 0.1.5 to 0.1.8 fix the findings of seven reviews; 0.1.4 adds the
   window's data path and a provisional map; Codex' next check is open). The window is provisional
   (see the README); judge its handling, not its final look.
-* Install: copy `Messier.vst3` from `out/messier-0.1.6/` into
+* Install: copy `Messier.vst3` from `out/messier-0.1.9/` into
   `C:\Program Files\Common Files\VST3\` (administrator rights). Studio One may need a
   rescan of its plug-ins.
 * Have a few WAV files ready: a 16-bit stereo loop at 48 kHz, a 24-bit file, a 32-bit
@@ -37,13 +37,33 @@ None yet (2026-11-17).
 - [ ] Loading another file while one plays: a short fade, no click, the new file
       starts at Start.
 - [ ] A very long file: the window stays responsive while it loads ("Loading ...").
+- [ ] Drag and drop (0.1.8): drag a WAV from the Explorer onto the map: "Drop WAV to
+      load" appears; dropping loads it as LOAD... does. The same onto the file line.
+      A text file or a folder: the pointer shows "not allowed", nothing loads. Several
+      files with one WAV among them: that WAV loads. Dropping onto a knob does nothing.
+      After a drop the host offers to save the song, and the file line shows the new
+      name (0.1.9). An unplayable WAV (8 bit, more than two channels, compressed, too
+      large) is refused already while it hovers: "not allowed" pointer and the reason on
+      the map (0.1.9). LOAD... opens in the folder of the file playing.
 
 ## 2. Controls, notes, MIDI
 
 - [ ] Every knob changes the sound as its name says; the value under the knob reads
-      sensibly (Speed as a factor, Pitch in octaves, Density in grains per second,
-      Window by name).
-- [ ] Speed and Pitch snap to +1x and 0 octaves near the centre.
+      sensibly (Speed as a factor, Pitch in octaves, Pitch Random in semitones, Density
+      in grains per second). WINDOW shows a small curve of the mixed grain window; its
+      tooltip names the nearest shape.
+- [ ] Speed: 0x exactly at 12 o'clock (the playhead stands), -4x fully left, +4x fully
+      right; +1x (the default, double-click) at about 1 o'clock, with a small snap.
+      Pitch: 0 octaves at the centre, with a snap. Pitch Random up to +-12 semitones.
+- [ ] Map (0.1.8): a click on the map or waveform moves START there (the loop's left
+      edge jumps to the click, the START knob follows); dragging moves it along; the
+      host records it as automation of Start. The mouse wheel over the map widens and
+      narrows the spray band, with Shift in finer steps; the SPRAY knob follows.
+- [ ] STOP (0.1.9): the sound fades out without a click; pressed again it goes on
+      where it stopped, fading in. Studio One's bypass of the plug-in does the same;
+      reopening a bypassed song opens it bypassed, a stopped song opens playing.
+- [ ] LATCH: a struck screen key stays held (pitch stays changed); another key moves the
+      hold, the same key or LATCH off lets it go; without LATCH as before.
 - [ ] Freeze: the playhead stands still, the sound goes on (spectral freeze). RESET
       sends playback back to Start, every press (since 0.1.2 the window's presses are not
       recorded as automation; an automation lane for Reset still works).

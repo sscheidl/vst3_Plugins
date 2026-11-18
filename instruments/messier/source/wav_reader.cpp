@@ -39,17 +39,22 @@ WavResult Fail(WavError error, const char* detail) noexcept {
 // MS-R25: while decoding, an exception inside the stream (std::bad_alloc in its
 // buffer, say) is passed on instead of becoming a silent short read: badbit joins the
 // stream's exception mask, and the caller's mask comes back afterwards.
+// MS-R29: the guard is complete before anything that can throw, and gives the mask
+// back in any case (exceptions() sets the mask before it may throw).
 class RethrowStreamErrors {
   public:
-    explicit RethrowStreamErrors(std::istream& in) : in_(in), saved_(in.exceptions()) {
+    explicit RethrowStreamErrors(std::istream& in) noexcept : in_(in), saved_(in.exceptions()) {}
+    // May throw (a stream without a buffer, a mask of the caller's); the destructor
+    // restores the mask then too.
+    void Arm() {
         in_.clear();
         in_.exceptions(saved_ | std::ios::badbit);
     }
     ~RethrowStreamErrors() {
         try {
-            in_.clear(in_.rdstate() & ~std::ios::badbit);
             in_.exceptions(saved_);
         } catch(...) {
+            // The mask is set; only the check of the stream's state threw.
         }
     }
     RethrowStreamErrors(const RethrowStreamErrors&) = delete;
@@ -104,8 +109,9 @@ WavResult OutOfMemory() noexcept {
     return Fail(WavError::kOutOfMemory, "while decoding");
 }
 
-WavResult DecodeUnchecked(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes) {
-    const RethrowStreamErrors rethrow(in);
+WavResult DecodeUnchecked(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes, bool probe = false) {
+    RethrowStreamErrors rethrow(in);
+    rethrow.Arm();
     std::uint8_t header[12];
     if(size < 12 || !ReadAt(in, 0, header, sizeof(header)))
         return Fail(WavError::kInvalid, "too short for a WAV file");
@@ -184,6 +190,12 @@ WavResult DecodeUnchecked(std::istream& in, std::uint64_t size, std::uint64_t ma
                       static_cast<unsigned long long>(max_pcm_bytes >> 20));
         return Fail(WavError::kTooLarge, text);
     }
+    if(probe) { // ProbeWavFile: everything checked but the audio data itself
+        WavResult result;
+        result.source_bits = bits;
+        result.source_float = float32;
+        return result;
+    }
 
     auto file = std::make_unique<FileData>();
     const std::size_t samples = static_cast<std::size_t>(frames * channels);
@@ -235,7 +247,7 @@ WavResult DecodeUnchecked(std::istream& in, std::uint64_t size, std::uint64_t ma
     return result;
 }
 
-WavResult ReadUnchecked(const std::string& utf8_path, std::uint64_t max_pcm_bytes) {
+WavResult ReadUnchecked(const std::string& utf8_path, std::uint64_t max_pcm_bytes, bool probe = false) {
     if(utf8_path.empty())
         return Fail(WavError::kMissing, "no path");
     std::filesystem::path path;
@@ -269,7 +281,7 @@ WavResult ReadUnchecked(const std::string& utf8_path, std::uint64_t max_pcm_byte
     std::ifstream in(path, std::ios::binary);
     if(!in)
         return Fail(WavError::kReadError, "cannot open the file");
-    return DecodeUnchecked(in, static_cast<std::uint64_t>(size), max_pcm_bytes);
+    return DecodeUnchecked(in, static_cast<std::uint64_t>(size), max_pcm_bytes, probe);
 }
 
 } // namespace
@@ -277,6 +289,16 @@ WavResult ReadUnchecked(const std::string& utf8_path, std::uint64_t max_pcm_byte
 WavResult DecodeWav(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes) noexcept {
     try {
         return DecodeUnchecked(in, size, max_pcm_bytes);
+    } catch(const std::bad_alloc&) {
+        return OutOfMemory();
+    } catch(...) {
+        return Fail(WavError::kReadError, "could not be read");
+    }
+}
+
+WavResult ProbeWavFile(const std::string& utf8_path, std::uint64_t max_pcm_bytes) noexcept {
+    try {
+        return ReadUnchecked(utf8_path, max_pcm_bytes, true);
     } catch(const std::bad_alloc&) {
         return OutOfMemory();
     } catch(...) {

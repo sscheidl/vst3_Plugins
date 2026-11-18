@@ -14,6 +14,8 @@
 #include "public.sdk/source/vst/vstparameters.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -76,9 +78,14 @@ bool GetText(IAttributeList* attributes, const char* id, std::string& text) {
     return true;
 }
 
+// MS-R28: connection generations of all controllers of this process, so that a
+// processor can tell a newer connection from an older one whichever controller made it.
+std::atomic<int64> g_generations{0};
+
 } // namespace
 
 tresult PLUGIN_API Controller::initialize(FUnknown* context) {
+    generation_ = ++g_generations;
     const tresult result = EditController::initialize(context);
     if(result != kResultOk)
         return result;
@@ -94,17 +101,15 @@ tresult PLUGIN_API Controller::connect(IConnectionPoint* other) {
     const tresult result = EditController::connect(other);
     if(result != kResultOk)
         return result;
-    // MS-R17, MS-R20, MS-R21: the processor at the other end may be a new one, whose
-    // sequence numbers and load count start anew. A new generation: replies still on
-    // their way from the old connection are not taken. Its first status names it.
-    ++generation_;
+    // MS-R17, MS-R21, MS-R28: the processor at the other end may be a new one, whose
+    // sequence numbers start anew. A new generation: replies still on their way from
+    // the old connection are not taken, and the processor refuses requests of the old
+    // one that reach it late.
+    generation_ = ++g_generations;
     last_status_serial_ = 0;
     last_reply_ = 0;
-    peer_unconfirmed_ = true;
-    marked_since_connect_ = 0;
-    parameter_since_connect_ = false;
-    // Parameter 199 as a new processor starts it, so that its first value is a change
-    // even when it equals the old processor's last one. Nothing is counted here.
+    // Parameter 199 as a processor starts it (never 0 after a load), so that a new
+    // processor's first value is a change. Nothing is counted here.
     EditController::setParamNormalized(kParamSampleChanges, 0.0);
     ForgetDisplay();
     RequestFileStatus();
@@ -142,6 +147,12 @@ void Controller::AddParameters() {
                                                  ParameterInfo::kCanAutomate));
     // Since 0.1.2 (MS-R09): the processor's report that a file from the window has
     // become the sound. Read-only and hidden; not for automation.
+    // Since 0.1.8: the host's bypass (it fades the output out; saved) and STOP, a pause
+    // of the sound with a fade (not saved).
+    parameters.addParameter(new DisplayParameter(STR16("Bypass"), kParamBypass, 1,
+                                                 ParameterInfo::kCanAutomate | ParameterInfo::kIsBypass));
+    parameters.addParameter(new DisplayParameter(STR16("Stop"), kParamStop, 1,
+                                                 ParameterInfo::kCanAutomate | ParameterInfo::kIsList));
     parameters.addParameter(new DisplayParameter(STR16("Sample Changes"), kParamSampleChanges, 0,
                                                  ParameterInfo::kIsReadOnly | ParameterInfo::kIsHidden));
 }
@@ -163,6 +174,7 @@ tresult PLUGIN_API Controller::setComponentState(IBStream* state) {
                  saved.values[static_cast<std::size_t>(i)]);
     SetValue(kParamReset, 0.0);
     SetValue(kParamPitchBend, kDefaultPitchBend);
+    SetValue(kParamStop, 0.0); // a project always opens playing
     // The processor has read the file by now; it says how that went. Moving the
     // path allocates nothing.
     file_.path = std::move(saved.path);
@@ -197,7 +209,7 @@ tresult PLUGIN_API Controller::setParamNormalized(ParamID tag, ParamValue value)
     // sound. The count in the value tells the host the project changed, whether or
     // not a status reply follows; the status then says which file it is.
     if(tag == kParamSampleChanges && getParamNormalized(tag) != before) {
-        CountFromParameter(SampleChangesCount(getParamNormalized(tag)));
+        MarkChanged(); // MS-R26: every change marks; nothing is subtracted later
         RequestFileStatus();
     }
     return result;
@@ -290,12 +302,18 @@ IPtr<IMessage> Controller::NewMessage(const char* id) {
         return nullptr;
     message->setMessageID(id);
     message->getAttributes()->setInt(kAttrGeneration, generation_);
+    message->getAttributes()->setInt(kAttrIssued, static_cast<int64>(std::chrono::steady_clock::now().time_since_epoch().count()));
     return message;
 }
 
 bool Controller::LoadFile(const std::string& path) {
     try {
-        return SendLoad(path);
+        const bool sent = SendLoad(path);
+        if(sent) {
+            awaiting_ = path; // the window asks until this request has finished
+            await_ticks_ = kAwaitTicks;
+        }
+        return sent;
     } catch(...) {
         return false; // MS-R01: not into the window's callback
     }
@@ -428,6 +446,8 @@ tresult PLUGIN_API Controller::notify(IMessage* message) {
         // load since the last status. Restoring a project and repeated status replies
         // leave the count alone.
         const std::uint32_t loads = status.user_loads;
+        if(await_ticks_ > 0 && status.request == awaiting_ && status.request_state != RequestState::kLoading)
+            await_ticks_ = 0; // that request has finished, loaded or failed
         file_ = std::move(status);
         CountFromStatus(static_cast<std::uint64_t>(processor), loads);
         ShowFile();
@@ -437,74 +457,36 @@ tresult PLUGIN_API Controller::notify(IMessage* message) {
     }
 }
 
-void Controller::CountFromParameter(std::uint32_t count) noexcept {
-    // MS-R12: parameter 199 alone marks the project, whether or not a status follows.
-    // It carries the count modulo 65536; a step forward of less than half of that is
-    // new loads (more than 32766 loads between two values the host passes on cannot
-    // happen at the pace files load).
-    if(peer_unconfirmed_) {
-        // MS-R20: after a connect, before its first status, the value may be an old or
-        // a new processor's; either way it changed because a file was loaded. Each
-        // change marks: the first as one load, later ones by their step. The status
-        // then adds what is missing.
-        std::uint32_t added = 1;
-        if(parameter_since_connect_) {
-            const std::uint32_t step = (count - last_parameter_) & kSampleChangesMask;
-            if(step == 0)
-                return;
-            if(step < kSampleChangesMask / 2)
-                added = step;
-        }
-        parameter_since_connect_ = true;
-        last_parameter_ = count;
-        marked_since_connect_ += added;
-        MarkChanged(added);
-        return;
-    }
-    const std::uint32_t added = (count - user_loads_counted_) & kSampleChangesMask;
-    if(added == 0 || added >= kSampleChangesMask / 2)
-        return; // a step back on a confirmed connection: an old value
-    user_loads_counted_ += added;
-    MarkChanged(added);
-}
-
 void Controller::CountFromStatus(std::uint64_t processor, std::uint32_t count) noexcept {
-    if(peer_unconfirmed_) {
-        // MS-R17, MS-R20: the first status of a connection names its processor. The
-        // same one as before (a reconnect) has loaded count - user_loads_counted_ files
-        // since; another one all of its count. Those parameter 199 has marked since the
-        // connect are not marked again.
-        const bool same = processor == counted_for_ && counted_for_ != 0;
-        const std::uint32_t base = same ? user_loads_counted_ : 0;
-        const std::uint32_t since = count > base ? count - base : 0;
-        const std::uint32_t missing = since > marked_since_connect_ ? since - marked_since_connect_ : 0;
-        peer_unconfirmed_ = false;
-        marked_since_connect_ = 0;
-        parameter_since_connect_ = false;
-        counted_for_ = processor;
-        user_loads_counted_ = count;
-        MarkChanged(missing);
-        return;
+    // MS-R17, MS-R27, MS-R32: a count higher than the last one seen of the same
+    // processor means new files; a processor never seen has new files if its count is
+    // above zero. A lower or equal count is an old reply or nothing new. The counts of
+    // the last kKnownProcessors processors are kept, so A -> B -> A marks nothing.
+    if(processor != status_from_) {
+        if(status_from_ != 0)
+            ForgetDisplay(); // another processor: its sequence numbers are its own
+        status_from_ = processor;
     }
-    if(processor != counted_for_) {
-        // Another processor on the same connection (not seen from a host): counted
-        // from its own zero, its files not those of the old one.
-        counted_for_ = processor;
-        user_loads_counted_ = 0;
-        ForgetDisplay();
+    Known* entry = nullptr;
+    for(Known& k : known_)
+        if(k.processor == processor)
+            entry = &k;
+    bool more = false;
+    if(entry) {
+        more = count > entry->loads;
+        if(more)
+            entry->loads = count;
+    } else {
+        more = count > 0;
+        known_[known_next_] = Known{processor, count};
+        known_next_ = (known_next_ + 1) % kKnownProcessors;
     }
-    // The full count: no limit on how many loads one status reports. A step back is
-    // an old reply.
-    if(count <= user_loads_counted_)
-        return;
-    const std::uint32_t added = count - user_loads_counted_;
-    user_loads_counted_ = count;
-    MarkChanged(added);
+    if(more)
+        MarkChanged();
 }
 
-void Controller::MarkChanged(std::uint32_t loads) noexcept {
-    for(std::uint32_t i = 0; i < std::min(loads, kMostDirtyCalls); ++i)
-        setDirty(true);
+void Controller::MarkChanged() noexcept {
+    setDirty(true);
 }
 
 void Controller::ShowFile() noexcept {
@@ -537,7 +519,11 @@ Editor* Controller::MakeEditor() {
     // While a file is being read, the window asks how it goes on every timer tick.
     // On every tick it asks for what it shows (since 0.1.4).
     callbacks.poll = [this] {
-        if(file_.request_state == RequestState::kLoading || file_.serial == 0)
+        ++poll_ticks_;
+        if(await_ticks_ > 0)
+            --await_ticks_;
+        if(file_.request_state == RequestState::kLoading || file_.serial == 0 || await_ticks_ > 0
+           || poll_ticks_ % kStatusEveryTicks == 0)
             RequestFileStatus();
         RequestDisplay();
     };
