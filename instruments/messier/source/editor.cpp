@@ -509,7 +509,15 @@ void Editor::ChooseFile() {
     selector->forget();
 }
 
-void Editor::ShowFileStatus(const FileStatus& status) {
+void Editor::ShowFileStatus(const FileStatus& status) noexcept {
+    try {
+        ShowFileStatusUnchecked(status);
+    } catch(...) {
+        // No memory for the texts (MS-R15): the window keeps what it shows.
+    }
+}
+
+void Editor::ShowFileStatusUnchecked(const FileStatus& status) {
     file_warning_ = false;
     file_tooltip_ = status.path;
     if(status.path.empty()) {

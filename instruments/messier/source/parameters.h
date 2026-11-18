@@ -87,10 +87,16 @@ constexpr std::array<double, kParamCount> kDefaults = {
     kDefaultPitchBend,
     0.0};                                   // sample changes
 
-// The value of kParamSampleChanges for a count of files loaded from the window. It
-// only has to change with every load; 1024 steps before it repeats.
+// The value of kParamSampleChanges for a count of files loaded from the window, and
+// back (MS-R12). 65536 steps: the count survives a host that keeps values as float
+// (24 bits of mantissa), and the controller counts the difference to the last one.
+constexpr std::uint32_t kSampleChangesMask = 0xFFFF;
 inline double SampleChangesValue(std::uint32_t loads) {
-    return static_cast<double>(loads % 1024u) / 1023.0;
+    return static_cast<double>(loads & kSampleChangesMask) / kSampleChangesMask;
+}
+inline std::uint32_t SampleChangesCount(double normalized) {
+    const double v = normalized >= 0.0 ? (normalized <= 1.0 ? normalized : 1.0) : 0.0;
+    return static_cast<std::uint32_t>(std::lround(v * kSampleChangesMask));
 }
 
 inline double Clamp01(double value) {

@@ -9,7 +9,7 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 0.1.2, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 0.1.3, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
@@ -19,8 +19,9 @@ bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
 check of 0.1.1 five more ([check](docs/CODEX_REVIEW_0.1.1.md),
-[fixes](docs/CODEX_REVIEW_0.1.1_UMSETZUNG.md)); 0.1.2 fixes them, Codex' next check is
-open. Not tried in a DAW, not listened to. The [DAW test list](docs/DAW_TEST_0.1.0.md) is
+[fixes](docs/CODEX_REVIEW_0.1.1_UMSETZUNG.md)), its check of 0.1.2 another five
+([check](docs/CODEX_REVIEW_0.1.2.md), [fixes](docs/CODEX_REVIEW_0.1.2_UMSETZUNG.md)); 0.1.3
+fixes them, Codex' next check is open. Not tried in a DAW, not listened to. The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
 
 **The window is provisional.** The build order's window (section 8: an Atlas nebula map
@@ -56,10 +57,10 @@ makes of the pot; typed text is converted back.
 | 115 | Size Random | random grain length, +- on the squared Overlap | 0 | - |
 | 117 | Mask | probability that a grain stays silent, up to 99 % | 0 | - |
 | 120 | Freeze | the playhead stands still; grains and the vocoder go on (a spectral freeze, not a mute) | off | - |
-| 121 | Reset | playback back to Start, on the rising edge of the value (for automation); the window's RESET button sends its presses directly to the processor and is not recorded as automation | - | - |
+| 121 | Reset | playback back to Start, on the rising edge of the value (for automation); the window's RESET button sends its presses directly to the processor and is not recorded as automation. Presses that fall into one 64-sample step of the engine act once; presses while no audio runs are dropped after 0.5 s, also across an activation | - | - |
 | 122 | Volume | behind the core, 0 to 100 %; 100 % leaves the core's output untouched | 100 % | CC 33 |
 | 123 | Pitch Bend | +-2 semitones, from the pitch wheel; not saved | centre | wheel |
-| 199 | Sample Changes | hidden and read-only: the processor's report that a file from the window became the sound; not saved | - | - |
+| 199 | Sample Changes | hidden and read-only: the count of files from the window that became the sound (65536 steps), from which the plug-in tells the host that the project changed; not saved | - | - |
 
 The secondaries are the firmware's SOURCE page under their pot. Speed's and Blend's
 secondaries (input gain, grain FM) need the audio input; their IDs 111 and 116 are kept
@@ -214,7 +215,8 @@ ctest --preset windows-vs2026-x64-release -R messier
 in the build report.
 
 Failing allocations are tested by fault injection: in Release builds every case (the
-loader below 16 bytes, and every allocation of six host calls in turn); in Debug builds
+loader below 16 bytes, and every allocation of nine host calls in turn, parameter texts
+and the window's creation included); in Debug builds
 the loader's cases from 40 bytes, the spare empty file included. Below that the Debug
 standard library of MSVC ends the process by design (its container proxies), outside the
 plug-in's code; the plug-in ships as a Release build.

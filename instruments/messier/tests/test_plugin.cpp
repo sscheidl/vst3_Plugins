@@ -1018,11 +1018,32 @@ void TestResetButtonThroughHost() {
     std::this_thread::sleep_for(Processor::kKeyboardNoteLifetime + std::chrono::milliseconds(50));
     block();
     CHECK(resets() == start + 5);
+    // MS-R13: a press just before an activation acts after it.
+    editor->PressReset();
+    host.processor->setProcessing(false);
+    CHECK(host.processor->setActive(false) == kResultOk);
+    CHECK(host.processor->setActive(true) == kResultOk);
+    host.processor->setProcessing(true);
+    const std::uint32_t after_restart = resets(); // a fresh engine counts from 0
+    block();
+    CHECK(resets() == after_restart + 1);
+    // Two presses in two host blocks of one sample each: each acts, unless both fall
+    // into one 64-sample quantum the engine has not rendered yet; then they are one
+    // restart from START (the same sound; documented). Never none.
+    const std::uint32_t before_small = resets();
+    editor->PressReset();
+    host.Process(1);
+    editor->PressReset();
+    host.Process(1);
+    block();
+    const std::uint32_t small_resets = resets() - before_small;
+    CHECK(small_resets == 1 || small_resets == 2);
+    const std::uint32_t before_automation = resets();
     // Automation of parameter 121 still acts on its rising edge.
     int32 index = 0;
     handler.changes.addParameterData(kParamReset, index)->addPoint(0, 1.0, index);
     block();
-    CHECK(resets() == start + 6);
+    CHECK(resets() == before_automation + 1);
     view = nullptr;
     host.external_changes = nullptr;
     CHECK(processor_point->disconnect(controller_point) == kResultOk);
@@ -1132,6 +1153,18 @@ void TestFileChangeMarksProject() {
     block();
     block();
     CHECK(handler.dirty == 3);
+    // MS-R12: the status reply does not come back (the processor's way to the
+    // controller is cut); parameter 199 alone marks the project.
+    CHECK(processor_point->disconnect(controller_point) == kResultOk);
+    CHECK(controller->LoadFile(g_path_mono));
+    CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
+    block();
+    block();
+    CHECK(handler.dirty == 4);
+    CHECK(processor_point->connect(controller_point) == kResultOk);
+    CHECK(controller->RequestFileStatus()); // the late status counts nothing twice
+    block();
+    CHECK(handler.dirty == 4);
     // A project brings its own file: restoring is no change.
     const std::vector<char> project = MakeState(StartValues(), g_path_mono);
     CHECK(LoadState(*host.processor, project) == kResultOk);
@@ -1142,12 +1175,13 @@ void TestFileChangeMarksProject() {
     CHECK(controller->setComponentState(&stream) == kResultOk);
     block();
     block();
-    CHECK(controller->File().path == g_path_mono && handler.dirty == 3);
+    CHECK(controller->File().path == g_path_mono && handler.dirty == 4);
     CHECK(processor_point->disconnect(controller_point) == kResultOk);
     CHECK(controller_point->disconnect(processor_point) == kResultOk);
     CHECK(controller->terminate() == kResultOk);
     std::printf("file change: each file from the window marks the project changed, with no "
-                "window open and two at a time; polls, a failed load and a project do not\n");
+                "window open, two at a time and without a status reply; polls, a failed load "
+                "and a project do not\n");
 }
 
 // MS-R01, MS-R06: no host call lets an exception out. Every allocation the call
@@ -1202,6 +1236,33 @@ void TestNoExceptionLeavesHostCalls() {
              return host.processor->getState(&stream);
          }},
         {"processor notify (load)", [&] { return host.processor->notify(load); }},
+        {"controller getParamStringByValue", [&] {
+             String128 text{};
+             tresult result = kResultOk;
+             for(const ParamID id : kParamIds) {
+                 const tresult one = controller->getParamStringByValue(id, 0.37, text);
+                 if(one != kResultOk)
+                     result = one;
+             }
+             return result;
+         }},
+        {"controller getParamValueByString", [&] {
+             ParamValue value = 0.0;
+             tresult result = kResultOk;
+             for(const ParamID id : kParamIds) {
+                 // Longer than std::string's own buffer, so that converting it allocates.
+                 TChar text[] = {' ', ' ', ' ', ' ', ' ', ' ', '2', '5', '.', '5', '0', '0', '0',
+                                 '0', '0', '0', '0', '0', '0', '0', 0};
+                 const tresult one = controller->getParamValueByString(id, text, value);
+                 if(one != kResultOk && one != kResultFalse)
+                     result = one;
+             }
+             return result;
+         }},
+        {"controller createView", [&] {
+             IPtr<IPlugView> made = owned(controller->createView(ViewType::kEditor));
+             return made ? kResultOk : kResultFalse;
+         }},
     };
     for(const Call& call : calls) {
         int failures = 0;
@@ -1236,7 +1297,8 @@ void TestNoExceptionLeavesHostCalls() {
     CHECK(processor_point->disconnect(controller_point) == kResultOk);
     CHECK(controller_point->disconnect(processor_point) == kResultOk);
     CHECK(controller->terminate() == kResultOk);
-    std::printf("host calls: no exception leaves them, whichever allocation fails\n");
+    std::printf("host calls: no exception leaves them, whichever allocation fails (nine calls, "
+                "parameter texts and the window included)\n");
 #else
     std::printf("host calls under failing allocations: Release builds only (Debug STL proxies)\n");
 #endif

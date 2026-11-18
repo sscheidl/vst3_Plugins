@@ -51,6 +51,16 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
     bool PressReset() noexcept;
     const FileStatus& File() const { return file_; }
 
+    // The host asks for a parameter's text, or the value of a typed text; guarded
+    // (MS-R11).
+    Steinberg::tresult PLUGIN_API getParamStringByValue(Steinberg::Vst::ParamID tag,
+                                                        Steinberg::Vst::ParamValue valueNormalized,
+                                                        Steinberg::Vst::String128 string) SMTG_OVERRIDE;
+    Steinberg::tresult PLUGIN_API getParamValueByString(Steinberg::Vst::ParamID tag,
+                                                        Steinberg::Vst::TChar* string,
+                                                        Steinberg::Vst::ParamValue& valueNormalized)
+        SMTG_OVERRIDE;
+
     // IMidiMapping
     Steinberg::tresult PLUGIN_API getMidiControllerAssignment(
         Steinberg::int32 busIndex, Steinberg::int16 channel,
@@ -81,10 +91,12 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
     bool SendSimple(const char* id) noexcept;
     Editor* MakeEditor();
     void ShowFile() noexcept;
+    void CountUserLoads(std::uint32_t count) noexcept;
 
     std::vector<OpenEditor> editors_;
     EditorSettings editor_;
     FileStatus file_;
+    std::uint32_t user_loads_counted_ = 0; // modulo 65536, see CountUserLoads
 };
 
 } // namespace messier

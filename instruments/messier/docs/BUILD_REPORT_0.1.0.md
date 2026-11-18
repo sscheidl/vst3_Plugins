@@ -8,8 +8,10 @@
 > are in [CODEX_REVIEW_0.1.0_UMSETZUNG.md](CODEX_REVIEW_0.1.0_UMSETZUNG.md). The window
 > stays provisional until its layout and colours are settled. Codex' check of 0.1.1 found
 > five more (MS-R06 to MS-R10, [CODEX_REVIEW_0.1.1.md](CODEX_REVIEW_0.1.1.md)); 0.1.2
-> fixes them ([CODEX_REVIEW_0.1.1_UMSETZUNG.md](CODEX_REVIEW_0.1.1_UMSETZUNG.md)). The rest
-> of this report is left as written.
+> fixes them ([CODEX_REVIEW_0.1.1_UMSETZUNG.md](CODEX_REVIEW_0.1.1_UMSETZUNG.md)). Its
+> check of 0.1.2 found MS-R11 to MS-R15; 0.1.3 fixes them
+> ([CODEX_REVIEW_0.1.2_UMSETZUNG.md](CODEX_REVIEW_0.1.2_UMSETZUNG.md)). The rest of this
+> report is left as written.
 
 Date: 2026-11-17. Work order: `docs/CLAUDE_BUILDAUFTRAG_MESSIER_0.1.0.md` (approved by the
 user on 2026-11-17, kept untracked in the main checkout). Built and tested by Claude

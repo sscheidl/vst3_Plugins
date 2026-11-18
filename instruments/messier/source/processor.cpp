@@ -216,7 +216,8 @@ tresult PLUGIN_API Processor::setActive(TBool state) {
             delete backlog_[i];
         backlog_count_ = 0;
         exchange_.Collect();
-        reset_presses_.store(0); // presses while the audio was off do not act later
+        // RESET presses are kept (MS-R13): within their 0.5 s they act in the first
+        // block after the activation.
         // A complete project, if one is there, restarts the engine (MS-R07); else the
         // current values with the newest file from the window, without a fade. While a
         // project waits for its other half, the values in the engine stay those of the

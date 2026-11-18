@@ -11,9 +11,9 @@ None yet (2026-11-17).
 ## Before starting
 
 * Not before Codex has released a build for the DAW test (0.1.0 was not released;
-  0.1.1 and 0.1.2 fix the findings of two reviews; Codex' next check is open). The window is provisional
+  0.1.1 to 0.1.3 fix the findings of three reviews; Codex' next check is open). The window is provisional
   (see the README); judge its handling, not its final look.
-* Install: copy `Messier.vst3` from `out/messier-0.1.2/` into
+* Install: copy `Messier.vst3` from `out/messier-0.1.3/` into
   `C:\Program Files\Common Files\VST3\` (administrator rights). Studio One may need a
   rescan of its plug-ins.
 * Have a few WAV files ready: a 16-bit stereo loop at 48 kHz, a 24-bit file, a 32-bit

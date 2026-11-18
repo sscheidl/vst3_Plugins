@@ -124,33 +124,43 @@ std::unique_ptr<FileData> FileLoader::LoadProject(const std::string& path,
         result = ReadWavFile(path, max_pcm_bytes_);
     const std::lock_guard<std::mutex> lock(mutex_);
     ++status_.serial;
+    // MS-R14: the new texts first, then the file object; the status changes only once
+    // the file is there. Without one, setState() refuses the project, and the status
+    // and the path that getState() saves stay those of the project still playing.
     std::unique_ptr<FileData> file;
     try {
+        std::string info;
+        SoundState sound = SoundState::kNone;
+        std::string new_path = path;
         if(path.empty()) {
             file = TakeEmptyLocked(false); // frames 0: no file
-            status_.path.clear();
-            status_.info.clear();
-            status_.sound = SoundState::kNone;
         } else if(result.error == WavError::kNone && result.file) {
-            std::string info = DescribeFile(*result.file, result.source_bits, result.source_float);
-            status_.path = path;
-            status_.info = std::move(info);
-            status_.sound = SoundState::kReady;
+            info = DescribeFile(*result.file, result.source_bits, result.source_float);
+            sound = SoundState::kReady;
             file = std::move(result.file);
         } else {
             // The project names this file: keep its path, play nothing.
-            std::string info = std::string(WavErrorText(result.error)) + ": " + result.detail;
+            info = std::string(WavErrorText(result.error)) + ": " + result.detail;
+            sound = SoundFor(result.error);
             file = TakeEmptyLocked(false);
-            status_.path = path;
-            status_.sound = SoundFor(result.error);
+        }
+        if(file) {
+            status_.path = std::move(new_path);
             status_.info = std::move(info);
+            status_.sound = sound;
         }
     } catch(...) {
-        // No memory left to describe the outcome (MS-R01): silence, from the spare if
-        // need be. The status keeps its previous path then.
-        file = TakeEmptyLocked(true);
-        status_.sound = SoundState::kTooLarge;
-        status_.info = kOutOfMemory;
+        // No memory to take the project over completely (MS-R01, MS-R14): refused as
+        // a whole; the old project plays on and stays what is saved. An empty file
+        // object goes back to the spare.
+        if(file && file->frames == 0 && !spare_empty_)
+            spare_empty_ = std::move(file);
+        file.reset();
+    }
+    if(!file) {
+        // Refused (MS-R14): reported apart from the sound, which is unchanged.
+        status_.request_state = RequestState::kFailed;
+        status_.detail = kOutOfMemory;
     }
     if(file) {
         file->project = project;

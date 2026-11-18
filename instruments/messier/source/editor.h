@@ -164,7 +164,7 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // Opens the file dialog, as the LOAD button does.
     void ChooseFile();
     // Called by the controller with what the processor reports about the sample.
-    void ShowFileStatus(const FileStatus& status);
+    void ShowFileStatus(const FileStatus& status) noexcept;
     // What the window shows; empty while it is closed. For tests.
     std::string ShownFileName() const;
     std::string ShownFileInfo() const;
@@ -206,6 +206,7 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     void ShowValue(Knob& knob, Steinberg::Vst::ParamValue normalized);
     // Puts the file texts into the labels, if the window is open.
     void ApplyFileTexts();
+    void ShowFileStatusUnchecked(const FileStatus& status);
     // Forgets the views of a closed window.
     void ForgetViews();
     // Window size in pixels for the current zoom, display scale and keyboard.

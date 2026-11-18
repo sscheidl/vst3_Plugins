@@ -44,14 +44,24 @@ class DisplayParameter : public Parameter {
         UString(info.units, str16BufferSize(String128)).fromAscii(UnitOf(tag));
     }
 
+    // MS-R11: hosts call these through getParamStringByValue and
+    // getParamValueByString, also without a window; nothing may leave them.
     void toString(ParamValue normalized, String128 string) const SMTG_OVERRIDE {
-        Put(string, FormatValue(getInfo().id, normalized));
+        try {
+            Put(string, FormatValue(getInfo().id, normalized));
+        } catch(...) {
+            string[0] = 0; // no memory for the text: an empty one
+        }
     }
 
     bool fromString(const TChar* string, ParamValue& normalized) const SMTG_OVERRIDE {
         if(!string)
             return false;
-        return ParseValue(getInfo().id, StringConvert::convert(string), normalized);
+        try {
+            return ParseValue(getInfo().id, StringConvert::convert(string), normalized);
+        } catch(...) {
+            return false;
+        }
     }
 
     OBJ_METHODS(DisplayParameter, Parameter)
@@ -156,11 +166,32 @@ tresult PLUGIN_API Controller::setParamNormalized(ParamID tag, ParamValue value)
     if(result != kResultOk)
         return result;
     ShowParameter(tag);
-    // MS-R09: the processor reports a file from the window that became the sound;
-    // the status says which, and that tells the host the project changed.
-    if(tag == kParamSampleChanges && getParamNormalized(tag) != before)
+    // MS-R09, MS-R12: the processor reports files from the window that became the
+    // sound. The count in the value tells the host the project changed, whether or
+    // not a status reply follows; the status then says which file it is.
+    if(tag == kParamSampleChanges && getParamNormalized(tag) != before) {
+        CountUserLoads(SampleChangesCount(getParamNormalized(tag)));
         RequestFileStatus();
+    }
     return result;
+}
+
+tresult PLUGIN_API Controller::getParamStringByValue(ParamID tag, ParamValue valueNormalized,
+                                                     String128 string) {
+    try {
+        return EditController::getParamStringByValue(tag, valueNormalized, string);
+    } catch(...) {
+        return kOutOfMemory; // MS-R11
+    }
+}
+
+tresult PLUGIN_API Controller::getParamValueByString(ParamID tag, TChar* string,
+                                                     ParamValue& valueNormalized) {
+    try {
+        return EditController::getParamValueByString(tag, string, valueNormalized);
+    } catch(...) {
+        return kOutOfMemory; // MS-R11
+    }
 }
 
 tresult PLUGIN_API Controller::getState(IBStream* state) {
@@ -290,16 +321,26 @@ tresult PLUGIN_API Controller::notify(IMessage* message) {
         // state has changed though no parameter did; tell the host once for each such
         // load since the last status. Restoring a project and repeated status replies
         // leave the count alone.
-        const std::uint32_t added =
-            status.user_loads > file_.user_loads ? status.user_loads - file_.user_loads : 0;
+        const std::uint32_t loads = status.user_loads;
         file_ = std::move(status);
-        for(std::uint32_t i = 0; i < added && i < 1024u; ++i)
-            setDirty(true);
+        CountUserLoads(loads & kSampleChangesMask);
         ShowFile();
         return kResultOk;
     } catch(...) {
         return kOutOfMemory;
     }
+}
+
+void Controller::CountUserLoads(std::uint32_t count) noexcept {
+    // MS-R12: one setDirty for each file from the window since the last count seen,
+    // whichever way the count came: parameter 199 or a status reply. Both carry it
+    // modulo 65536; a step backwards (a processor started anew) counts nothing.
+    const std::uint32_t added = (count - user_loads_counted_) & kSampleChangesMask;
+    if(added == 0 || added >= kSampleChangesMask / 2)
+        return;
+    user_loads_counted_ = count & kSampleChangesMask;
+    for(std::uint32_t i = 0; i < added; ++i)
+        setDirty(true);
 }
 
 void Controller::ShowFile() noexcept {
@@ -335,7 +376,7 @@ Editor* Controller::MakeEditor() {
             RequestFileStatus();
     };
     auto* editor = new Editor(this, editor_, std::move(callbacks));
-    editor->ShowFileStatus(file_);
+    editor->ShowFileStatus(file_); // never throws (MS-R15)
     return editor;
 }
 

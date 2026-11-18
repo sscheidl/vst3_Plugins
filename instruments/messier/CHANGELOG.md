@@ -1,5 +1,21 @@
 # Changes
 
+## 0.1.3 (2026-11-18)
+
+The five findings of Codex' check of 0.1.2 (`docs/CODEX_REVIEW_0.1.2.md`), fixed; details
+in `docs/CODEX_REVIEW_0.1.2_UMSETZUNG.md`. The sound is unchanged.
+
+* MS-R11: parameter texts (shown or typed in the host, also without the window) let no
+  exception out.
+* MS-R12: parameter 199 carries the count of files from the window (65536 steps); the
+  controller marks the project changed from it directly, whether or not a status reply
+  follows, and a late status reply counts nothing twice.
+* MS-R13: RESET presses survive an activation within their 0.5 s. Documented: presses that
+  fall into one 64-sample step of the engine that it has not yet rendered act once.
+* MS-R14: a project that cannot be taken over completely for lack of memory is refused as
+  a whole; the path that is saved stays that of the project still playing.
+* MS-R15: opening the window cannot lose the editor object when memory runs out.
+
 ## 0.1.2 (2026-11-18)
 
 The five findings of Codex' check of 0.1.1 (`docs/CODEX_REVIEW_0.1.1.md`), fixed; details

@@ -30,11 +30,13 @@ namespace fs = std::filesystem;
 // least that many bytes, in any thread, throws std::bad_alloc. The nothrow forms
 // of operator new call this one and return null.
 static std::atomic<std::size_t> g_fail_from{0};
+// While not 0, allocations of exactly this size fail too (the empty file object).
+static std::atomic<std::size_t> g_fail_size{0};
 static std::atomic<std::uint64_t> g_failed{0};
 
 void* operator new(std::size_t size) {
     const std::size_t from = g_fail_from.load(std::memory_order_relaxed);
-    if(from != 0 && size >= from) {
+    if((from != 0 && size >= from) || (size != 0 && size == g_fail_size.load(std::memory_order_relaxed))) {
         g_failed.fetch_add(1, std::memory_order_relaxed);
         throw std::bad_alloc();
     }
@@ -438,47 +440,51 @@ void TestOutOfMemory() {
         CHECK(status.path == good && status.sound == SoundState::kReady && !exchange.Pending());
         }
     // A project loaded with almost no memory: silent, from the spare empty file.
-    // FileData has 40 bytes, so not even the empty file object can be made here: the
-    // spare is used, and cannot be made again while memory is short. This runs in
-    // Debug builds too (no allocation below 40 bytes fails).
-    static_assert(sizeof(FileData) >= 40);
-    CHECK(loader.SpareReadyForTest());
+    // A project loaded with almost no memory is refused as a whole (MS-R14): no file
+    // object comes back, and the status and its path, which getState() saves, stay
+    // those of the project still playing. Runs in Debug builds too (nothing below 40
+    // bytes fails).
+    const FileStatus before = loader.Status();
     g_fail_from = 40;
-    FileData* silent = loader.LoadProject(other, 2).release();
-    const bool spare_after_failure = loader.SpareReadyForTest();
+    std::unique_ptr<FileData> refused = loader.LoadProject(other, 2);
     g_fail_from = 0;
-    CHECK(!spare_after_failure);
     FileStatus status = loader.Status();
-    CHECK(status.sound == SoundState::kTooLarge || status.sound == SoundState::kReadError);
-    CHECK(silent && silent->frames == 0 && silent->project == 2);
-    // Memory back: everything works again, the spare is refilled.
-    FileData* back = loader.LoadProject(other, 3).release();
-    CHECK(loader.SpareReadyForTest()); // made again
-    CHECK(back && back->frames == 4800 && back->project == 3);
-    g_fail_from = 40;
-    FileData* again = loader.LoadProject(other, 4).release();
-    g_fail_from = 0;
-    CHECK(again && again->frames == 0 && again->project == 4);
-    // So little memory that not even an empty file object can be made: the spare
-    // kept for this case is used, and made again once memory is back. Not in Debug
-    // builds: there the standard library allocates a 16-byte container proxy even in
-    // noexcept constructors (std::filesystem::path) and terminates by design when that
-    // fails. The plug-in ships as a Release build, which has no such proxies.
+    CHECK(!refused);
+    CHECK(status.path == before.path && status.sound == before.sound && status.info == before.info);
+    CHECK(status.request_state == RequestState::kFailed && status.detail == "out of memory");
+    // The spare empty file object: a project without a file, or with a file that cannot
+    // be read, while not even an empty file object can be made. Only that size fails.
+    CHECK(loader.SpareReadyForTest());
+    g_fail_size = sizeof(FileData);
+    FileData* silent = loader.LoadProject("", 3).release();
+    const bool spare_after = loader.SpareReadyForTest();
+    std::unique_ptr<FileData> missing = loader.LoadProject((g_dir / "oom-missing.wav").string(), 4);
+    g_fail_size = 0;
+    CHECK(silent && silent->frames == 0 && silent->project == 3 && !spare_after);
+    CHECK(!missing); // spare used up, none to be made: refused
+    CHECK(loader.Status().sound == SoundState::kNone && loader.SoundPath().empty());
+    // Memory back: everything works again, the spare is made again.
+    FileData* back = loader.LoadProject(other, 5).release();
+    CHECK(loader.SpareReadyForTest());
+    CHECK(back && back->frames == 4800 && back->project == 5);
+    FileData* again = nullptr;
 #if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
-    // Memory back once more, so that the spare is there again (the case above may
-    // have used it: FileData has 40 bytes since 0.1.2).
-    loader.LoadProject(other, 50).reset();
+    // So little memory that hardly anything works (from 16 bytes). Not in Debug builds:
+    // there the standard library allocates a 16-byte container proxy even in noexcept
+    // constructors and terminates by design when that fails. The plug-in ships as a
+    // Release build, which has no such proxies.
     g_fail_from = 16;
-    FileData* spare = loader.LoadProject(other, 5).release();
+    again = loader.LoadProject("", 6).release(); // the spare
     g_fail_from = 0;
-    CHECK(spare && spare->frames == 0 && spare->project == 5);
-    delete spare;
-    loader.LoadProject(other, 6).reset();
+    CHECK(again && again->frames == 0);
+    CHECK(loader.SoundPath().empty());
+    loader.LoadProject(other, 7).reset(); // memory back, spare again; that file plays
+    const FileStatus playing_other = loader.Status();
     g_fail_from = 16;
-    spare = loader.LoadProject(other, 7).release();
+    std::unique_ptr<FileData> none = loader.LoadProject(other, 8); // the path cannot be copied
     g_fail_from = 0;
-    CHECK(spare && spare->frames == 0 && spare->project == 7);
-    delete spare;
+    CHECK(!none);
+    CHECK(loader.SoundPath() == playing_other.path && loader.Status().sound == playing_other.sound);
 #endif
     loader.Request(other);
     CHECK(WaitFor([&] { return loader.Idle(); }));
@@ -488,7 +494,7 @@ void TestOutOfMemory() {
         delete file;
     std::printf("out of memory: the conversion buffer, the PCM array and the status texts refused "
                 "in the worker, and a project load in the calling thread: the process lives on, "
-                "the old file stays, a project falls silent\n");
+                "the old file stays, a project is refused as a whole with its saved path kept, the spare used and made again\n");
 }
 
 } // namespace
