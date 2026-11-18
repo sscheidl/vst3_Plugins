@@ -14,7 +14,7 @@ None yet (2026-11-17).
   0.1.1 to 0.1.3, 0.1.5 to 0.1.8 and 0.1.10 fix the findings of nine reviews; 0.1.4 adds
   the window's data path and a provisional map; Codex' next check is open). The window is provisional
   (see the README); judge its handling, not its final look.
-* Install: copy `Messier.vst3` from `out/messier-0.1.10/` into
+* Install: copy `Messier.vst3` from `out/messier-0.1.11/` into
   `C:\Program Files\Common Files\VST3\` (administrator rights). Studio One may need a
   rescan of its plug-ins.
 * Have a few WAV files ready: a 16-bit stereo loop at 48 kHz, a 24-bit file, a 32-bit
@@ -89,6 +89,10 @@ None yet (2026-11-17).
 
 ## 3. Saving and loading
 
+- [ ] Resize grip (0.1.11): the hatched corner at the lower right shows the diagonal
+      resize pointer; dragging it resizes the window smoothly, with and without the
+      keyboard, at 100 % and at Windows display scaling of 150 %, down to 50 % and up to
+      200 %. The host may refuse a size: then the window stays as it is.
 - [ ] A saved song reopens with the same file, the same settings, window size,
       keyboard and octave.
 - [ ] Export right after opening a song: the export starts with sound, not silence.

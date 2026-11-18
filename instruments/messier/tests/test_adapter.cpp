@@ -81,7 +81,7 @@ class CounterEngine final : public QuantumEngine {
         }
     }
     std::int64_t index = 0;
-    std::array<Logged, 4096> log{};
+    std::array<Logged, 6144> log{}; // a full note queue (4096 since adapter 0.1.2) and more
     std::size_t logged = 0;
 };
 

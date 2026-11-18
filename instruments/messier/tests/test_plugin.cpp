@@ -9,6 +9,7 @@
 #include "test_support.h"
 
 #include "controller.h"
+#include "dialog_start.h"
 #include "display_data.h"
 #include "editor.h"
 #include "file_drop.h"
@@ -1242,8 +1243,107 @@ void TestLongPause() {
     CHECK(host.processor->Engine().EffectivePitch() == 1.0f); // 72 was let go
     CHECK(host.processor->Adapter().DroppedNotes() == 0);
     CHECK(host.allocations == 0);
+
+    // MS-R38 (0.1.11), Codex' case taken to its end: every note that can be held is held
+    // (16 channels of 128), all but one are let go while the engine rests. The queue holds
+    // all those releases: no "all notes off" ends the note still held.
+    HostScore all;
+    std::int64_t t = 4800;
+    for(int channel = 0; channel < 16; ++channel)
+        for(int note = 0; note < 128; ++note)
+            if(!(channel == 15 && note == 72))
+                all.push_back({t++, Ev::kNoteOn, note, 0.5, channel});
+    all.push_back({t++, Ev::kNoteOn, 72, 0.8, 15}); // the newest: it sounds, pitch 2
+    const std::int64_t stopped = t + 512;
+    all.push_back({stopped, Ev::kParam, static_cast<int>(kParamStop), 1.0});
+    t = stopped + 1000;
+    for(int channel = 0; channel < 16; ++channel)
+        for(int note = 0; note < 128; ++note)
+            if(!(channel == 15 && note == 72))
+                all.push_back({t++, Ev::kNoteOff, note, 0.0, channel});
+    const std::int64_t resumed = t + 1000;
+    all.push_back({resumed, Ev::kParam, static_cast<int>(kParamStop), 0.0});
+    PluginHost crowd({}, all);
+    CHECK(LoadState(*crowd.processor, MakeState(StartValues(), g_path)) == kResultOk);
+    crowd.Run(stopped, 256);
+    CHECK(crowd.processor->Engine().EffectivePitch() == 2.0f);
+    crowd.Run(resumed + 2048 - crowd.position, 256);
+    CHECK(crowd.processor->Adapter().DroppedNotes() == 0);
+    CHECK(crowd.processor->Engine().EffectivePitch() == 2.0f); // 72 on channel 16 still held
+    CHECK(crowd.allocations == 0);
     std::printf("long pause: a busy track while stopped neither fills the note queue nor loses the "
-                "release of the note held\n");
+                "release of the note held; all 2047 other held notes let go while resting, the "
+                "last one sounds on\n");
+}
+
+// The resize grip (0.1.11): a press starts a drag, moves report the distance from the
+// press in window pixels, the release ends it. The window's own size rules
+// (ConstrainEditorSize, as for a corner drag) are tested in TestViewLayout.
+void TestResizeGrip() {
+    int begun = 0;
+    std::vector<std::pair<double, double>> moved;
+    auto grip = VSTGUI::makeOwned<ResizeGrip>(VSTGUI::CRect(0, 0, 18, 18), VSTGUI::CColor(150, 156, 168),
+                                              [&] { ++begun; },
+                                              [&](double dx, double dy) { moved.push_back({dx, dy}); });
+    grip->DragTo(10, 10); // no press: nothing
+    CHECK(moved.empty() && !grip->Dragging());
+    grip->Press(880, 520);
+    CHECK(begun == 1 && grip->Dragging());
+    grip->DragTo(920, 545);
+    grip->DragTo(860, 500);
+    CHECK(moved.size() == 2 && moved[0] == std::make_pair(40.0, 25.0) && moved[1] == std::make_pair(-20.0, -20.0));
+    grip->Let();
+    grip->DragTo(1000, 1000);
+    CHECK(moved.size() == 2 && !grip->Dragging());
+    // A corner drag of 40 by 25 pixels from 100 %: a size of the window's aspect ratio.
+    const EditorSize start = EditorSizeFor(1.0, true);
+    const EditorSize asked{start.width + 40, start.height + 25};
+    const EditorSize allowed = ConstrainEditorSize(asked, start, 1.0, true, true);
+    CHECK(allowed.width > start.width && allowed.height > start.height);
+    CHECK(std::fabs(static_cast<double>(allowed.width) / allowed.height
+                    - static_cast<double>(start.width) / start.height) < 0.01);
+    std::printf("resize grip: a drag reports its distance from the press; the window follows it as "
+                "a corner drag, with its aspect ratio\n");
+}
+
+// MS-R39 (0.1.11): starting the LOAD... dialog. If the system cannot open it, LOAD...
+// works again at once and the reference VSTGUI took for the answer is given back; a
+// dialog that answered (also by cancelling) or is still open is left alone.
+void TestDialogStart() {
+    bool open = false;
+    int given_back = 0;
+    auto back = [&] { ++given_back; };
+    // The system could not create the dialog: no answer.
+    auto answered = std::make_shared<bool>(false);
+    CHECK(!StartDialog(open, answered, [] { return false; }, back));
+    CHECK(!open && given_back == 1);
+    // A second attempt works: the dialog opens and is cancelled (Windows answers, then
+    // returns false).
+    answered = std::make_shared<bool>(false);
+    CHECK(StartDialog(open, answered, [&] {
+        CHECK(open); // open while it runs
+        *answered = true;
+        open = false; // the answer's own reset
+        return false;
+    }, back));
+    CHECK(!open && given_back == 1);
+    // Started and still open (a platform that answers later): stays open.
+    answered = std::make_shared<bool>(false);
+    CHECK(StartDialog(open, answered, [] { return true; }, back));
+    CHECK(open && given_back == 1);
+    open = false;
+    // run() throws before an answer: reset, given back, the exception goes on to the
+    // button's guard.
+    answered = std::make_shared<bool>(false);
+    bool thrown = false;
+    try {
+        StartDialog(open, answered, []() -> bool { throw std::bad_alloc(); }, back);
+    } catch(const std::bad_alloc&) {
+        thrown = true;
+    }
+    CHECK(thrown && !open && given_back == 2);
+    std::printf("dialog start: a dialog that cannot open leaves LOAD... usable and gives its reference "
+                "back; an answered or open dialog is left alone\n");
 }
 
 // The map takes the mouse (0.1.8): a click or drag sets START to that place in the
@@ -2450,6 +2550,8 @@ int main() {
     TestSwitchesOnTheSample();
     TestScreenAndHostKeys();
     TestLongPause();
+    TestDialogStart();
+    TestResizeGrip();
     TestState();
     TestExportStart();
     TestMessagesAndKeyboard();

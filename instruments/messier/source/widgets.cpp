@@ -12,6 +12,7 @@
 #include "vstgui/lib/cdrawcontext.h"
 #include "vstgui/lib/cgraphicspath.h"
 #include "vstgui/lib/clinestyle.h"
+#include "vstgui/lib/cframe.h"
 #include "vstgui/lib/events.h"
 
 #include <algorithm>
@@ -316,6 +317,100 @@ void ToggleButton::onMouseDownEvent(MouseDownEvent& event) {
     if(!done && style_ != Style::Action)
         on_ = !on_;
     Guarded([&] { invalid(); });
+}
+
+ResizeGrip::ResizeGrip(const CRect& size, CColor colour, std::function<void()> begin,
+                       std::function<void(double, double)> drag)
+: CView(size), colour_(colour), begin_(std::move(begin)), drag_(std::move(drag)) {
+    setTooltipText("Drag to resize the window");
+}
+
+double ResizeGrip::Zoom() const {
+    const CFrame* frame = getFrame();
+    return frame ? frame->getZoom() : 1.0;
+}
+
+void ResizeGrip::Press(double x, double y) {
+    dragging_ = true;
+    start_x_ = x;
+    start_y_ = y;
+    if(begin_)
+        begin_();
+}
+
+void ResizeGrip::DragTo(double x, double y) {
+    if(dragging_ && drag_)
+        drag_(x - start_x_, y - start_y_);
+}
+
+void ResizeGrip::Let() {
+    dragging_ = false;
+}
+
+void ResizeGrip::draw(CDrawContext* context) {
+    Guarded([&] { DrawUnchecked(context); }); // MS-R37
+}
+
+void ResizeGrip::DrawUnchecked(CDrawContext* context) {
+    // Three diagonal hatch lines towards the corner, as Windows draws a size grip.
+    const CRect area = getViewSize();
+    context->setDrawMode(kAntiAliasing | kNonIntegralMode);
+    context->setFrameColor(colour_);
+    context->setLineWidth(1.5);
+    const double size = std::min(area.getWidth(), area.getHeight());
+    for(int i = 1; i <= 3; ++i) {
+        const double inset = size * (1.0 - 0.28 * i);
+        context->drawLine(CPoint(area.right - 2, area.top + inset), CPoint(area.left + inset, area.bottom - 2));
+    }
+}
+
+void ResizeGrip::onMouseEnterEvent(MouseEnterEvent& event) {
+    Guarded([&] {
+        if(CFrame* frame = getFrame())
+            frame->setCursor(kCursorNWSESize);
+    });
+    event.consumed = true;
+}
+
+void ResizeGrip::onMouseExitEvent(MouseExitEvent& event) {
+    Guarded([&] {
+        if(CFrame* frame = getFrame())
+            frame->setCursor(kCursorDefault);
+    });
+    event.consumed = true;
+}
+
+// The mouse position is in the frame's units (the grip sits directly in the frame);
+// times the zoom it is in window pixels from the window's corner at the top left, which
+// a resize from the lower right does not move.
+void ResizeGrip::onMouseDownEvent(MouseDownEvent& event) {
+    Guarded([&] {
+        if(!event.buttonState.isLeft())
+            return;
+        const double zoom = Zoom();
+        Press(event.mousePosition.x * zoom, event.mousePosition.y * zoom);
+        event.consumed = true;
+    });
+}
+
+void ResizeGrip::onMouseMoveEvent(MouseMoveEvent& event) {
+    Guarded([&] {
+        if(!dragging_)
+            return;
+        const double zoom = Zoom();
+        DragTo(event.mousePosition.x * zoom, event.mousePosition.y * zoom);
+        event.consumed = true;
+    });
+}
+
+void ResizeGrip::onMouseUpEvent(MouseUpEvent& event) {
+    Let();
+    event.consumed = true;
+}
+
+void ResizeGrip::onMouseCancelEvent(MouseCancelEvent& event) {
+    Let();
+    event.consumed = true;
 }
 
 } // namespace messier

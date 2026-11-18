@@ -14,7 +14,7 @@ supported by Qu-Bit Electronix; their name and the product name of the original 
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.1.10:** builds, passes Steinberg's validator, tested automatically (bit for
+**Status 0.1.11:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
@@ -31,7 +31,8 @@ them. Its check of 0.1.7 four more ([check](docs/CODEX_REVIEW_0.1.7.md),
 [report](docs/BUILD_REPORT_0.1.8.md)); 0.1.8 fixes them and adds drag and drop of WAV
 files. Its checks of 0.1.8 and 0.1.9 four more ([0.1.8](docs/CODEX_REVIEW_0.1.8.md),
 [0.1.9](docs/CODEX_REVIEW_0.1.9.md), [report](docs/BUILD_REPORT_0.1.10.md)); 0.1.10 fixes
-them, Codex' next check is open. The user has tried 0.1.7 and 0.1.8 in Studio One
+them. Codex released 0.1.10 for the DAW test ([check](docs/CODEX_REVIEW_0.1.10.md)); 0.1.11
+fixes its two remaining edge cases ([report](docs/BUILD_REPORT_0.1.11.md)). The user has tried 0.1.7 and 0.1.8 in Studio One
 (operation and sound). The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
 
@@ -161,6 +162,10 @@ their own sample, so the output does not depend on the host's block size (since
 **On the map** (since 0.1.8): a click or drag sets START to that place in the file (an
 edit the host records like a knob turn), the mouse wheel widens or narrows SPRAY (finer
 with Shift).
+
+**Window size:** drag the hatched grip in the lower right corner (since 0.1.11), or the
+window's edge; the window keeps its aspect ratio, from 50 to 200 %. The size is saved
+with the song.
 
 **LATCH** (next to KEYS): a key struck on the screen keyboard stays held after the mouse
 is let go, so the pitch stays changed. Clicking another key moves the hold there;

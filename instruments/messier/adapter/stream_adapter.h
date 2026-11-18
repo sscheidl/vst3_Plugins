@@ -40,7 +40,7 @@
 
 namespace messier {
 
-constexpr const char* kAdapterVersion = "0.1.1";
+constexpr const char* kAdapterVersion = "0.1.2";
 
 struct EngineEvent {
     enum Type : std::uint8_t { kNoteOn, kNoteOff, kAllNotesOff, kControl, kPitchBend };
@@ -67,7 +67,11 @@ class StreamAdapter {
   public:
     static constexpr int kQuantum = 64;
     static constexpr double kInternalRate = 48000.0;
-    static constexpr int kNoteCapacity = 1024;   // note events waiting for their quantum
+    // Note events waiting for their quantum. Since 0.1.2 (Messier 0.1.11, MS-R38) room
+    // for twice every note that can be held at once (16 channels of 128): while the
+    // plug-in's output rests, the queue does not drain, and the plug-in passes on at
+    // most one release for each held note there, so a pause cannot overflow it.
+    static constexpr int kNoteCapacity = 2 * 16 * 128;
     static constexpr int kControlKinds = 24;     // control events with index 0..23
     static constexpr int kControlCapacity = 256; // waiting points per control and for the wheel
 

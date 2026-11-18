@@ -3,6 +3,7 @@
 // its tuning lock and selectors; only the namespace is changed.
 #pragma once
 
+#include "vstgui/lib/ccolor.h"
 #include "vstgui/lib/cfont.h"
 #include "vstgui/lib/cview.h"
 
@@ -92,6 +93,41 @@ class ToggleButton : public VSTGUI::CView {
     Style style_;
     std::function<void(bool)> toggled_;
     VSTGUI::SharedPointer<VSTGUI::CFontDesc> font_;
+};
+
+// The resize grip in the window's lower right corner (0.1.11, the user's wish): a small
+// hatched square that is easier to hit than the window's edge. Dragging it reports how
+// far the mouse has moved since the press, in the window's pixels (frame units times
+// the frame's zoom, which the resize itself changes). The view sits directly in the
+// frame.
+class ResizeGrip : public VSTGUI::CView {
+  public:
+    ResizeGrip(const VSTGUI::CRect& size, VSTGUI::CColor colour, std::function<void()> begin,
+               std::function<void(double dx, double dy)> drag);
+
+    // What the mouse events do, in window pixels; public for tests, as VSTGUI's events
+    // need its platform.
+    void Press(double x, double y);
+    void DragTo(double x, double y);
+    void Let();
+    bool Dragging() const { return dragging_; }
+
+    void draw(VSTGUI::CDrawContext* context) override;
+    void DrawUnchecked(VSTGUI::CDrawContext* context);
+    void onMouseEnterEvent(VSTGUI::MouseEnterEvent& event) override;
+    void onMouseExitEvent(VSTGUI::MouseExitEvent& event) override;
+    void onMouseDownEvent(VSTGUI::MouseDownEvent& event) override;
+    void onMouseMoveEvent(VSTGUI::MouseMoveEvent& event) override;
+    void onMouseUpEvent(VSTGUI::MouseUpEvent& event) override;
+    void onMouseCancelEvent(VSTGUI::MouseCancelEvent& event) override;
+
+  private:
+    double Zoom() const;
+    VSTGUI::CColor colour_;
+    std::function<void()> begin_;
+    std::function<void(double, double)> drag_;
+    bool dragging_ = false;
+    double start_x_ = 0.0, start_y_ = 0.0;
 };
 
 } // namespace messier

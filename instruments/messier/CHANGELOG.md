@@ -1,5 +1,18 @@
 # Changes
 
+## 0.1.11 (2026-11-18)
+
+The two edge cases of Codex' check of 0.1.10 (`docs/CODEX_REVIEW_0.1.10.md`), and a
+resize grip; details in `docs/BUILD_REPORT_0.1.11.md`. The sound is unchanged.
+
+* New: a hatched grip in the window's lower right corner; dragging it resizes the
+  window, keeping its aspect ratio, as a corner drag of the window does.
+* If the system cannot open the LOAD... dialog, LOAD... works again at once (MS-R39);
+  before, it stayed blocked until the window was opened anew.
+* The engine's note queue holds twice every note that can be held at once (adapter
+  0.1.2), so letting go of very many held notes during a pause cannot end a note still
+  held (MS-R38).
+
 ## 0.1.10 (2026-11-18)
 
 The four findings of Codex' checks of 0.1.8 and 0.1.9 (`docs/CODEX_REVIEW_0.1.8.md`,

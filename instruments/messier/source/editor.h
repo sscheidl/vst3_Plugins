@@ -27,6 +27,7 @@ namespace messier {
 struct FileStatus;
 class KeyboardView;
 class MapView;
+class ResizeGrip;
 class ToggleButton;
 class WindowShapeView;
 
@@ -261,6 +262,11 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     bool Resize();
     // Records a change by the user; `settled` follows once it has stopped.
     void UserChanged();
+    // The resize grip (0.1.11): the size when the drag began, and the zoom for a drag
+    // of (dx, dy) window pixels from it, as a corner drag of the window would give.
+    void GripBegin();
+    void GripDrag(double dx, double dy);
+    EditorSize grip_start_{0, 0};
 
     std::array<Knob, kKnobCount> knobs_{};
     KeyboardView* keyboard_view_ = nullptr; // owned by the frame, like the views below
@@ -279,6 +285,7 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // Since 0.1.8: LATCH for the screen keyboard. Not saved; a window opens unlatched.
     ToggleButton* latch_button_ = nullptr;
     ToggleButton* stop_button_ = nullptr; // since 0.1.8
+    ResizeGrip* grip_ = nullptr;          // since 0.1.11
     bool latch_ = false;
     EngineDisplay shown_display_{};             // the newest display, also while closed
     std::shared_ptr<const WaveOverview> shown_wave_;

@@ -1,5 +1,6 @@
 #include "editor.h"
 
+#include "dialog_start.h"
 #include "guard.h"
 #include "file_drop.h"
 
@@ -54,6 +55,7 @@ constexpr CCoord kSmallValueTop = 272 + kEditorMapHeight;
 constexpr CCoord kKeyboardTop = kEditorTopHeight - 4;
 constexpr CCoord kKeyboardBottom = kEditorTopHeight + kKeyboardSectionHeight - 18;
 constexpr CCoord kButtonWidth = 52;
+constexpr CCoord kGripSize = 18; // the resize grip (0.1.11)
 
 // After the last step of a drag, wait this long before telling the host the
 // project changed. Hosts may do real work for that message.
@@ -152,6 +154,7 @@ void Editor::ForgetViews() {
     file_zone_ = nullptr;
     window_shape_ = nullptr;
     latch_button_ = nullptr;
+    grip_ = nullptr;
     stop_button_ = nullptr;
 }
 
@@ -355,6 +358,10 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
                                        "RESET", false, [this](bool) { PressReset(); },
                                        ToggleButton::Style::Action));
     reset->setTooltipText("Reset: playback back to START");
+    // The resize grip in the lower right corner (0.1.11), added last so that it is on top;
+    // LayOut() puts it into the corner of the height the keyboard leaves.
+    grip_ = Add(new ResizeGrip(CRect(0, 0, kGripSize, kGripSize), kDimText, [this] { GripBegin(); },
+                               [this](double dx, double dy) { GripDrag(dx, dy); }));
 
     if(!frame->open(parent, platformType)) {
         frame->forget();
@@ -401,6 +408,12 @@ void Editor::LayOut(int32 width, int32 height) {
         octave->setVisible(settings_.keyboard);
         octave->setMouseEnabled(settings_.transpose != limit);
         octave->invalid();
+    }
+    if(grip_) {
+        const CCoord bottom = EditorBaseHeight(settings_.keyboard);
+        grip_->setViewSize(CRect(kWidth - kGripSize - 2, bottom - kGripSize - 2, kWidth - 2, bottom - 2));
+        grip_->setMouseableArea(grip_->getViewSize());
+        grip_->invalid();
     }
     // Zooming invalidates and repaints the whole window, so only when needed.
     const double total = DisplayZoom(width, height);
@@ -467,6 +480,28 @@ void Editor::SetKeyboardTranspose(int semitones) {
     settings_.transpose = transpose;
     if(frame)
         LayOut(rect.getWidth(), rect.getHeight());
+    UserChanged();
+}
+
+void Editor::GripBegin() {
+    grip_start_ = {rect.getWidth(), rect.getHeight()};
+}
+
+void Editor::GripDrag(double dx, double dy) {
+    // As a corner drag of the window: the allowed size nearest to the asked one, with
+    // the aspect ratio and the zoom limits kept (ConstrainEditorSize).
+    const EditorSize asked{static_cast<int>(std::lround(grip_start_.width + dx)),
+                           static_cast<int>(std::lround(grip_start_.height + dy))};
+    const EditorSize allowed = ConstrainEditorSize(asked, grip_start_, scale_, settings_.keyboard, true);
+    const double zoom = EditorZoomForSize(allowed.width, allowed.height, scale_, settings_.keyboard);
+    if(zoom == settings_.zoom)
+        return;
+    const EditorSettings before = settings_;
+    settings_.zoom = zoom;
+    if(frame && !Resize()) {
+        settings_ = before; // the host keeps the size
+        return;
+    }
     UserChanged();
 }
 
@@ -645,7 +680,9 @@ void Editor::PressReset() {
 void Editor::ChooseFile() {
     if(!frame || dialog_open_)
         return;
-    CNewFileSelector* selector = CNewFileSelector::create(frame, CNewFileSelector::kSelectFile);
+    // MS-R39: owned from its creation, so that a failure while setting it up frees it.
+    const SharedPointer<CNewFileSelector> selector(
+        CNewFileSelector::create(frame, CNewFileSelector::kSelectFile), false); // owned
     if(!selector)
         return;
     selector->setTitle("Load a WAV file");
@@ -657,10 +694,11 @@ void Editor::ChooseFile() {
             selector->setInitialDirectory(file_tooltip_.substr(0, slash).c_str());
     }
     selector->addFileExtension(CFileExtension("WAVE", "wav"));
-    dialog_open_ = true;
     // The dialog may call back after this window has gone: then nothing happens.
     std::shared_ptr<bool> alive = alive_;
-    selector->run([this, alive](CNewFileSelector* chosen) {
+    auto answered = std::make_shared<bool>(false);
+    VSTGUI::CNewFileSelector::CallbackFunc answer = [this, alive, answered](CNewFileSelector* chosen) {
+        *answered = true;
         if(!*alive)
             return;
         dialog_open_ = false;
@@ -670,8 +708,17 @@ void Editor::ChooseFile() {
                 if(const char* path = chosen->getSelectedFile(0))
                     callbacks_.load(path);
         });
-    });
-    selector->forget();
+    };
+    // MS-R39: if the system cannot open the dialog, LOAD... works again at once.
+    // VSTGUI's run() keeps one reference for the answer it then never gives; that one
+    // is given back here (and only if run() took it).
+    const auto references = selector->getNbReference();
+    StartDialog(
+        dialog_open_, answered, [&] { return selector->run(std::move(answer)); },
+        [&] {
+            if(selector->getNbReference() > references)
+                selector->forget();
+        });
 }
 
 void Editor::ShowDisplay(const EngineDisplay& display, std::shared_ptr<const WaveOverview> wave) noexcept {
