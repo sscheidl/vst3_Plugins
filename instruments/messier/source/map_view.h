@@ -51,6 +51,9 @@ class MapView : public VSTGUI::CView {
     void SetSkin(std::shared_ptr<const Skin> skin) noexcept;
     // BLEND (normalized): the nebula fades and the grains brighten towards Granular.
     void SetBlend(double blend) noexcept;
+    // PITCH in octaves (0.2.3): it tints the grains' halo, rays and tails, warm at 0.
+    void SetPitch(double octaves) noexcept;
+    static VSTGUI::CColor PitchTint(const VSTGUI::CColor& warm, double octaves);
     // START and SIZE (normalized): the slider's thumb, and for kPreview after a change
     // the loop as the core will set it (START x length; SIZE squared of the rest), ahead
     // of the displays. MS-R46: after that the loop the core reports, which also follows
@@ -153,7 +156,7 @@ class MapView : public VSTGUI::CView {
     std::array<Ended, kMaxEnded> ended_{};
     std::size_t ended_count_ = 0;
     bool stopped_ = false;
-    double drift_speed_ = 0, drift_offset_ = 0;
+    double drift_speed_ = 0, drift_a_ = 0, drift_b_ = 0; // b: the farther nebula
     Clock::time_point drift_at_{};
 
     EngineDisplay display_{};
@@ -166,6 +169,8 @@ class MapView : public VSTGUI::CView {
     Clock::time_point drawn_at_{};
     VSTGUI::CCoord inset_ = 0;
     double blend_ = 0.5;
+    double pitch_ = 0;
+    VSTGUI::CColor tail_ink_{255, 200, 140, 255}; // the tails' colour this frame
     double start_ = 0.0, size_ = 1.0;
     bool start_known_ = false, size_known_ = false;
     DropShown drop_state_ = DropShown::kNone;

@@ -71,7 +71,7 @@ std::shared_ptr<WaveOverview> MakeWave() {
     return wave;
 }
 
-EngineDisplay MakeDisplay(bool frozen) {
+EngineDisplay MakeDisplay(bool frozen, bool dense = false) {
     EngineDisplay d;
     d.sequence = 1;
     d.frames = kFrames;
@@ -93,6 +93,14 @@ EngineDisplay MakeDisplay(bool frozen) {
     d.grain_count = static_cast<std::uint32_t>(std::size(grains));
     for(std::uint32_t i = 0; i < d.grain_count; ++i)
         d.grains[i] = grains[i];
+    if(dense) { // 0.2.3: many grains at once, for the rays at high density
+        d.grain_count = EngineDisplay::kMaxGrains;
+        for(std::uint32_t i = 0; i < d.grain_count; ++i) {
+            const double k = (i * 0.618034) - std::floor(i * 0.618034);
+            d.grains[i] = {static_cast<float>((11.0 + 6.0 * k) * kRate), static_cast<float>((i * 0.37) - std::floor(i * 0.37)),
+                           static_cast<float>(0.15 + 0.7 * k), 48000.0f, 2.5f};
+        }
+    }
     return d;
 }
 
@@ -132,6 +140,8 @@ struct Case {
     bool keyboard;
     int transpose;
     bool latch, stop, freeze;
+    double pitch = 0;   // octaves (0.2.3: the grains' tint)
+    bool dense = false; // many grains
 };
 
 } // namespace
@@ -165,18 +175,20 @@ int main(int argc, char** argv) {
 
     const auto wave = MakeWave();
     const Case cases[] = {
-        {"keys_lowest", true, -kKeyboardTransposeLimit, true, false, false},
-        {"keys_highest_stop", true, kKeyboardTransposeLimit, false, true, false},
-        {"nokeys_freeze", false, kKeyboardDefaultTranspose, true, false, true},
+        {"keys_lowest", true, -kKeyboardTransposeLimit, true, false, false, -3.0},
+        {"keys_highest_stop", true, kKeyboardTransposeLimit, false, true, false, 0.0},
+        {"nokeys_freeze", false, kKeyboardDefaultTranspose, true, false, true, 2.0},
+        {"dense_pitch_down", true, kKeyboardDefaultTranspose, false, false, false, -1.5, true},
     };
     for(const Case& c : cases) {
         controller->setParamNormalized(kParamStop, c.stop ? 1.0 : 0.0);
         controller->setParamNormalized(kParamFreeze, c.freeze ? 1.0 : 0.0);
+        controller->setParamNormalized(kParamPitch, PitchNormalized(c.pitch));
         EditorSettings settings;
         settings.keyboard = c.keyboard;
         settings.transpose = c.transpose;
         IPtr<Editor> editor(new Editor(controller, settings, EditorCallbacks{}), false);
-        editor->ShowDisplay(MakeDisplay(c.freeze), wave);
+        editor->ShowDisplay(MakeDisplay(c.freeze, c.dense), wave);
         FileStatus status;
         status.path = "C:\\Samples\\down from.wav";
         status.sound = SoundState::kReady;
@@ -191,7 +203,7 @@ int main(int argc, char** argv) {
         editor->SetLatch(c.latch);
         if(c.latch && editor->Keyboard())
             editor->Keyboard()->MouseDownOn(kKeyboardLowNote + c.transpose + 4); // a held E
-        editor->ShowDisplay(MakeDisplay(c.freeze), wave);
+        editor->ShowDisplay(MakeDisplay(c.freeze, c.dense), wave);
         for(const double scale : {1.0, 2.0, 0.5}) {
             char name[96];
             std::snprintf(name, sizeof name, "messier_%s_%gx.png", c.name, scale);

@@ -209,6 +209,15 @@ The new window (0.2.0, Slate; judge the look as well as what it shows):
       a file loads: no crash (MS-R44).
 - [ ] A short loop (SIZE low) at +1x: the playhead runs forward (MS-R45).
 
+0.2.3:
+
+- [ ] Bright grains show four fine rays; with many grains (high DENSITY) the plate stays
+      calm and the playhead readable.
+- [ ] PITCH at -3, 0 and +2 octaves and automated across 0: rays, halo and tails turn
+      rose below 0 and blue-violet above, warm at 0; the heads' core stays ivory.
+- [ ] Stopping the host's transport (displays stop coming): the nebula comes to rest.
+- [ ] Watched for a few minutes while playing: the nebulae never jump.
+
 ## 7. Listening
 
 - [ ] Against the Daisy kit with Nebulae on Daisy 0.2.2, if at hand, same file, same

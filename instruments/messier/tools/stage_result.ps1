@@ -55,7 +55,8 @@ foreach ($document in 'README.md', 'CHANGELOG.md', 'UPSTREAM.md', 'components.js
     'docs\BUILD_REPORT_0.1.10.md', 'docs\CODEX_PRUEFAUFTRAG_0.1.10.md', 'docs\CODEX_REVIEW_0.1.10.md',
     'docs\BUILD_REPORT_0.1.11.md', 'docs\BUILD_REPORT_0.2.0.md', 'docs\CODEX_PRUEFAUFTRAG_0.2.0.md',
     'docs\CODEX_REVIEW_0.2.0.md', 'docs\BUILD_REPORT_0.2.1.md', 'docs\CODEX_PRUEFAUFTRAG_0.2.1.md',
-    'docs\CODEX_REVIEW_0.2.1.md', 'docs\BUILD_REPORT_0.2.2.md', 'docs\CODEX_PRUEFAUFTRAG_0.2.2.md') {
+    'docs\CODEX_REVIEW_0.2.1.md', 'docs\BUILD_REPORT_0.2.2.md', 'docs\CODEX_PRUEFAUFTRAG_0.2.2.md',
+    'docs\BUILD_REPORT_0.2.3.md', 'docs\CODEX_PRUEFAUFTRAG_0.2.3.md') {
     $source = Join-Path $plugin $document
     if (Test-Path $source) { Copy-Item $source (Join-Path $Target (Split-Path $document -Leaf)) -Force }
 }

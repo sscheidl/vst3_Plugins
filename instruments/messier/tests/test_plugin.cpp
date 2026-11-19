@@ -1695,10 +1695,13 @@ void TestWindow022() {
         d.rendered = 1;
         Clock::time_point now{};
         now += std::chrono::seconds(1);
-        // The window draws about every 20 ms; each frame moves the drift on.
+        // The window draws about every 20 ms; each frame moves the drift on, and the
+        // displays keep coming (0.2.3: without them the drift rests).
         const auto run = [&](int frames) {
             for(int k = 0; k < frames; ++k) {
                 now += ms(20);
+                ++d.rendered;
+                map->ShowAt(d, nullptr, now);
                 map->AdvanceDrift(now);
             }
         };
@@ -1741,6 +1744,21 @@ void TestWindow022() {
         CHECK(map->DriftSpeed() == 0.0);
         map->SetStopped(false);
         CHECK(map->DriftTarget() == 9.0);
+        // 0.2.3: no displays any more, and the drift comes to rest.
+        run(300);
+        for(int k = 0; k < 300; ++k) {
+            now += ms(20);
+            map->AdvanceDrift(now);
+        }
+        CHECK(map->DriftSpeed() == 0.0);
+        // 0.2.3: a late overview is drawn but is no new display: the head stays at rest.
+        const EngineDisplay same = map->Shown();
+        auto wave = std::make_shared<WaveOverview>();
+        wave->sequence = same.sequence;
+        wave->frames = same.frames;
+        wave->rate = 48000;
+        map->ShowAt(same, wave, now);
+        CHECK(map->ShowsWave() && map->HeadAt(now + ms(50)) == same.playhead);
     }
     {
         auto map = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
@@ -1766,6 +1784,19 @@ void TestWindow022() {
         CHECK(map->Afterglows(t + ms(30)) == 1);
         CHECK(map->Afterglows(t + ms(10 + 299)) == 1); // kTrail: 0.3 s after it ended
         CHECK(map->Afterglows(t + ms(10 + 301)) == 0);
+        // 0.2.3 (Codex' check): a running grain with the same pan, speed and window rate
+        // but elsewhere in its window does not hide the one that ended.
+        auto twin = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
+        EngineDisplay a = d;
+        a.grains[1] = {8000.0f, 0.2f, 0.2f, 48000.0f, 10.0f};
+        twin->ShowAt(a, nullptr, t);
+        EngineDisplay b = a;
+        b.rendered = 2;
+        b.grain_count = 1;
+        b.grains[0] = a.grains[1];
+        b.grains[0].phase = 0.5f;
+        twin->ShowAt(b, nullptr, t + ms(30));
+        CHECK(twin->Afterglows(t + ms(30)) == 1);
         // Another file: the glow is gone at once.
         EngineDisplay other = next;
         other.sequence = 2;
@@ -1785,6 +1816,9 @@ void TestWindow022() {
     const SkinColours& slate = PresetInfo(GuiPreset::kSlate).colours;
     CHECK(slate.control == VSTGUI::CColor(157, 172, 235) && slate.value == VSTGUI::CColor(190, 200, 255));
     CHECK(slate.marker == VSTGUI::CColor(227, 115, 61));
+    // 0.2.3: PITCH tints the grains only away from 0 octaves.
+    CHECK(MapView::PitchTint(slate.tail, 0.0) == slate.tail && MapView::PitchTint(slate.tail, -3.0) != slate.tail
+          && MapView::PitchTint(slate.tail, 2.0).blue > slate.tail.blue);
     std::printf("window 0.2.2 design: the nebula drifts with the signed tempo, eased, at rest when frozen or "
                 "stopped, not turned by a loop's turn; ended grains glow on for %.1f s, a new file clears "
                 "them; header group, LATCH/KEYS, the triangle's lane; control and marker colours apart\n",
@@ -2646,6 +2680,7 @@ void TestDisplayPath() {
     CHECK(refused([](EngineDisplay& d) { d.head_speed = std::numeric_limits<float>::quiet_NaN(); }));
     CHECK(refused([](EngineDisplay& d) { d.grains[0].speed = std::numeric_limits<float>::infinity(); }));
     CHECK(refused([](EngineDisplay& d) { d.grains[0].phase_rate = -1.0f; }));
+    CHECK(refused([](EngineDisplay& d) { d.grains[0].phase_rate = std::numeric_limits<float>::min(); })); // 0.2.3
     CHECK(!refused([](EngineDisplay& d) { d.head_speed = -192000.0f; }));
     CHECK(refused([](EngineDisplay& d) { d.sequence = 0; }));
     CHECK(refused([](EngineDisplay& d) { d.frames = 0; })); // no file, yet a sequence

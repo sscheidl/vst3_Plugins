@@ -39,6 +39,15 @@ constexpr double kMaxAhead = 0.15;
 // The same display for longer than this (a large host buffer is shorter): the engine
 // rests, nothing moves on.
 constexpr double kRestAfter = 0.1;
+// 0.2.3: an ended grain still in the next display was made at most this long before its
+// end (a display's age when it arrives, a large host buffer included).
+constexpr double kSameGrainSlack = 0.25;
+// 0.2.3: without any new display for this long (the host stopped processing, the
+// displays stopped coming) the nebula's drift comes to rest as at STOP.
+constexpr double kDriftStaleAfter = 0.5;
+// The nebulae's tiles repeat at this share of their width; the farther one drifts slower.
+constexpr double kTileShare = 0.9;
+constexpr double kFarDrift = 0.62;
 // A waveform bitmap that could not be made is tried again after this (MS-R47).
 constexpr auto kWaveRetry = std::chrono::seconds(2);
 
@@ -72,13 +81,19 @@ void MapView::Show(const EngineDisplay& display, std::shared_ptr<const WaveOverv
 
 void MapView::ShowAt(const EngineDisplay& display, std::shared_ptr<const WaveOverview> wave,
                      Clock::time_point now) noexcept {
-    if(wave == wave_ && std::memcmp(&display, &display_, sizeof display) == 0) {
+    if(std::memcmp(&display, &display_, sizeof display) == 0) {
         // The same again, the count of rendered quanta too: no audio block in between
         // (a large host buffer), or the engine rests (STOP, Bypass, a host that stopped
         // processing). Only a display unchanged for longer than a large buffer stops
         // playhead and grains where the display has them.
         if(Seconds(now - shown_at_) > kRestAfter)
             resting_ = true;
+        // 0.2.3: an overview that arrives late is drawn, but it is no new display: the
+        // playhead's and grains' prediction and the resting go on as they were.
+        if(wave != wave_) {
+            wave_ = std::move(wave);
+            Guarded([&] { invalid(); });
+        }
         return;
     }
     // 0.2.2: the grains of the display before that have ended by now glow on a while;
@@ -91,16 +106,23 @@ void MapView::ShowAt(const EngineDisplay& display, std::shared_ptr<const WaveOve
             if(!(g.phase_rate > 0) || !(g.phase < 1))
                 continue;
             const double left = (1.0 - g.phase) / g.phase_rate; // seconds still to sound
+            const double since = Seconds(now - shown_at_);
+            // 0.2.3: compared in seconds before the time point is made, so that a grain
+            // far from its end never meets a cast beyond the clock's range.
+            if(!(left <= since) || since - left >= kTrail)
+                continue; // sounds on in the new display, or its glow is gone
             const Clock::time_point at =
                 shown_at_ + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(left));
-            if(at > now || Seconds(now - at) >= kTrail)
-                continue; // sounds on in the new display, or its glow is gone
             // The display may have been made just before the grain ended: then it is still
-            // in it (its pan, speed and window rate are its own for its whole life).
+            // in it, with its pan, speed and window rate (its own for its whole life) and
+            // further on in its window, by about the time since. 0.2.3: a grain with the
+            // same three values but elsewhere in its window is another one; this one ended.
             bool sounds = false;
             for(std::uint32_t k = 0; k < std::min(display.grain_count, EngineDisplay::kMaxGrains); ++k) {
                 const GrainDot& h = display.grains[k];
-                sounds = sounds || (h.pan == g.pan && h.speed == g.speed && h.phase_rate == g.phase_rate);
+                sounds = sounds
+                         || (h.pan == g.pan && h.speed == g.speed && h.phase_rate == g.phase_rate
+                             && h.phase >= g.phase && h.phase >= g.phase + g.phase_rate * (since - kSameGrainSlack));
             }
             if(sounds)
                 continue;
@@ -156,11 +178,17 @@ double MapView::DriftTarget() const {
 void MapView::AdvanceDrift(Clock::time_point now) noexcept {
     const double dt = drift_at_ == Clock::time_point{} ? 0.0 : std::clamp(Seconds(now - drift_at_), 0.0, 0.1);
     drift_at_ = now;
-    const double target = DriftTarget();
+    // 0.2.3: no new display for a while, and the drift rests as at STOP.
+    const double target = Seconds(now - shown_at_) > kDriftStaleAfter ? 0.0 : DriftTarget();
     drift_speed_ += (target - drift_speed_) * (1.0 - std::exp(-dt / kDriftEase));
     if(target == 0.0 && std::abs(drift_speed_) < 0.01)
         drift_speed_ = 0.0; // at rest
-    drift_offset_ = std::fmod(drift_offset_ + drift_speed_ * dt, 1.0e6);
+    // 0.2.3: each nebula's place as a share of its tile period (which does not swell), so
+    // that neither the swell nor a long drift makes a tile jump.
+    const double period = std::max(1.0, (getViewSize().getWidth() - 2 * inset_ + 120) * kTileShare);
+    const auto turn = [](double share) { return share - std::floor(share); };
+    drift_a_ = turn(drift_a_ + drift_speed_ * dt / period);
+    drift_b_ = turn(drift_b_ + kFarDrift * drift_speed_ * dt / period);
 }
 
 double MapView::Ahead(Clock::time_point now) const {
@@ -214,6 +242,22 @@ CRect MapView::SnowflakeBox() const {
 void MapView::SetSkin(std::shared_ptr<const Skin> skin) noexcept {
     skin_ = std::move(skin);
     Guarded([&] { invalid(); });
+}
+
+void MapView::SetPitch(double octaves) noexcept {
+    pitch_ = std::isfinite(octaves) ? std::clamp(octaves, -3.0, 2.0) : 0.0;
+}
+
+CColor MapView::PitchTint(const CColor& warm, double octaves) {
+    // 0.2.3 (brief point 13): warm at 0 octaves, towards a muted rose down to -3 and a
+    // light blue-violet up to +2; at most 55 % of the way, so that it stays a tint.
+    if(!std::isfinite(octaves) || octaves == 0)
+        return warm;
+    const double share = octaves < 0 ? std::min(1.0, -octaves / 3.0) : std::min(1.0, octaves / 2.0);
+    const CColor to = octaves < 0 ? CColor(222, 138, 150) : CColor(168, 180, 255);
+    const double k = 0.55 * std::pow(share, 0.8);
+    const auto mix = [&](uint8_t a, uint8_t b) { return static_cast<uint8_t>(std::lround(a + (b - a) * k)); };
+    return CColor(mix(warm.red, to.red), mix(warm.green, to.green), mix(warm.blue, to.blue), warm.alpha);
 }
 
 void MapView::SetBlend(double blend) noexcept {
@@ -335,15 +379,14 @@ void MapView::DrawTrail(CDrawContext* context, double x, double y, double speed,
     }
     const CCoord from = speed > 0 ? x - length : x + length;
     const auto glow = [&](double age) { return std::pow(std::clamp(1.0 - age / kTrail, 0.0, 1.0), 1.6) * alpha; };
-    const SkinColours& c = skin_->Colours();
     auto path = owned(context->createGraphicsPath());
     if(!path)
         return;
     path->addRect(CRect(std::min(from, x), y - thickness / 2, std::max(from, x), y + thickness / 2));
-    auto gradient = owned(CGradient::create(0.0, 1.0, WithAlpha(c.tail, glow(far)), WithAlpha(c.tail, glow(since))));
+    auto gradient = owned(CGradient::create(0.0, 1.0, WithAlpha(tail_ink_, glow(far)), WithAlpha(tail_ink_, glow(since))));
     if(!gradient)
         return;
-    gradient->addColorStop(0.5, WithAlpha(c.tail, glow((far + since) / 2)));
+    gradient->addColorStop(0.5, WithAlpha(tail_ink_, glow((far + since) / 2)));
     context->fillLinearGradient(path, *gradient, CPoint(from, y), CPoint(x, y));
 }
 
@@ -425,7 +468,8 @@ void MapView::DrawUnchecked(CDrawContext* context) {
             if(!image || alpha <= 0.002)
                 return;
             const CCoord w = (width + 120) * swell, h = (plate.getHeight() + 40) * swell;
-            const CCoord period = w * 0.9; // the clouds' faded ends overlap a little
+            // The clouds' faded ends overlap a little; the period does not swell (0.2.3).
+            const CCoord period = (width + 120) * kTileShare;
             const CCoord cx0 = (plate.left + plate.right) / 2 + std::fmod(dx, period);
             const CCoord cy = (plate.top + plate.bottom) / 2 + dy;
             for(int n = -2; n <= 2; ++n) {
@@ -436,9 +480,9 @@ void MapView::DrawUnchecked(CDrawContext* context) {
                               static_cast<float>(alpha));
             }
         };
-        cloud(nebula_a, drift_offset_, wave_of(53, 1.1) * 12, 1.0 + 0.05 * wave_of(90, 0.4),
+        cloud(nebula_a, drift_a_ * (width + 120) * kTileShare, wave_of(53, 1.1) * 12, 1.0 + 0.05 * wave_of(90, 0.4),
               strength * (0.35 + 0.65 * fade));
-        cloud(nebula_b, drift_offset_ * 0.62 + (width + 120) * 0.45, wave_of(61, 2.3) * 12,
+        cloud(nebula_b, (drift_b_ * kTileShare + 0.45) * (width + 120), wave_of(61, 2.3) * 12,
               1.0 + 0.05 * wave_of(77, 2.0), strength * (0.35 + 0.65 * (1.0 - fade)));
 
         // The waveform on the glass (0.2.1, the user's trial).
@@ -519,6 +563,11 @@ void MapView::DrawUnchecked(CDrawContext* context) {
             // panorama, which does not move), also a while after the grain ended. Between
             // displays they move on at their own speeds.
             const double alpha = 0.85 + 0.15 * blend_;
+            // 0.2.3: PITCH tints halo, rays and tails; the head's core stays ivory.
+            tail_ink_ = PitchTint(c.tail, pitch_);
+            const CColor ray_ink = PitchTint(c.grain, pitch_);
+            // Many grains at once: fainter rays, so that the plate stays calm.
+            const double calm = std::min(1.0, 6.0 / std::max<std::uint32_t>(1, d.grain_count));
             const double frame_width = width / frames;
             const double ahead = Ahead(now);
             const auto y_of = [&](float pan) {
@@ -558,11 +607,30 @@ void MapView::DrawUnchecked(CDrawContext* context) {
                 const CCoord halo = r * 3.6 + 3.0;
                 if(auto path = owned(context->createGraphicsPath())) {
                     path->addEllipse(CRect(x - halo, y - halo, x + halo, y + halo));
-                    if(auto gradient = owned(CGradient::create(0.0, 1.0, WithAlpha(c.tail, alpha * level * 0.55),
-                                                               WithAlpha(c.tail, 0.0)))) {
-                        gradient->addColorStop(0.3, WithAlpha(c.tail, alpha * level * 0.22));
+                    if(auto gradient = owned(CGradient::create(0.0, 1.0, WithAlpha(tail_ink_, alpha * level * 0.55),
+                                                               WithAlpha(tail_ink_, 0.0)))) {
+                        gradient->addColorStop(0.3, WithAlpha(tail_ink_, alpha * level * 0.22));
                         context->fillRadialGradient(path, *gradient, CPoint(x, y), halo);
                     }
+                }
+                // 0.2.3 (brief point 13): a bright head gets four fine diffraction rays,
+                // across and down, that fade outwards and with the head.
+                if(level > 0.35) {
+                    const double glow = alpha * calm * (level - 0.35) / 0.65 * 0.85;
+                    const CCoord reach = r + 7.0 + 14.0 * level, half = 0.5;
+                    const auto ray = [&](CPoint to, CRect bar) {
+                        auto path = owned(context->createGraphicsPath());
+                        auto gradient = owned(CGradient::create(0.0, 1.0, WithAlpha(ray_ink, glow), WithAlpha(ray_ink, 0.0)));
+                        if(!path || !gradient)
+                            return;
+                        gradient->addColorStop(0.35, WithAlpha(ray_ink, glow * 0.35));
+                        path->addRect(bar);
+                        context->fillLinearGradient(path, *gradient, CPoint(x, y), to);
+                    };
+                    ray(CPoint(x + reach, y), CRect(x, y - half, x + reach, y + half));
+                    ray(CPoint(x - reach, y), CRect(x - reach, y - half, x, y + half));
+                    ray(CPoint(x, y + reach), CRect(x - half, y, x + half, y + reach));
+                    ray(CPoint(x, y - reach), CRect(x - half, y - reach, x + half, y));
                 }
                 context->setFillColor(CColor(0, 0, 0, static_cast<uint8_t>(40 + 50 * level)));
                 context->drawEllipse(CRect(x - r - 0.7, y - r - 0.7, x + r + 0.7, y + r + 0.7), kDrawFilled);

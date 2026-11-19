@@ -9,12 +9,12 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 0.2.2, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 0.2.3, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.2.2:** builds, passes Steinberg's validator, tested automatically (bit for
+**Status 0.2.3:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
@@ -37,7 +37,9 @@ the window of the window study ([report](docs/BUILD_REPORT_0.2.0.md)); Codex rel
 the DAW test with four findings ([check](docs/CODEX_REVIEW_0.2.0.md)), which 0.2.1 fixes
 together with the user's first look at it ([report](docs/BUILD_REPORT_0.2.1.md)). Codex' check
 of 0.2.1 found four more ([check](docs/CODEX_REVIEW_0.2.1.md)); 0.2.2 fixes them and brings the
-user's design round for Slate ([report](docs/BUILD_REPORT_0.2.2.md)). The user
+user's design round for Slate ([report](docs/BUILD_REPORT_0.2.2.md)); 0.2.3 fixes what Codex'
+probe checks of 0.2.2 showed and adds the grains' rays and PITCH tint
+([report](docs/BUILD_REPORT_0.2.3.md)). The user
 has tried 0.1.7, 0.1.8 and 0.2.0 in Studio One
 (operation and sound). The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
@@ -53,7 +55,9 @@ quarters of the panorama; the loop (following START and SIZE at once),
 the spray range around the playhead and the sounding grains are drawn from the engine's
 real state. Each grain is a shooting star: its head flares with the grain's window and
 burns out, its path through the file glows on for 0.3 s (across only; down is its
-panorama, left at the top; since 0.2.2 also a while after the grain ended). Between the
+panorama, left at the top; since 0.2.2 also a while after the grain ended). Since 0.2.3
+bright heads carry four fine rays, and PITCH tints halo, rays and tails (rose down,
+blue-violet up, warm at 0). Between the
 engine's displays playhead and grains move on at the speeds the engine reports (since
 0.2.2). The orange triangle above the plate, in a lane of its own, marks the playhead. While Freeze holds the playhead, it is dashed and carries a
 snowflake; a click on the snowflake ends Freeze. Below lie SPRAY, seven knobs and Volume

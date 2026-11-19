@@ -1,5 +1,20 @@
 # Changes
 
+## 0.2.3 (2026-11-19)
+
+Window only; the sound is unchanged. Details in `docs/BUILD_REPORT_0.2.3.md`.
+
+* Codex' probe checks of 0.2.2 (it wrote no report): an ended grain keeps its glow
+  although a running grain has the same pan, speed and window rate; a late waveform
+  overview no longer restarts the playhead's prediction and the drift; without new
+  displays the nebula's drift comes to rest after 0.5 s; the nebula's tiles no longer
+  jump when they swell after a long drift; the display reader refuses a grain window
+  longer than 1000 s.
+* Brief point 13: bright grain heads get four fine diffraction rays (across and down)
+  that fade outwards and with the head, fainter when many grains sound. PITCH tints
+  halo, rays and tails: warm at 0 octaves, towards a muted rose down to -3, towards a
+  light blue-violet up to +2, at most 55 % of the way; the head's core stays ivory.
+
 ## 0.2.2 (2026-11-19)
 
 Codex' check of 0.2.1 (`docs/CODEX_REVIEW_0.2.1.md`) and the user's design round for

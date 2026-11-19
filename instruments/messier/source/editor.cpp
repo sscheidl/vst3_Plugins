@@ -227,6 +227,7 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
         map_view_->SetStart(controller->getParamNormalized(kParamStart));
         map_view_->SetSize(controller->getParamNormalized(kParamSize));
         map_view_->SetBlend(controller->getParamNormalized(kParamBlend));
+        map_view_->SetPitch(PitchOctaves(controller->getParamNormalized(kParamPitch)));
         map_view_->SetStopped(IsOn(controller->getParamNormalized(kParamStop)));
     }
     // Since 0.1.8: on the map a click or drag sets START, the wheel SPRAY, as edits the
@@ -1111,6 +1112,8 @@ void Editor::ParameterChanged(ParamID id, ParamValue normalized) {
         map_view_->SetSize(normalized); // the loop at once (0.2.1)
     if(id == kParamBlend && map_view_)
         map_view_->SetBlend(normalized);
+    if(id == kParamPitch && map_view_)
+        map_view_->SetPitch(PitchOctaves(normalized)); // the grains' tint (0.2.3)
     // 0.2.1: also while the host automates and holds back the timer; MS-R44: not from
     // inside the controller's call.
     AnimateLater();
