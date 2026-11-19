@@ -11,8 +11,9 @@ stehen im [Build-Bericht 0.2.3](BUILD_REPORT_0.2.3.md) (Englisch).
 ## Was du prüfst
 
 * Repository `vst3_Plugins`, Branch `messier-gui`, Worktree `.work/messier-gui/wt`.
-* 0.2.3 auf `085d8ce` (0.2.2, gepusht). Ist 0.2.3 committet, prüfe diesen Commit und nenne
-  ihn; sonst den Arbeitsstand (`git -C .work/messier-gui/wt diff 085d8ce`).
+* 0.2.3 ist `cc35386` und `a77041c` (MS-R48) auf `085d8ce` (0.2.2), gepusht:
+  `git -C .work/messier-gui/wt diff 085d8ce a77041c`. Ein späterer Commit, der nur diesen
+  Prüfauftrag ändert, gehört nicht zur Prüfung.
 * Der Designauftrag, Punkt 13: `out/messier-gui-entwurf-2026-11-19/CLAUDE_AUFTRAG_MESSIER_GUI.md`
   im Haupt-Checkout.
 
