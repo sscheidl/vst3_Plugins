@@ -9,12 +9,12 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 0.2.5, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 0.2.7, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.2.5:** builds, passes Steinberg's validator, tested automatically (bit for
+**Status 0.2.7:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
@@ -43,7 +43,10 @@ probe checks of 0.2.2 showed and adds the grains' rays and PITCH tint
 ([check](docs/CODEX_REVIEW_0.2.3.md)); 0.2.4 fixes its two findings and brings the GUI
 standard with all four presets ([report](docs/BUILD_REPORT_0.2.4.md)). Codex released 0.2.4
 as well ([check](docs/CODEX_REVIEW_0.2.4.md)); 0.2.5 fixes its three findings, brings HUE and
-TRAIL and the presets Plum and Gold ([report](docs/BUILD_REPORT_0.2.5.md)). The user
+TRAIL and the presets Plum and Gold ([report](docs/BUILD_REPORT_0.2.5.md)); 0.2.6 follows
+the user's look at it: HUE turns only the hue, TRAIL is fixed and WAVE takes its place
+([report](docs/BUILD_REPORT_0.2.6.md)); 0.2.7 makes the file name follow every load in
+Studio One and sets it upright ([report](docs/BUILD_REPORT_0.2.7.md)). The user
 has tried 0.1.7, 0.1.8 and 0.2.0 in Studio One
 (operation and sound). The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
@@ -58,7 +61,7 @@ and Freeze; a grid of crosses marks the seconds and the
 quarters of the panorama; the loop (following START and SIZE at once),
 the spray range around the playhead and the sounding grains are drawn from the engine's
 real state. Each grain is a shooting star: its head flares with the grain's window and
-burns out, its path through the file glows on for 0.45 s by default (across only; down is its
+burns out, its path through the file glows on for 0.45 s (across only; down is its
 panorama, left at the top; since 0.2.2 also a while after the grain ended). Since 0.2.3
 bright heads carry four fine rays, and PITCH tints halo, rays and tails (rose down,
 blue-violet up, warm at 0). Between the
@@ -205,12 +208,58 @@ keeps its aspect ratio, from 50 to 200 %. The size is saved with the song.
 **GUI preset:** the palette symbol in the header chooses the look (since 0.2.0); saved
 with the song. A song of 0.1.x opens with Slate.
 
-**Accent colour:** open DETAILS and drag the HUE slider to change the labels,
-START fill and held key together. Double-click it to restore the preset's colour. The
-project remembers each preset's accent.
+**Custom skins** (since 0.2.7; 0.2.6 had them in a test build only): the window takes
+bitmaps and colour tables from a folder named `Messier-Skin` before its own, file by file.
+It looks in two places, and for each file the first one that has it wins:
 
-**Trail:** the TRAIL knob on the right of DETAILS sets the grain path's fade time from
-150 to 900 ms. Its default is 450 ms. It affects the display and is saved with the project.
+1. `Documents\Messier-Skin` of the user, writable without administrator rights;
+2. `Messier-Skin` beside `Messier.vst3`, i.e. `C:\Program Files\Common Files\VST3\Messier-Skin\`,
+   for all users of the computer (changing it needs administrator rights).
+
+The built-in skin fills every gap. A bitmap is taken only at exactly the size below,
+for `@2x` at exactly twice that. A missing, unreadable, empty, broken or wrongly sized file
+gives the next folder's file, and in the end the built-in one. Each image falls back on
+its own, so no window opens empty. In the palette menu, **Reload skin folders** reads both
+folders again without reopening the window. **Open skin folder** creates
+`Documents\Messier-Skin` if needed and opens it, with `Messier skin files.txt` listing every
+file name and size. At the right end of the DETAILS bar, `CUSTOM SKIN n` replaces the
+version while n bitmaps and colour values come from the folders.
+
+| File (`<preset>`: slate, silver, plum, gold) | @1x pixels | @2x pixels |
+| --- | --- | --- |
+| `messier_<preset>_chassis@1x.png` | 880 × 724 | 1760 × 1448 |
+| `messier_<preset>_plate@1x.png` | 840 × 186 | 1680 × 372 |
+| `messier_<preset>_bezel@1x.png` (nine-part frame, edge 12) | 64 × 64 | 128 × 128 |
+| `messier_<preset>_knob_l@1x.png` | 72 × 72 | 144 × 144 |
+| `messier_<preset>_knob_s@1x.png` | 48 × 48 | 96 × 96 |
+| `messier_<preset>_thumb@1x.png` (START handle) | 16 × 28 | 32 × 56 |
+| `messier_<preset>_button@1x.png`, `_button_down@1x.png` (edge 8) | 48 × 28 | 96 × 56 |
+| `messier_nebula_a@1x.png`, `messier_nebula_b@1x.png` (white; tinted) | 1000 × 260 | 2000 × 520 |
+| `messier_keys_white@1x.png` | 36 × 66 | 72 × 132 |
+| `messier_keys_black@1x.png` | 22 × 40 | 44 × 80 |
+
+The `@2x` files carry the same names with `@2x.png`. The chassis is drawn at the height of
+the fully open window (KEYS and DETAILS) and cut off below when sections are closed.
+
+Colour tables are named `messier_<preset>_colours.txt`. Each line reads
+`name = #RRGGBB` or `#RRGGBBAA` (AA is the opacity), and comments start at `;`. A line left out
+keeps the built-in colour. Where both folders set a colour, the one in Documents wins.
+The names are `metal`, `stain`, `glass`, `text`, `dim`, `marker`, `engrave_light`,
+`engrave_dark`, `rule_dark`, `rule_light`, `grid_line`, `grid_cross`, `plate_text`,
+`nebula_a`, `nebula_b` and the others listed in `Messier skin files.txt`, plus
+`negative = true` (dark ink on bright glass). The built-in tables to start from:
+`preview_messier_window --export-skin <folder>` writes all four. The built-in bitmaps are
+in `resource/gui/`.
+
+**Accent colour:** open DETAILS and drag the HUE slider to turn the hue of the knob arcs,
+values, START fill and held key (since 0.2.6 only the hue: each colour keeps its
+lightness and saturation, so near-grey labels hardly change). Double-click it to restore
+the preset's colour. The project remembers each preset's accent.
+
+**Waveform brightness:** the WAVE slider on the right of DETAILS (since 0.2.6) makes the
+waveform on the glass dimmer or brighter, 25 to 200 %, inside and outside the loop alike.
+Double-click restores the preset default: 200 % for Plum, 100 % for the other presets.
+A project can store its own WAVE value. The grains' paths glow for a fixed 0.45 s.
 
 **LATCH** (in the keyboard row since 0.2.4; hidden with the keyboard): a key struck on the screen keyboard stays held after the mouse
 is let go, so the pitch stays changed. Clicking another key moves the hold there;

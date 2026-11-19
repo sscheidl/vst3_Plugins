@@ -1,6 +1,7 @@
 #include "controller.h"
 
 #include "editor.h"
+#include "message_text.h"
 #include "parameters.h"
 #include "plugin_ids.h"
 #include "state_io.h"
@@ -68,15 +69,6 @@ class DisplayParameter : public Parameter {
 
     OBJ_METHODS(DisplayParameter, Parameter)
 };
-
-bool GetText(IAttributeList* attributes, const char* id, std::string& text) {
-    const void* data = nullptr;
-    uint32 size = 0;
-    if(!attributes || attributes->getBinary(id, data, size) != kResultOk)
-        return false;
-    text.assign(static_cast<const char*>(data), size);
-    return true;
-}
 
 // MS-R28: connection generations of all controllers of this process, so that a
 // processor can tell a newer connection from an older one whichever controller made it.
@@ -261,7 +253,7 @@ tresult PLUGIN_API Controller::getState(IBStream* state) {
     for(const int32 accent : editor_.accents)
         if(!stream.writeInt32(accent))
             return kResultFalse;
-    return stream.writeInt32(editor_.trail_ms) ? kResultOk : kResultFalse;
+    return stream.writeInt32(editor_.wave_percent) ? kResultOk : kResultFalse;
 }
 
 tresult PLUGIN_API Controller::setState(IBStream* state) {
@@ -286,9 +278,16 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
         for(int32& accent : settings.accents)
             if(!stream.readInt32(accent) || !IsAccent(accent))
                 return kResultFalse;
-    if(version >= 5 && (!stream.readInt32(settings.trail_ms) || settings.trail_ms < kTrailMinMs
-                       || settings.trail_ms > kTrailMaxMs))
+    int32 trail_ms = kTrailDefaultMs; // version 5 only; the trail is fixed since 0.2.6
+    if(version == 5 && (!stream.readInt32(trail_ms) || trail_ms < kTrailMinMs || trail_ms > kTrailMaxMs))
         return kResultFalse;
+    if(version >= 6) {
+        if(!stream.readInt32(settings.wave_percent))
+            return kResultFalse;
+        const bool uses_preset = version >= 7 && settings.wave_percent == kPresetWave;
+        if(!uses_preset && (settings.wave_percent < kWaveMinPercent || settings.wave_percent > kWaveMaxPercent))
+            return kResultFalse;
+    }
     settings.zoom = ClampEditorZoom(zoom);
     settings.keyboard = keyboard != 0;
     settings.transpose = transpose;
@@ -356,7 +355,7 @@ bool Controller::SendLoad(const std::string& path) {
     IPtr<IMessage> message = NewMessage(kLoadMessageId);
     if(!message)
         return false;
-    message->getAttributes()->setBinary(kAttrPath, path.data(), static_cast<uint32>(path.size()));
+    SetText(message->getAttributes(), kAttrPath, path);
     // The processor answers with its status at once ("loading").
     return sendMessage(message) == kResultOk;
 }
@@ -451,9 +450,11 @@ tresult PLUGIN_API Controller::notify(IMessage* message) {
         IAttributeList* attributes = message->getAttributes();
         FileStatus status;
         int64 code = 0, serial = 0, user_loads = 0, processor = 0;
-        if(!attributes || !GetText(attributes, kAttrPath, status.path)
-           || !GetText(attributes, kAttrInfo, status.info) || !GetText(attributes, kAttrRequest, status.request)
-           || !GetText(attributes, kAttrDetail, status.detail)
+        // The four texts may be empty, and an empty one may be missing (0.2.7).
+        if(!attributes || !GetOptionalText(attributes, kAttrPath, status.path)
+           || !GetOptionalText(attributes, kAttrInfo, status.info)
+           || !GetOptionalText(attributes, kAttrRequest, status.request)
+           || !GetOptionalText(attributes, kAttrDetail, status.detail)
            || attributes->getInt(kAttrState, code) != kResultOk
            || attributes->getInt(kAttrSerial, serial) != kResultOk
            || attributes->getInt(kAttrUserLoads, user_loads) != kResultOk

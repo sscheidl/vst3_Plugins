@@ -277,9 +277,13 @@ constexpr std::int32_t kMaxPathBytes = 32768;
 // as one byte (1 for shown), its transposition in semitones as int32.
 // Version 2 (0.2.0): the same with the GUI preset as int32 (GuiPreset); version 1 is
 // still read, with Slate.
-// V3 adds DETAILS, V4 adds the accent hues, V5 adds the trail time in milliseconds.
-constexpr std::int32_t kControllerStateVersion = 5;
-constexpr std::int32_t kTrailMinMs = 150, kTrailDefaultMs = 450, kTrailMaxMs = 900;
+// V3 adds DETAILS, V4 adds the accent hues, V5 added the trail time in milliseconds
+// (still read, no longer used: since 0.2.6 the trail is fixed), V6 the waveform's
+// brightness in percent in its place. V7 also accepts kPresetWave in that field.
+constexpr std::int32_t kControllerStateVersion = 7;
+constexpr std::int32_t kTrailMinMs = 150, kTrailDefaultMs = 450, kTrailMaxMs = 900; // V5's range
+constexpr std::int32_t kWaveMinPercent = 25, kWaveDefaultPercent = 100, kWaveMaxPercent = 200;
+constexpr std::int32_t kPresetWave = 0; // use the active GUI preset's WAVE default
 
 // Messages between the two halves of the plug-in.
 // Controller -> processor: a key of the screen keyboard. Velocity 1..127 is a

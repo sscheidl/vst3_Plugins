@@ -243,11 +243,32 @@ The new window (0.2.0, Slate; judge the look as well as what it shows):
 - [ ] HUE (DETAILS, left): labels, knob arcs, START fill and the held key follow it live;
       a double-click brings back the preset's colour; each preset keeps its own hue in the
       project.
-- [ ] TRAIL (DETAILS, right): 150 to 900 ms, 450 by default; the grains' paths fade
-      accordingly; saved with the project.
+- [ ] (0.2.6: TRAIL is gone, see below.)
 - [ ] A dense cloud of grains (DENSITY high): every grain that ends leaves its path
       (MS-R55); after STOP the fading paths fade out, no grain head comes back (MS-R57).
 - [ ] START at 100 % of a very short file: the thumb on the loop bracket (MS-R56).
+
+0.2.6 (the user's look at 0.2.5):
+
+- [ ] HUE turns only the hue: the arcs, values, START fill and held key keep their
+      brightness; near-grey labels hardly change. Double-click: the preset's colour.
+- [ ] WAVE (DETAILS, right, where TRAIL was): 25 to 200 %, the waveform dimmer or
+      brighter, the loop still clearer; double-click 100 %; saved with the project.
+- [ ] The grains' paths glow a fixed 0.45 s, without the long streaks of high TRAIL values.
+- [ ] A project saved with 0.2.5 opens (its trail is ignored, WAVE at 100 %).
+
+0.2.7 (the file name in Studio One; Codex' skin-test changes):
+
+- [ ] Load one WAV, then another with a different name: the name beside LOAD and the
+      file information below it follow each load, with the window open throughout.
+- [ ] A file that cannot be read (a renamed .txt): "Could not load ..." with the reason;
+      the name stays at the file that plays.
+- [ ] The name is upright, spelt and cased as on disk; a very long name ends in ".."
+      before the catalogue number, the tooltip shows the whole path.
+- [ ] KEYS and DETAILS in all four combinations: the chassis artwork (Plum's vine) stays
+      where it is relative to the knobs.
+- [ ] A new Plum instance: WAVE at 200 %; double-click on WAVE brings back the preset's
+      default (Plum 200 %, the others 100 %). The palette menu reads Slate, Silver, Gold, Plum.
 
 ## 7. Listening
 

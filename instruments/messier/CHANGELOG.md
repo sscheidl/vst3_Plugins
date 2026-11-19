@@ -1,5 +1,39 @@
 # Changes
 
+## 0.2.7 (2026-11-19)
+
+Window and messages; the sound and the processor's state are unchanged. Details in
+`docs/BUILD_REPORT_0.2.7.md`.
+
+* The file name beside LOAD follows every load in Studio One. Its messages keep no empty
+  binary attribute, so the file status's empty texts (the detail, before any load all
+  four) were missing and the controller refused every status; the window kept the name
+  from the project. An empty text is no longer sent, and a missing one reads as empty.
+* The file name is set upright (Bahnschrift 18) like the rest of the header, spelt as it
+  is; a name too long for its place ends in "..", and the tooltip has the whole path.
+* Custom skins in every build (the user's wish, 2026-11-19; until now a test build's
+  switch, `MESSIER_SKIN_FOLDER`, which is gone). The window takes bitmaps and colour tables
+  from `Documents\Messier-Skin` first, then from `Messier-Skin` beside the bundle, file by
+  file. A missing, broken or wrongly sized file falls back to the built-in one. The palette
+  menu has **Reload skin folders** and **Open skin folder**; the latter writes
+  `Messier skin files.txt` with every name and size. The README lists the files.
+* Taken over from Codex' changes for the skin test (2026-11-19): the chassis is drawn at
+  the height of the fully open window in every section state and cut off below, so
+  the artwork stays aligned with the controls; Plum's WAVE default is 200 % (controller state version 7, 0 meaning the
+  preset's default); the palette menu reads Slate, Silver, Gold, Plum.
+
+## 0.2.6 (2026-11-19)
+
+The user's look at 0.2.5; window only. Details in `docs/BUILD_REPORT_0.2.6.md`.
+
+* HUE turns only the hue: control, value and ink colours keep their own lightness and
+  saturation (HSL), so the preset's brightness and contrast stay.
+* TRAIL is gone: high values drew long streaks. The grains' paths glow a fixed 0.45 s.
+* WAVE takes TRAIL's place, a slider like HUE: the waveform's brightness from 25 to 200 %
+  (100 by default, double-click), inside and outside the loop alike.
+* The controller's state is version 6: WAVE in percent in the place of version 5's trail;
+  version 5 is still read (its trail ignored).
+
 ## 0.2.5 (2026-11-19)
 
 Window only; the sound, the parameters and the processor's state are unchanged. Details

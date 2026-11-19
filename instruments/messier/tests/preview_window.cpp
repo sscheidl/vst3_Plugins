@@ -144,14 +144,32 @@ struct Case {
     bool dense = false; // many grains
     GuiPreset preset = GuiPreset::kSlate; // 0.2.4
     bool details = false;                 // 0.2.4: DETAILS open
+    std::int32_t hue = kPresetAccent;     // 0.2.6: HUE (the preset's own colour)
+    std::int32_t wave = kPresetWave;
+    const char* file = "down from.wav"; // 0.2.7: a long name too
 };
 
 } // namespace
 
 int main(int argc, char** argv) {
+    UseSkinFolders({}); // 0.2.7: the built-in skin, whatever custom skin this computer holds
     if(argc < 2) {
-        std::fprintf(stderr, "usage: preview_messier_window <folder>\n");
+        std::fprintf(stderr, "usage: preview_messier_window <folder> | --export-skin <folder>\n");
         return 2;
+    }
+    // 0.2.6: the four presets' colour tables as text, the start of a skin folder.
+    if(std::string(argv[1]) == "--export-skin" && argc >= 3) {
+        const std::filesystem::path skin = argv[2];
+        std::filesystem::create_directories(skin);
+        for(std::int32_t p = 0; p < kGuiPresetCount; ++p) {
+            const auto preset = static_cast<GuiPreset>(p);
+            std::ofstream out(skin / ColourTableFileName(preset), std::ios::binary);
+            out << "; Messier skin colours: " << PresetInfo(preset).name << "\n";
+            out << "; name = #RRGGBB or #RRGGBBAA; delete a line to keep the built-in value\n";
+            out << ColourTableText(PresetInfo(preset).colours);
+            std::printf("%s\n", ColourTableFileName(preset).c_str());
+        }
+        return 0;
     }
     const std::filesystem::path folder = argv[1];
     std::filesystem::create_directories(folder);
@@ -186,8 +204,16 @@ int main(int argc, char** argv) {
         {"silver_closed", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kSilver, false},
         {"plum_open", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kPlum, true},
         {"plum_closed", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kPlum, false},
+        {"plum_keys_only", true, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kPlum, false},
+        {"plum_details_only", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kPlum, true},
         {"gold_open", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kGold, true},
+        {"slate_hue_wave", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kSlate, true, 30,
+         160},
+        {"gold_hue_wave", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kGold, true, 200,
+         50},
         {"gold_closed", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kGold, false},
+        {"slate_long_name", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kSlate, false,
+         kPresetAccent, kPresetWave, "Field Recording 2026-11-19, Rain on the Glasshouse Roof (Take 12).wav"},
     };
     for(const Case& c : cases) {
         controller->setParamNormalized(kParamStop, c.stop ? 1.0 : 0.0);
@@ -198,10 +224,12 @@ int main(int argc, char** argv) {
         settings.transpose = c.transpose;
         settings.preset = c.preset;
         settings.details = c.details;
+        settings.accents[static_cast<std::size_t>(c.preset)] = c.hue;
+        settings.wave_percent = c.wave;
         IPtr<Editor> editor(new Editor(controller, settings, EditorCallbacks{}), false);
         editor->ShowDisplay(MakeDisplay(c.freeze, c.dense), wave);
         FileStatus status;
-        status.path = "C:\\Samples\\down from.wav";
+        status.path = std::string("C:\\Samples\\") + c.file;
         status.sound = SoundState::kReady;
         status.info = "48 kHz  24 bit  stereo  24.00 s";
         status.serial = 1;

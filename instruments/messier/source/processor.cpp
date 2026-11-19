@@ -1,5 +1,6 @@
 #include "processor.h"
 
+#include "message_text.h"
 #include "plugin_ids.h"
 #include "state_io.h"
 
@@ -21,20 +22,6 @@ namespace {
 
 uint64 ChannelMask(int32 numChannels) {
     return numChannels >= 64 ? ~uint64{0} : (uint64{1} << numChannels) - 1;
-}
-
-// A string attribute as UTF-8 bytes. Binary, so that no host converts it.
-bool GetText(IAttributeList* attributes, const char* id, std::string& text) {
-    const void* data = nullptr;
-    uint32 size = 0;
-    if(!attributes || attributes->getBinary(id, data, size) != kResultOk)
-        return false;
-    text.assign(static_cast<const char*>(data), size);
-    return true;
-}
-
-void SetText(IAttributeList* attributes, const char* id, const std::string& text) {
-    attributes->setBinary(id, text.data(), static_cast<uint32>(text.size()));
 }
 
 // A number for this processor instance (MS-R17): different for every instance of

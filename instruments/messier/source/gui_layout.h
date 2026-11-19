@@ -86,7 +86,8 @@ constexpr double kAccentWidth = 80;
 constexpr double kAccentCentre = (kMargin + SmallColumnLeft(0)) / 2;
 constexpr double kAccentLeft = kAccentCentre - kAccentWidth / 2;
 constexpr double kAccentRight = kAccentCentre + kAccentWidth / 2;
-constexpr double kTrailCentre = kWidth - kAccentCentre;
+constexpr double kWaveCentre = kWidth - kAccentCentre; // WAVE, as wide as HUE (0.2.6)
+constexpr double kWaveLeft = kWaveCentre - kAccentWidth / 2, kWaveRight = kWaveCentre + kAccentWidth / 2;
 
 // The keyboard section, from its top (TopHeight): LATCH, the octave keys and 15 white keys
 // of 36 units, centred as one row.

@@ -29,7 +29,10 @@
 #include "public.sdk/source/common/memorystream.h"
 #include "vstgui/lib/cframe.h"
 #include "vstgui/lib/controls/coptionmenu.h"
+#include "vstgui/lib/platform/platformfactory.h"
+#include "vstgui/lib/platform/win32/win32factory.h"
 #include "vstgui/lib/vstguiinit.h"
+#include "pluginterfaces/base/funknownimpl.h"
 #include "public.sdk/source/vst/hosting/eventlist.h"
 #include "public.sdk/source/vst/hosting/hostclasses.h"
 #include "public.sdk/source/vst/hosting/parameterchanges.h"
@@ -37,6 +40,8 @@
 #include "public.sdk/source/vst/utility/stringconvert.h"
 
 #include <windows.h>
+#include <objbase.h>
+#undef small // rpcndr.h; the tests name files so
 #include <process.h>
 #include <xmmintrin.h>
 
@@ -49,6 +54,7 @@
 #include <functional>
 #include <fstream>
 #include <limits>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -143,17 +149,69 @@ struct Ev {
 };
 using HostScore = std::vector<Ev>;
 
+// A host like Studio One (0.2.7): its attribute lists keep no binary attribute of
+// length 0. Everything else as the SDK's host classes.
+class EmptyDroppingAttributes : public U::Implements<U::Directly<IAttributeList>> {
+  public:
+    tresult PLUGIN_API setInt(AttrID id, int64 value) override { return inner_->setInt(id, value); }
+    tresult PLUGIN_API getInt(AttrID id, int64& value) override { return inner_->getInt(id, value); }
+    tresult PLUGIN_API setFloat(AttrID id, double value) override { return inner_->setFloat(id, value); }
+    tresult PLUGIN_API getFloat(AttrID id, double& value) override { return inner_->getFloat(id, value); }
+    tresult PLUGIN_API setString(AttrID id, const TChar* string) override { return inner_->setString(id, string); }
+    tresult PLUGIN_API getString(AttrID id, TChar* string, uint32 size) override {
+        return inner_->getString(id, string, size);
+    }
+    tresult PLUGIN_API setBinary(AttrID id, const void* data, uint32 size) override {
+        if(size == 0) {
+            ++dropped;
+            return kResultFalse;
+        }
+        return inner_->setBinary(id, data, size);
+    }
+    tresult PLUGIN_API getBinary(AttrID id, const void*& data, uint32& size) override {
+        return inner_->getBinary(id, data, size);
+    }
+    static inline int dropped = 0;
+
+  private:
+    IPtr<IAttributeList> inner_ = HostAttributeList::make();
+};
+
+class EmptyDroppingMessage : public U::Implements<U::Directly<IMessage>> {
+  public:
+    FIDString PLUGIN_API getMessageID() override { return id_.c_str(); }
+    void PLUGIN_API setMessageID(FIDString id) override { id_ = id ? id : ""; }
+    IAttributeList* PLUGIN_API getAttributes() override { return attributes_; }
+
+  private:
+    std::string id_;
+    IPtr<IAttributeList> attributes_ = owned(new EmptyDroppingAttributes());
+};
+
+class EmptyDroppingHost : public HostApplication {
+  public:
+    tresult PLUGIN_API createInstance(TUID cid, TUID iid, void** obj) override {
+        if(FUnknownPrivate::iidEqual(cid, IMessage::iid) && FUnknownPrivate::iidEqual(iid, IMessage::iid)) {
+            *obj = static_cast<IMessage*>(new EmptyDroppingMessage());
+            return kResultTrue;
+        }
+        return HostApplication::createInstance(cid, iid, obj);
+    }
+};
+
 struct HostConfig {
     double rate = 48000.0;
     int max_block = 2048;
     bool double_precision = false;
+    bool drops_empty_binaries = false; // 0.2.7: the host's messages as Studio One's
 };
 
 class PluginHost {
   public:
     explicit PluginHost(const HostConfig& config, HostScore score = {})
     : config_(config), score_(std::move(score)), events_(4096), out_events_(4096), changes_(64), out_changes_(8) {
-        host_app_ = owned(new HostApplication());
+        host_app_ = config.drops_empty_binaries ? IPtr<HostApplication>(owned(new EmptyDroppingHost()))
+                                                : owned(new HostApplication());
         processor = owned(new Processor());
         CHECK(processor->initialize(host_app_) == kResultOk);
         Setup(config.rate);
@@ -675,6 +733,49 @@ void TestExportStart() {
 
 // Loading a file from the window while playing: the processor allocates nothing,
 // the new file plays after the swap, the old one is freed on the loader's thread.
+// 0.2.7: in Studio One the name beside LOAD stayed at the project's file after another
+// load. Its messages keep no empty binary attribute; the status's empty texts (the
+// detail, before any load all four) were missing, and the controller refused every
+// status. A host like it: the first status, two loads with distinct names and a failed
+// one all arrive.
+void TestHostWithoutEmptyTexts() {
+    HostConfig config;
+    config.drops_empty_binaries = true;
+    PluginHost host(config);
+    IPtr<HostApplication> app = owned(new EmptyDroppingHost());
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(app) == kResultOk);
+    auto* processor_point = static_cast<IConnectionPoint*>(host.processor.get());
+    auto* controller_point = static_cast<IConnectionPoint*>(controller.get());
+    CHECK(processor_point->connect(controller_point) == kResultOk);
+    CHECK(controller_point->connect(processor_point) == kResultOk);
+    EmptyDroppingAttributes::dropped = 0;
+    CHECK(controller->RequestFileStatus());
+    CHECK(controller->File().serial != 0 && controller->File().path.empty()
+          && controller->File().sound == SoundState::kNone);
+    const std::string other = WriteWav("Another Name, Take 2.wav", g_image);
+    for(const std::string& path : {g_path, other}) {
+        CHECK(controller->LoadFile(path));
+        CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
+        CHECK(controller->RequestFileStatus());
+        CHECK(controller->File().path == path && controller->File().sound == SoundState::kReady
+              && controller->File().request_state == RequestState::kNone && controller->File().detail.empty()
+              && controller->File().info == "48 kHz stereo, 16 bit, 0:03.0");
+    }
+    const std::string missing = (std::filesystem::path(g_path).parent_path() / "not there.wav").string();
+    CHECK(controller->LoadFile(missing));
+    CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
+    CHECK(controller->RequestFileStatus());
+    CHECK(controller->File().path == other && controller->File().request_state == RequestState::kFailed
+          && controller->File().request == missing && !controller->File().detail.empty());
+    CHECK(EmptyDroppingAttributes::dropped == 0); // no empty text is sent any more
+    CHECK(processor_point->disconnect(controller_point) == kResultOk);
+    CHECK(controller_point->disconnect(processor_point) == kResultOk);
+    CHECK(controller->terminate() == kResultOk);
+    std::printf("a host without empty binary attributes: the first status, two loads and a failed "
+                "one reach the controller\n");
+}
+
 void TestLoadWhilePlaying() {
     PluginHost host({});
     CHECK(LoadState(*host.processor, MakeState(StartValues(), g_path)) == kResultOk);
@@ -1602,10 +1703,14 @@ void TestWindow021() {
         for(int32 i = 0; i < 6; ++i)
             CHECK(!free_size->getEntry(i)->isChecked());
         auto presets = MakePresetMenu(GuiPreset::kSlate);
-        CHECK(presets->isMultipleCheckStyle() && presets->getNbEntries() == 4);
+        CHECK(presets->isMultipleCheckStyle() && presets->getNbEntries() == 7); // 0.2.7: and the two skin entries
         CHECK(presets->getEntry(0)->isChecked() && presets->getEntry(0)->isEnabled());
         for(int32 i = 1; i < 4; ++i)
             CHECK(!presets->getEntry(i)->isChecked() && presets->getEntry(i)->isEnabled()); // 0.2.4: all delivered
+        CHECK(presets->getEntry(0)->getTitle() == "Slate" && presets->getEntry(1)->getTitle() == "Silver");
+        CHECK(presets->getEntry(2)->getTitle() == "Gold" && presets->getEntry(3)->getTitle() == "Plum");
+        CHECK(MakePresetMenu(GuiPreset::kGold)->getEntry(2)->isChecked());
+        CHECK(MakePresetMenu(GuiPreset::kPlum)->getEntry(3)->isChecked());
         CHECK(!PopUpMenu(nullptr, sizes, VSTGUI::CPoint(), {})); // nothing to show it in
     }
     VSTGUI::exit();
@@ -1683,7 +1788,7 @@ void TestWindow021() {
 // 0.2.2, the user's design round: the nebula drifts with the signed tempo the display
 // carries (forward right, backward left, at rest when frozen, stopped or without tempo,
 // never turned round by the playhead's jump at the loop's end), eased; ended grains glow
-// on for the selected trail time, and another file clears them; the layout keeps the window's size.
+// on for kTrail, and another file clears them; the layout keeps the window's size.
 void TestWindow022() {
     using Clock = MapView::Clock;
     const auto ms = [](int n) { return std::chrono::milliseconds(n); };
@@ -1789,13 +1894,6 @@ void TestWindow022() {
         CHECK(map->Afterglows(t + ms(30)) == 1);
         CHECK(map->Afterglows(t + ms(10 + 449)) == 1); // default: 0.45 s after it ended
         CHECK(map->Afterglows(t + ms(10 + 451)) == 0);
-        map->SetTrail(kTrailMinMs);
-        CHECK(map->Afterglows(t + ms(10 + 149)) == 1);
-        CHECK(map->Afterglows(t + ms(10 + 151)) == 0);
-        map->SetTrail(kTrailMaxMs);
-        CHECK(map->Afterglows(t + ms(10 + 899)) == 1);
-        CHECK(map->Afterglows(t + ms(10 + 901)) == 0);
-        map->SetTrail(kTrailDefaultMs);
         // 0.2.3 (Codex' check): a running grain with the same pan, speed and window rate
         // but elsewhere in its window does not hide the one that ended.
         auto twin = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
@@ -1833,8 +1931,8 @@ void TestWindow022() {
         alone->ShowAt(f, nullptr, t);
         CHECK(alone->EndedFor(0, t + ms(50)) < 0);
         CHECK(std::abs(alone->EndedFor(0, t + ms(350)) - 0.25) < 1e-6);
-        CHECK(alone->EndedFor(0, t + ms(450)) < kTrailDefaultMs / 1000.0);
-        CHECK(alone->EndedFor(0, t + ms(560)) >= kTrailDefaultMs / 1000.0);
+        CHECK(alone->EndedFor(0, t + ms(450)) < MapView::kTrail);
+        CHECK(alone->EndedFor(0, t + ms(560)) >= MapView::kTrail);
         // MS-R57 (0.2.5): 60 ms left, an identical display after 125 ms sets the rest; the
         // end predicted before stays and keeps fading on the wall clock.
         auto rests = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
@@ -1844,7 +1942,7 @@ void TestWindow022() {
         rests->ShowAt(q, nullptr, t);
         rests->ShowAt(q, nullptr, t + ms(125));
         CHECK(std::abs(rests->EndedFor(0, t + ms(130)) - 0.07) < 1e-6);
-        CHECK(rests->EndedFor(0, t + ms(60 + 451)) >= kTrailDefaultMs / 1000.0);
+        CHECK(rests->EndedFor(0, t + ms(60 + 451)) >= MapView::kTrail);
         auto later = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
         q.grains[0].phase = 0.2f; // 0.4 s left: resting, it does not end
         later->ShowAt(q, nullptr, t);
@@ -1948,7 +2046,7 @@ void TestWindow022() {
     std::printf("window 0.2.2 design: the nebula drifts with the signed tempo, eased, at rest when frozen or "
                 "stopped, not turned by a loop's turn; ended grains glow on for %.1f s, a new file clears "
                 "them; header group, LATCH/KEYS, the triangle's lane; control and marker colours apart\n",
-                kTrailDefaultMs / 1000.0);
+                MapView::kTrail);
 }
 
 // The GUI presets (0.2.0): the bitmaps the window asks for are in the plug-in's
@@ -1956,6 +2054,75 @@ void TestWindow022() {
 // 2x; presets whose bitmaps are not delivered show as Slate. The window settings carry
 // the preset (controller state version 2); a song of version 1 opens with Slate, and a
 // preset number not known is refused.
+// 0.2.7: custom skins. The first folder wins, file by file; a missing folder, a file
+// that is not a PNG, one of the wrong size and a 1x file under a 2x name fall through to
+// the next folder and in the end to the built-in bitmap. No image is left without one.
+void TestCustomSkin() {
+    namespace fs = std::filesystem;
+    using namespace VSTGUI;
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); // WIC reads the PNGs, as in a host
+    VSTGUI::init(GetModuleHandleW(nullptr));
+    if(auto* win32 = getPlatformFactory().asWin32Factory()) // the built-in bitmaps, as in the bundle
+        win32->setResourceBasePath(UTF8String(MESSIER_GUI_DIR "/"));
+    const fs::path user = g_dir / "skin user", shared = g_dir / "skin shared", none = g_dir / "skin none";
+    fs::create_directories(user);
+    fs::create_directories(shared);
+    const fs::path gui(MESSIER_GUI_DIR);
+    auto copy = [&](const char* from, const fs::path& to) {
+        CHECK(fs::copy_file(gui / from, to, fs::copy_options::overwrite_existing));
+    };
+    copy("messier_plum_knob_s@1x.png", user / "messier_gold_knob_s@1x.png");   // taken
+    copy("messier_plum_knob_s@1x.png", user / "messier_gold_knob_l@1x.png");   // 48 x 48: wrong size
+    copy("messier_plum_knob_s@1x.png", user / "messier_gold_knob_s@2x.png");   // 1x under the 2x name
+    std::ofstream(user / "messier_gold_chassis@1x.png", std::ios::binary) << "not a PNG";
+    std::ofstream(user / "messier_gold_plate@1x.png", std::ios::binary); // empty
+    copy("messier_plum_knob_l@1x.png", shared / "messier_gold_knob_l@1x.png");   // taken: the user's is wrong
+    copy("messier_silver_knob_s@1x.png", shared / "messier_gold_knob_s@1x.png"); // the user's wins
+    std::ofstream(user / "messier_gold_colours.txt", std::ios::binary) << "glass = #102030\n";
+    std::ofstream(shared / "messier_gold_colours.txt", std::ios::binary) << "glass = #FFFFFF\nmarker = #010203\n";
+    const IPlatformFactory& factory = getPlatformFactory();
+    auto png = [&](CBitmap* bitmap) {
+        return bitmap && bitmap->getPlatformBitmap()
+                   ? factory.createBitmapMemoryPNGRepresentation(bitmap->getPlatformBitmap())
+                   : PNGBitmapBuffer{};
+    };
+    auto file_png = [&](const char* name) {
+        const std::string path = (gui / name).string();
+        PlatformBitmapPtr bitmap = factory.createBitmapFromPath(path.c_str());
+        return bitmap ? factory.createBitmapMemoryPNGRepresentation(bitmap) : PNGBitmapBuffer{};
+    };
+    auto complete = [](const Skin& skin) {
+        bool all = true;
+        for(std::size_t i = 0; i < kSkinImageCount; ++i) {
+            const SkinImage& image = skin.Image(static_cast<SkinImageId>(i));
+            all = all && image.x1 && image.x2 && image.x1->getWidth() == image.size.x
+                  && image.x1->getHeight() == image.size.y;
+        }
+        return all;
+    };
+    const SkinColours& gold = PresetInfo(GuiPreset::kGold).colours;
+    {
+    const Skin plain(GuiPreset::kGold, {none});
+    CHECK(plain.Overrides() == 0 && complete(plain) && plain.Colours().glass == gold.glass);
+    const Skin built_in(GuiPreset::kGold, {});
+    CHECK(png(plain.Image(SkinImageId::kChassis).x1) == png(built_in.Image(SkinImageId::kChassis).x1));
+    const Skin custom(GuiPreset::kGold, {user, none, shared});
+    CHECK(custom.Overrides() == 2 + 3 && complete(custom)); // two bitmaps, three colour values
+    CHECK(custom.Colours().glass == CColor(16, 32, 48) && custom.Colours().marker == CColor(1, 2, 3));
+    const PNGBitmapBuffer plum_small = file_png("messier_plum_knob_s@1x.png");
+    CHECK(!plum_small.empty() && png(custom.Image(SkinImageId::kKnobSmall).x1) == plum_small);
+    CHECK(png(custom.Image(SkinImageId::kKnobLarge).x1) == file_png("messier_plum_knob_l@1x.png"));
+    for(const SkinImageId id : {SkinImageId::kChassis, SkinImageId::kPlate})
+        CHECK(png(custom.Image(id).x1) == png(built_in.Image(id).x1));
+    CHECK(png(custom.Image(SkinImageId::kKnobSmall).x2) == png(built_in.Image(SkinImageId::kKnobSmall).x2));
+    } // the skins go before VSTGUI does
+    VSTGUI::exit();
+    if(SUCCEEDED(com))
+        CoUninitialize();
+    std::printf("custom skins: the first folder wins file by file; a missing folder, a broken, an empty, a "
+                "wrong-sized and a wrong-scale file give the built-in bitmap\n");
+}
+
 void TestGuiPresets() {
     int checked = 0;
     for(std::int32_t p = 0; p < kGuiPresetCount; ++p)
@@ -1980,6 +2147,35 @@ void TestGuiPresets() {
     CHECK(checked == 96); // 0.2.4: all four presets, 12 images each (4 shared), 1x and 2x
     CHECK(SkinImageFileName(GuiPreset::kGold, SkinImageId::kChassis, 2) == "messier_gold_chassis@2x.png");
     CHECK(SkinImageFileName(GuiPreset::kPlum, SkinImageId::kNebulaA, 1) == "messier_nebula_a@1x.png");
+    // 0.2.6: a colour table written as text reads back the same; unknown lines and
+    // comments are left alone; a skin folder only in a skin test build.
+    for(std::int32_t p = 0; p < kGuiPresetCount; ++p) {
+        const SkinColours& colours = PresetInfo(static_cast<GuiPreset>(p)).colours;
+        SkinColours read = PresetInfo(GuiPreset::kSlate).colours;
+        read.negative = !colours.negative;
+        CHECK(ApplyColourTable(ColourTableText(colours), read) == 32);
+        CHECK(ColourTableText(read) == ColourTableText(colours) && read.negative == colours.negative);
+    }
+    {
+        SkinColours some = PresetInfo(GuiPreset::kGold).colours;
+        CHECK(ApplyColourTable("; a comment\nglass = #102030 ; dark\nnothing = #FFFFFF\nmarker = red\n", some) == 1);
+        CHECK(some.glass == VSTGUI::CColor(16, 32, 48) && some.marker == PresetInfo(GuiPreset::kGold).colours.marker);
+    }
+    // 0.2.7: custom skins, the user's folder in Documents first; the guide names every
+    // bitmap with its size and every colour.
+    CHECK(UserSkinFolder().filename() == "Messier-Skin" && BundleSkinFolder().filename() == "Messier-Skin"
+          && UserSkinFolder() != BundleSkinFolder());
+    {
+        const std::string guide = SkinFolderGuide();
+        CHECK(guide.find("messier_<preset>_chassis@1x.png") != std::string::npos
+              && guide.find("880 x 724") != std::string::npos && guide.find("1760 x 1448") != std::string::npos
+              && guide.find("messier_keys_black@1x.png") != std::string::npos);
+        std::istringstream table(ColourTableText(PresetInfo(GuiPreset::kSlate).colours));
+        std::string line;
+        while(std::getline(table, line))
+            CHECK(guide.find("  " + line.substr(0, line.find(' ')) + "\n") != std::string::npos
+                  || line.rfind("negative", 0) == 0);
+    }
     for(std::int32_t p = 0; p < kGuiPresetCount; ++p) // 0.2.4: all delivered
         CHECK(PresetInfo(static_cast<GuiPreset>(p)).delivered && ShownPreset(static_cast<GuiPreset>(p)) == static_cast<GuiPreset>(p));
     CHECK(ShownPreset(static_cast<GuiPreset>(9)) == GuiPreset::kSlate);
@@ -1993,7 +2189,7 @@ void TestGuiPresets() {
     CHECK(controller->initialize(app) == kResultOk);
     auto load = [&](std::int32_t version, double zoom, std::int8_t keys, std::int32_t transpose, const std::int32_t* preset,
                     std::int8_t details = -1, const std::array<std::int32_t, kGuiPresetCount>* accents = nullptr,
-                    std::int32_t trail_ms = -1) {
+                    std::int32_t tail = -1) {
         MemoryStream stream;
         int32 written = 0;
         stream.write(&version, 4, &written);
@@ -2007,23 +2203,25 @@ void TestGuiPresets() {
         if(accents)
             for(std::int32_t hue : *accents)
                 stream.write(&hue, 4, &written);
-        if(trail_ms >= 0)
-            stream.write(&trail_ms, 4, &written);
+        if(tail >= 0) // version 5: trail time; versions 6 and 7: WAVE setting
+            stream.write(&tail, 4, &written);
         stream.seek(0, IBStream::kIBSeekSet, nullptr);
         return controller->setState(&stream);
     };
     const std::int32_t plum = 2, unknown = 7;
     CHECK(load(2, 1.25, 0, 12, &plum) == kResultOk);
     CHECK(controller->WindowSettings().preset == GuiPreset::kPlum && controller->WindowSettings().zoom == 1.25);
+    CHECK(controller->WindowSettings().wave_percent == kPresetWave && controller->WindowSettings().WavePercent() == 200);
     MemoryStream own;
     CHECK(controller->getState(&own) == kResultOk);
     int64 length = 0;
     own.seek(0, IBStream::kIBSeekEnd, &length);
-    CHECK(length == 42); // version 5 appends trail milliseconds to the version 4 state
+    CHECK(length == 42); // version 7 keeps the version 6 layout
     CHECK(!controller->WindowSettings().details); // a song of 0.2.3: DETAILS closed
     CHECK(load(3, 1.0, 1, 0, &plum, 1) == kResultOk && controller->WindowSettings().details);
     CHECK(load(1, 1.0, 1, -12, nullptr) == kResultOk); // a song of 0.1.x
     CHECK(controller->WindowSettings().preset == GuiPreset::kSlate && controller->WindowSettings().keyboard);
+    CHECK(controller->WindowSettings().WavePercent() == 100);
     CHECK(load(2, 1.0, 1, 0, &unknown) == kResultFalse);
     CHECK(load(2, 1.0, 1, 0, nullptr) == kResultFalse); // version 2 without its preset
     CHECK(load(3, 1.0, 1, 0, &plum) == kResultFalse); // version 3 without DETAILS
@@ -2031,27 +2229,52 @@ void TestGuiPresets() {
     CHECK(controller->WindowSettings().preset == GuiPreset::kSlate);
     const std::array<std::int32_t, kGuiPresetCount> accents{0, kPresetAccent, 120, kAccentMaxHue};
     CHECK(load(4, 1.0, 1, 0, &plum, 0, &accents) == kResultOk);
-    CHECK(controller->WindowSettings().accents == accents && controller->WindowSettings().trail_ms == kTrailDefaultMs);
+    CHECK(controller->WindowSettings().accents == accents && controller->WindowSettings().WavePercent() == 200);
     auto invalid = accents;
     invalid.back() = kAccentMaxHue + 1;
     CHECK(load(4, 1.0, 1, 0, &plum, 1, &invalid) == kResultFalse);
     CHECK(controller->WindowSettings().accents == accents && !controller->WindowSettings().details);
+    // Version 5 (0.2.5): its trail is read and checked, no longer used (0.2.6: fixed).
     CHECK(load(5, 1.0, 1, 0, &plum, 1, &accents) == kResultFalse);
     CHECK(load(5, 1.0, 1, 0, &plum, 1, &accents, kTrailMaxMs + 1) == kResultFalse);
-    CHECK(!controller->WindowSettings().details && controller->WindowSettings().trail_ms == kTrailDefaultMs);
-    CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents, kTrailMinMs) == kResultFalse);
     CHECK(load(5, 1.0, 1, 0, &plum, 1, &accents, 720) == kResultOk);
-    MemoryStream with_trail;
-    CHECK(controller->getState(&with_trail) == kResultOk);
+    CHECK(controller->WindowSettings().details && controller->WindowSettings().WavePercent() == 200);
+    // Version 6 (0.2.6): WAVE from 25 to 200 %.
+    CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents) == kResultFalse);
+    CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents, kWaveMaxPercent + 1) == kResultFalse);
+    CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents, kWaveMinPercent - 1) == kResultFalse);
+    CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents, kPresetWave) == kResultFalse);
+    CHECK(load(8, 1.0, 1, 0, &plum, 1, &accents, kWaveDefaultPercent) == kResultFalse);
+    CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents, 100) == kResultOk);
+    CHECK(controller->WindowSettings().WavePercent() == 100);
+    own.seek(0, IBStream::kIBSeekSet, nullptr);
+    CHECK(controller->setState(&own) == kResultOk);
+    CHECK(controller->WindowSettings().wave_percent == kPresetWave && controller->WindowSettings().WavePercent() == 200);
+    CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents, 160) == kResultOk);
+    MemoryStream with_wave;
+    CHECK(controller->getState(&with_wave) == kResultOk);
     CHECK(load(3, 1.0, 1, 0, &plum, 0) == kResultOk);
     CHECK(controller->WindowSettings().Accent() == kPresetAccent);
-    CHECK(controller->WindowSettings().trail_ms == kTrailDefaultMs);
-    with_trail.seek(0, IBStream::kIBSeekSet, nullptr);
-    CHECK(controller->setState(&with_trail) == kResultOk && controller->WindowSettings().accents == accents);
-    CHECK(controller->WindowSettings().trail_ms == 720);
+    CHECK(controller->WindowSettings().wave_percent == kPresetWave);
+    with_wave.seek(0, IBStream::kIBSeekSet, nullptr);
+    CHECK(controller->setState(&with_wave) == kResultOk && controller->WindowSettings().accents == accents);
+    CHECK(controller->WindowSettings().wave_percent == 160);
+    {
+        IPtr<IPlugView> view = owned(controller->createView(ViewType::kEditor));
+        auto* editor = dynamic_cast<Editor*>(view.get());
+        CHECK(editor && editor->Settings().WavePercent() == 160);
+        editor->SetGuiPreset(GuiPreset::kGold);
+        CHECK(editor->Settings().WavePercent() == 160);
+        editor->SetWave(kPresetWave);
+        CHECK(editor->Settings().WavePercent() == 100);
+        editor->SetGuiPreset(GuiPreset::kPlum);
+        CHECK(editor->Settings().WavePercent() == 200);
+        editor->SetGuiPreset(GuiPreset::kSlate);
+        CHECK(editor->Settings().WavePercent() == 100);
+    }
     CHECK(controller->terminate() == kResultOk);
     std::printf("gui presets: the bitmaps of all four presets in the resources at the brief's sizes; the "
-                "preset, DETAILS, accent hues and trail time saved with the window; states 1 to 4 read\n");
+                "preset, DETAILS, accent hues and WAVE saved with the window (state 7); states 1 to 6 read\n");
 }
 
 void TestProjectBackpressure() {
@@ -3121,6 +3344,7 @@ void TestNoExceptionLeavesHostCalls() {
 
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
+    UseSkinFolders({}); // 0.2.7: the built-in skin, whatever custom skin this computer holds
     g_dir = fs::temp_directory_path() / ("messier-plugin-test-" + std::to_string(_getpid()));
     fs::remove_all(g_dir);
     fs::create_directories(g_dir);
@@ -3142,11 +3366,13 @@ int main() {
     TestDialogStart();
     TestResizeGrip();
     TestGuiPresets();
+    TestCustomSkin();
     TestWindow021();
     TestWindow022();
     TestState();
     TestExportStart();
     TestMessagesAndKeyboard();
+    TestHostWithoutEmptyTexts();
     TestLoadWhilePlaying();
     TestProjectBackpressure();
     TestResetButtonThroughHost();

@@ -129,9 +129,14 @@ struct EditorSettings {
     GuiPreset preset = GuiPreset::kSlate;       // since 0.2.0
     bool details = false;                       // DETAILS open (0.2.4; closed for a new instance)
     std::array<std::int32_t, kGuiPresetCount> accents{kPresetAccent, kPresetAccent, kPresetAccent, kPresetAccent};
-    std::int32_t trail_ms = kTrailDefaultMs;
+    std::int32_t wave_percent = kPresetWave;
 
     std::int32_t Accent() const { return accents[static_cast<std::size_t>(preset)]; }
+    std::int32_t WavePercent() const {
+        if(wave_percent != kPresetWave)
+            return wave_percent;
+        return preset == GuiPreset::kPlum ? 200 : kWaveDefaultPercent;
+    }
 };
 
 // The sizes the window's size menu offers (0.2.0), as zoom.
@@ -213,6 +218,10 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // bitmaps are not delivered yet is kept as the setting and shown as Slate.
     void SetGuiPreset(GuiPreset preset);
     void SetAccent(std::int32_t hue);
+    // A skin test build (0.2.6): the skin folder read again, as the preset menu offers.
+    void ReloadSkin();
+    // WAVE: the waveform's brightness in percent, or kPresetWave to restore the GUI preset's default.
+    void SetWave(std::int32_t percent);
     // The window size as its menu sets it (0.2.0). If the host refuses, nothing changes.
     void SetZoom(double zoom);
     // Freeze as the window's switch does: an edit the host records.
@@ -280,7 +289,7 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // Hands the current skin to every view and label; draws the window anew. Each step on
     // its own (MS-R41): whatever one meets, the others are done.
     void ApplySkin() noexcept;
-    void ApplyTrail();
+    void ApplyWave();
     void beginEdit(int32_t tag) override;
     void endEdit(int32_t tag) override;
     // The window's heartbeat (0.2.1): asks for the display every kDisplayInterval and lets
@@ -343,8 +352,8 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     ToggleButton* keyboard_button_ = nullptr;
     ToggleButton* details_button_ = nullptr;
     VSTGUI::CSlider* accent_slider_ = nullptr;
-    MetalKnob* trail_knob_ = nullptr;
-    VSTGUI::CTextLabel* trail_value_ = nullptr;
+    VSTGUI::CSlider* wave_slider_ = nullptr;
+    VSTGUI::CTextLabel* wave_value_ = nullptr;
     ToggleButton* octave_down_ = nullptr;
     ToggleButton* octave_up_ = nullptr;
     ToggleButton* freeze_button_ = nullptr;

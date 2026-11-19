@@ -20,6 +20,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -109,11 +110,42 @@ struct SkinImage {
     explicit operator bool() const { return x1 || x2; }
 };
 
+// Custom skins (0.2.7; in 0.2.6 a test build's switch): the window takes bitmaps and
+// colour tables from two folders named "Messier-Skin" before its own, file by file:
+// first the user's, in Documents (writable without administrator rights), then the one
+// beside the Messier.vst3 bundle (for all users of the computer). A bitmap is taken
+// only at its exact pixel size (twice that for @2x); a file that is missing, unreadable,
+// not an image or of another size falls through to the next folder and in the end to
+// the built-in bitmap. Colour tables: the bundle folder's first, the user's on top.
+std::filesystem::path UserSkinFolder();   // Documents\Messier-Skin; empty if Windows names none
+std::filesystem::path BundleSkinFolder(); // beside the bundle; empty if not found
+std::vector<std::filesystem::path> SkinFolders(); // the two in that order, those named
+// Tests and the preview program: SkinFolders() gives exactly these from now on (an empty
+// list: the built-in skin alone), whatever the computer holds. Before any window opens.
+void UseSkinFolders(std::vector<std::filesystem::path> folders);
+// What a custom skin may hold, as text for a file in the folder: every bitmap's name and
+// pixel size, every colour's name (made from the built-in skin, so it never goes stale).
+std::string SkinFolderGuide();
+// The palette menu's "Open skin folder": makes the user's folder if needed, puts the
+// guide in it ("Messier skin files.txt", once) and opens it in Explorer. False if any
+// step failed; never throws.
+bool OpenUserSkinFolder() noexcept;
+// A preset's colour table as text: one "name = #RRGGBB" or "#RRGGBBAA" per line,
+// "negative = true" or "false"; lines from ";" on are comments.
+std::string ColourTableFileName(GuiPreset preset); // messier_<key>_colours.txt
+std::string ColourTableText(const SkinColours& colours);
+// Takes the lines it understands onto `colours`; the count of values taken.
+int ApplyColourTable(const std::string& text, SkinColours& colours);
+
 // The look of an open window: one preset's colours, fonts and bitmaps. Made when the
 // window opens and when the user picks another preset; may throw (std::bad_alloc).
 class Skin {
   public:
     explicit Skin(GuiPreset preset);
+    // With these skin folders, first wins (tests); the one above takes SkinFolders().
+    Skin(GuiPreset preset, const std::vector<std::filesystem::path>& folders);
+    // How many bitmaps and colour values came from the skin folders.
+    int Overrides() const { return overrides_; }
 
     GuiPreset Preset() const { return preset_; }
     const SkinColours& Colours() const { return colours_; }
@@ -131,7 +163,9 @@ class Skin {
 
   private:
     GuiPreset preset_;
+    SkinColours base_colours_; // the preset's, with the skin folders' tables on top
     SkinColours colours_;
+    int overrides_ = 0;
     std::array<SkinImage, kSkinImageCount> images_;
     struct Font {
         int kind;

@@ -158,8 +158,8 @@ void MapView::ShowAt(const EngineDisplay& display, std::shared_ptr<const WaveOve
                 continue;
             const double left = (1.0 - g.phase) / g.phase_rate; // audio seconds it still sounded
             // Compared in seconds before a time point is made (MS-R52).
-            if(!(left <= audio) || audio - left >= kTrailMaxMs / 1000.0)
-                continue; // keep enough history to lengthen the trail while editing
+            if(!(left <= audio) || audio - left >= kTrail)
+                continue; // sounds on in the new display, or its glow is gone
             if(take(g, g.phase + g.phase_rate * audio))
                 continue; // the new display was made just before its end
             Ended ended;
@@ -196,7 +196,7 @@ void MapView::Keep(const Ended& ended) noexcept {
 std::size_t MapView::Afterglows(Clock::time_point now) const {
     std::size_t glowing = 0;
     for(std::size_t i = 0; i < ended_count_; ++i)
-        glowing += now >= ended_[i].at && Seconds(now - ended_[i].at) < trail_seconds_ ? 1 : 0;
+        glowing += now >= ended_[i].at && Seconds(now - ended_[i].at) < kTrail ? 1 : 0;
     return glowing;
 }
 
@@ -317,11 +317,11 @@ void MapView::SetBlend(double blend) noexcept {
     blend_ = std::clamp(blend, 0.0, 1.0);
 }
 
-void MapView::SetTrail(std::int32_t milliseconds) noexcept {
-    const double seconds = std::clamp(milliseconds, kTrailMinMs, kTrailMaxMs) / 1000.0;
-    if(seconds == trail_seconds_)
+void MapView::SetWave(std::int32_t percent) noexcept {
+    const double gain = std::clamp(percent, kWaveMinPercent, kWaveMaxPercent) / 100.0;
+    if(gain == wave_gain_)
         return;
-    trail_seconds_ = seconds;
+    wave_gain_ = gain;
     Guarded([&] { invalid(); });
 }
 
@@ -418,16 +418,18 @@ void MapView::DrawWave(CDrawContext* context, const CRect& plate, double loop_le
             context->drawBitmap(wave_cache_, CRect(from, plate.top, to, plate.bottom), CPoint(from - plate.left, 0),
                                 alpha);
     };
-    part(plate.left, loop_left, 0.16f);
-    part(loop_left, loop_right, 0.40f);
-    part(loop_right, plate.right, 0.16f);
+    // 0.2.6: WAVE scales all three alike (at most fully opaque).
+    const auto level = [&](double alpha) { return static_cast<float>(std::min(1.0, alpha * wave_gain_)); };
+    part(plate.left, loop_left, level(0.16));
+    part(loop_left, loop_right, level(0.40));
+    part(loop_right, plate.right, level(0.16));
 }
 
 void MapView::DrawTrail(CDrawContext* context, double x, double y, double speed, double since, double reach,
                         double thickness, double alpha) {
-    // A point of the path glows 1 - age / trail_seconds_, age being how long ago the grain
+    // A point of the path glows 1 - age / kTrail, age being how long ago the grain
     // passed it; eased, so the glow fades softly.
-    reach = std::min(reach, trail_seconds_);
+    reach = std::min(reach, kTrail);
     if(!(reach > since) || !(alpha > 0.0))
         return;
     CCoord length = std::abs(speed) * (reach - since);
@@ -439,7 +441,7 @@ void MapView::DrawTrail(CDrawContext* context, double x, double y, double speed,
         length = kMaxTrail;
     }
     const CCoord from = speed > 0 ? x - length : x + length;
-    const auto glow = [&](double age) { return std::pow(std::clamp(1.0 - age / trail_seconds_, 0.0, 1.0), 1.6) * alpha; };
+    const auto glow = [&](double age) { return std::pow(std::clamp(1.0 - age / kTrail, 0.0, 1.0), 1.6) * alpha; };
     auto path = owned(context->createGraphicsPath());
     if(!path)
         return;
@@ -629,7 +631,7 @@ void MapView::DrawUnchecked(CDrawContext* context) {
 
             // The grains as shooting stars, in front of nebula, waveform and loop (0.2.2): a
             // warm-white head that flares with the grain's window and burns out, and its
-            // path through the file glowing on for the chosen trail time (across only; down is its
+            // path through the file glowing on for kTrail (across only; down is its
             // panorama, which does not move), also a while after the grain ended. Between
             // displays they move on at their own speeds.
             const double alpha = 0.85 + 0.15 * blend_;

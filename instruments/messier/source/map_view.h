@@ -65,8 +65,12 @@ class MapView : public VSTGUI::CView {
     // STOP (0.2.2): the nebula's drift comes to rest at once, not only once the displays
     // stand still.
     void SetStopped(bool stopped) noexcept { stopped_ = stopped; }
-    // How long a grain's path glows on after the grain passed (display only).
-    void SetTrail(std::int32_t milliseconds) noexcept;
+    // How long a grain's path glows on after the grain passed (display only; fixed since
+    // 0.2.6, the user's 450 ms).
+    static constexpr double kTrail = kTrailDefaultMs / 1000.0;
+    // The waveform's brightness in percent (0.2.6, WAVE): scales inside and outside the
+    // loop alike, so the loop stays as clear.
+    void SetWave(std::int32_t percent) noexcept;
     // The window's timer and the user's edits: the plate is drawn again, about as often
     // as displays come, so that nebula, playhead and grains move on.
     void Tick() noexcept;
@@ -178,7 +182,7 @@ class MapView : public VSTGUI::CView {
     VSTGUI::CCoord inset_ = 0;
     double blend_ = 0.5;
     double pitch_ = 0;
-    double trail_seconds_ = kTrailDefaultMs / 1000.0;
+    double wave_gain_ = 1.0;
     VSTGUI::CColor tail_ink_{255, 200, 140, 255}; // the tails' colour this frame
     double start_ = 0.0, size_ = 1.0;
     bool start_known_ = false, size_known_ = false;

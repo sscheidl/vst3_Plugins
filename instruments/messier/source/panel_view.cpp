@@ -6,7 +6,7 @@
 
 #include "vstgui/lib/cdrawcontext.h"
 
-#include <algorithm>
+#include <string>
 #include <utility>
 
 namespace messier {
@@ -44,15 +44,15 @@ void PanelView::DrawUnchecked(CDrawContext* context) {
     const Skin& skin = *skin_;
     const SkinColours& c = skin.Colours();
     const CRect all = getViewSize();
-    const CCoord height = all.getHeight();
     context->setDrawMode(kAntiAliasing | kNonIntegralMode);
 
-    // The chassis: as much of it as the window shows; a window taller than the bitmap
-    // (DETAILS and the keyboard both open) gets it stretched, a plain material.
+    // Use the fully open layout as the chassis coordinate system. Shorter layouts crop
+    // the bottom so decorations stay aligned with the controls in every layout.
     const SkinImage& chassis = skin.Image(SkinImageId::kChassis);
     if(chassis) {
-        const CCoord shown = std::min<CCoord>(height, chassis.size.y);
-        DrawSkinImagePart(context, chassis, CRect(0, 0, chassis.size.x, shown), all);
+        const CCoord full_height = L::TopHeight(true) + L::kKeyboardSection;
+        ConcatClip clip(*context, all);
+        DrawSkinImage(context, chassis, CRect(all.left, all.top, all.right, all.top + full_height));
     } else {
         context->setFillColor(c.metal);
         context->drawRect(all, kDrawFilled);
@@ -73,9 +73,12 @@ void PanelView::DrawUnchecked(CDrawContext* context) {
         DrawRule(context, c, CPoint(x0, y), CPoint(x1, y));
     }
 
-    // The maker and version, at the right end of the DETAILS bar.
-    DrawTracked(context, stringCompanyName " " FULL_VERSION_STR,
-                CRect(x1 - 112, bar - 8, x1, bar + 8), kRightText, 1.4, skin.Caps(10.5), c.dim, &c);
+    // The maker and version, at the right end of the DETAILS bar; with a custom skin, how
+    // many files and values its folders gave (0.2.7).
+    std::string version = stringCompanyName " " FULL_VERSION_STR;
+    if(skin.Overrides() > 0)
+        version = "CUSTOM SKIN " + std::to_string(skin.Overrides());
+    DrawTracked(context, version, CRect(x1 - 112, bar - 8, x1, bar + 8), kRightText, 1.4, skin.Caps(10.5), c.dim, &c);
 
     // The header: the brand and an accent stroke before LOAD. Only when the header is
     // redrawn (the texts cost more than the plate's frame).

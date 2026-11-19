@@ -44,16 +44,21 @@ namespace L = layout;
 namespace {
 
 constexpr CCoord kWidth = kEditorWidth;
+constexpr std::array kPresetMenuOrder{GuiPreset::kSlate, GuiPreset::kSilver, GuiPreset::kGold, GuiPreset::kPlum};
 
 // After the last step of a drag, wait this long before telling the host the
 // project changed. Hosts may do real work for that message.
 constexpr auto kSettleDelay = std::chrono::milliseconds(400);
 constexpr int32_t kAccentTag = -2;
-constexpr int32_t kTrailTag = -3;
-constexpr int32_t kTrailSpan = kTrailMaxMs - kTrailMinMs;
+constexpr int32_t kWaveTag = -3;
+constexpr int32_t kWaveSpan = kWaveMaxPercent - kWaveMinPercent;
 
-constexpr float TrailNormalized(int32_t milliseconds) {
-    return static_cast<float>(milliseconds - kTrailMinMs) / kTrailSpan;
+constexpr float WaveNormalized(int32_t percent) {
+    return static_cast<float>(percent - kWaveMinPercent) / kWaveSpan;
+}
+
+constexpr int32_t ClampWaveSetting(int32_t percent) {
+    return percent == kPresetWave ? kPresetWave : std::clamp(percent, kWaveMinPercent, kWaveMaxPercent);
 }
 
 class AccentSlider : public CSlider {
@@ -106,6 +111,61 @@ class AccentSlider : public CSlider {
 
   private:
     std::function<void()> restore_;
+};
+
+// WAVE (0.2.6): a slider of HUE's size for the waveform's brightness; its track in the
+// groove's colour, filled in the controls' colour up to the value. Double-click restores the preset default.
+class WaveSlider : public CSlider {
+    static constexpr double kTrackInset = 4.0;
+
+  public:
+    WaveSlider(const CRect& rect, IControlListener* listener, std::function<void()> restore)
+    : CSlider(rect, listener, kWaveTag, CPoint(kTrackInset + 0.5, 0),
+              int32_t(rect.getWidth() - 2 * kTrackInset + 1), nullptr, nullptr),
+      restore_(std::move(restore)) {
+        setSliderMode(CSliderMode::FreeClick);
+        setWheelInc(5.0f / kWaveSpan);
+        setTooltipText("Waveform contrast, 25 to 200 %. Double-click: preset default.");
+    }
+    void SetColours(CColor groove, CColor fill) {
+        groove_ = groove;
+        fill_ = fill;
+        invalid();
+    }
+
+    CMouseEventResult onMouseDown(CPoint& point, const CButtonState& buttons) override {
+        return Guarded(kMouseEventHandled, [&] {
+            if(buttons.isLeftButton() && buttons.isDoubleClick()) {
+                restore_();
+                return kMouseEventHandled;
+            }
+            return CSlider::onMouseDown(point, buttons);
+        });
+    }
+
+    void draw(CDrawContext* context) override {
+        Guarded([&] {
+            const CRect area = getViewSize();
+            const double y = area.getCenter().y;
+            const double left = area.left + kTrackInset, right = area.right - kTrackInset;
+            const double x = left + (right - left) * getValueNormalized();
+            context->setDrawMode(kAntiAliasing);
+            context->setFillColor(groove_);
+            context->drawRect(CRect(left, y - 2, right, y + 2), kDrawFilled);
+            context->setFillColor(fill_);
+            context->drawRect(CRect(left, y - 1.5, x, y + 1.5), kDrawFilled);
+            const CRect thumb(x - 4, y - 6, x + 4, y + 6);
+            context->setFillColor(kWhiteCColor);
+            context->setFrameColor(kBlackCColor);
+            context->setLineWidth(1);
+            context->drawEllipse(thumb, kDrawFilledAndStroked);
+            setDirty(false);
+        });
+    }
+
+  private:
+    std::function<void()> restore_;
+    CColor groove_ = CColor(0, 0, 0, 120), fill_ = kWhiteCColor;
 };
 
 struct KnobSpec {
@@ -170,7 +230,7 @@ Editor::Editor(EditController* controller, const EditorSettings& settings,
     settings_.transpose = ClampKeyboardTranspose(settings.transpose);
     settings_.preset = IsGuiPreset(static_cast<std::int32_t>(settings.preset)) ? settings.preset : GuiPreset::kSlate;
     settings_.accents = settings.accents;
-    settings_.trail_ms = std::clamp(settings.trail_ms, kTrailMinMs, kTrailMaxMs);
+    settings_.wave_percent = ClampWaveSetting(settings.wave_percent);
     setRect(ScaledSize());
 }
 
@@ -196,8 +256,8 @@ void Editor::ForgetViews() {
     keyboard_button_ = nullptr;
     details_button_ = nullptr;
     accent_slider_ = nullptr;
-    trail_knob_ = nullptr;
-    trail_value_ = nullptr;
+    wave_slider_ = nullptr;
+    wave_value_ = nullptr;
     octave_down_ = nullptr;
     octave_up_ = nullptr;
     freeze_button_ = nullptr;
@@ -284,8 +344,11 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
                                       false, [this](bool) { ChooseFile(); }, ToggleButton::Style::Action));
     load->setTooltipText("Load a WAV file: 16 or 24 bit PCM or 32 bit float, mono or stereo");
     load->SetSkin(skin_);
+    // The name upright like the rest of the header (0.2.7), as it is spelt; a name too long
+    // for its place ends in "..", the tooltip has the whole path.
     file_name_ = Add(MakeLabel(Box(L::kFileLeft, L::kFileNameTop, L::kCatalogueLeft, L::kFileNameBottom), "",
-                               skin.Italic(19), colours.text, kLeftText));
+                               skin.Sans(18), colours.text, kLeftText));
+    file_name_->setTextTruncateMode(CTextLabel::kTruncateTail);
     file_info_ = Add(MakeLabel(Box(L::kFileLeft, L::kFileNameBottom, L::kFileRight, L::kFileInfoBottom), "",
                                skin.Mono(11), colours.dim, kLeftText));
     catalogue_ = Add(MakeLabel(Box(L::kCatalogueLeft, L::kFileNameTop, L::kFileRight, L::kFileNameBottom), "",
@@ -443,20 +506,17 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
                                          this, [this] { SetAccent(kPresetAccent); }));
     accent_slider_->setVisible(settings_.details);
 
-    const double trail_left = L::kTrailCentre - L::kSmallKnobSize / 2;
-    const double trail_right = L::kTrailCentre + L::kSmallKnobSize / 2;
-    panel_->AddLabel(Box(trail_left, L::kSmallNameTop, trail_right, L::kSmallKnobTop),
-                     "TRAIL", PanelView::LabelKind::kSmallKnob);
-    trail_knob_ = Add(new MetalKnob(Box(trail_left, L::kSmallKnobTop, trail_right, L::kSmallKnobTop + L::kSmallKnobSize),
-                                    this, kTrailTag, true, false));
-    trail_knob_->setDefaultValue(TrailNormalized(kTrailDefaultMs));
-    trail_knob_->setWheelInc(10.0f / kTrailSpan);
-    trail_knob_->setTooltipText("Trail: how long the grain paths glow (display only)");
-    trail_value_ = Add(MakeLabel(Box(trail_left, L::kSmallValueTop, trail_right, L::kSmallValueTop + 14),
-                                 "", small_value_font, colours.value, kCenterText));
-    trail_knob_->setVisible(settings_.details);
-    trail_value_->setVisible(settings_.details);
-    ApplyTrail();
+    // WAVE (0.2.6) in TRAIL's place: the waveform's brightness; the trail is fixed.
+    panel_->AddLabel(Box(L::kWaveLeft, L::kSmallNameTop, L::kWaveRight, L::kSmallKnobTop),
+                     "WAVE", PanelView::LabelKind::kSmallKnob);
+    wave_slider_ = Add(new WaveSlider(Box(L::kWaveLeft, L::kSmallKnobTop, L::kWaveRight,
+                                          L::kSmallKnobTop + L::kSmallKnobSize),
+                                      this, [this] { SetWave(kPresetWave); }));
+    wave_value_ = Add(MakeLabel(Box(L::kWaveLeft, L::kSmallValueTop, L::kWaveRight, L::kSmallValueTop + 14),
+                                "", small_value_font, colours.value, kCenterText));
+    wave_slider_->setVisible(settings_.details);
+    wave_value_->setVisible(settings_.details);
+    ApplyWave();
 
     // Freeze and Reset beside Volume.
     const CCoord column = L::kButtonColumnLeft;
@@ -538,8 +598,10 @@ void Editor::ApplySkin() noexcept {
                 knob.value->setFontColor(colours.value);
         });
     Guarded([&] {
-        if(trail_value_)
-            trail_value_->setFontColor(colours.value);
+        if(wave_value_)
+            wave_value_->setFontColor(colours.value);
+        if(auto* wave = dynamic_cast<WaveSlider*>(wave_slider_))
+            wave->SetColours(colours.groove, colours.control);
     });
     Guarded([&] {
         if(file_name_)
@@ -631,7 +693,7 @@ void Editor::LayOut(int32 width, int32 height) {
         if(knob.value)
             knob.value->setVisible(settings_.details);
     }
-    const std::array<CView*, 3> display_controls{accent_slider_, trail_knob_, trail_value_};
+    const std::array<CView*, 3> display_controls{accent_slider_, wave_slider_, wave_value_};
     for(CView* view : display_controls) {
         if(!view)
             continue;
@@ -749,6 +811,7 @@ void Editor::SetGuiPreset(GuiPreset preset) {
         ApplySkin();
     }
     settings_.preset = preset;
+    ApplyWave();
     UserChanged();
 }
 
@@ -763,34 +826,49 @@ void Editor::SetAccent(std::int32_t hue) {
     UserChanged();
 }
 
-void Editor::ApplyTrail() {
+void Editor::SetWave(std::int32_t percent) {
+    percent = ClampWaveSetting(percent);
+    if(percent == settings_.wave_percent)
+        return;
+    settings_.wave_percent = percent;
+    ApplyWave();
+    UserChanged();
+}
+
+void Editor::ApplyWave() {
+    const auto percent = settings_.WavePercent();
     if(map_view_)
-        map_view_->SetTrail(settings_.trail_ms);
-    if(trail_knob_) {
-        trail_knob_->setValueNormalized(TrailNormalized(settings_.trail_ms));
-        trail_knob_->invalid();
+        map_view_->SetWave(percent);
+    if(wave_slider_) {
+        wave_slider_->setValueNormalized(WaveNormalized(percent));
+        wave_slider_->invalid();
     }
-    if(trail_value_) {
+    if(wave_value_) {
         char text[16];
-        std::snprintf(text, sizeof text, "%d ms", static_cast<int>(settings_.trail_ms));
-        trail_value_->setText(text);
+        std::snprintf(text, sizeof text, "%d %%", static_cast<int>(percent));
+        wave_value_->setText(text);
     }
 }
 
 SharedPointer<COptionMenu> MakePresetMenu(GuiPreset current) {
     auto menu = makeOwned<COptionMenu>(CRect(), nullptr, -1, nullptr, nullptr, COptionMenu::kMultipleCheckStyle);
-    for(std::int32_t i = 0; i < kGuiPresetCount; ++i) {
-        const GuiPresetInfo& info = PresetInfo(static_cast<GuiPreset>(i));
+    for(const GuiPreset preset : kPresetMenuOrder) {
+        const GuiPresetInfo& info = PresetInfo(preset);
         std::string title = info.name;
         int32_t flags = CMenuItem::kNoFlags;
         if(!info.delivered) {
             title += "  (bitmaps to come)";
             flags |= CMenuItem::kDisabled;
         }
-        if(static_cast<GuiPreset>(i) == current)
+        if(preset == current)
             flags |= CMenuItem::kChecked;
         menu->addEntry(UTF8String(title), -1, flags);
     }
+    // Custom skins (0.2.7; a test build's in 0.2.6): read the folders again, or open the
+    // user's.
+    menu->addSeparator();
+    menu->addEntry(UTF8String("Reload skin folders"));
+    menu->addEntry(UTF8String("Open skin folder"));
     return menu;
 }
 
@@ -844,9 +922,26 @@ void Editor::ShowPresetMenu() {
         const auto still = alive.lock();
         if(!still || !*still || !frame || window != window_serial_)
             return; // the editor or that window is gone
-        if(IsGuiPreset(index) && PresetInfo(static_cast<GuiPreset>(index)).delivered)
-            SetGuiPreset(static_cast<GuiPreset>(index));
+        if(index >= 0 && index < std::ssize(kPresetMenuOrder)) {
+            const GuiPreset preset = kPresetMenuOrder[static_cast<std::size_t>(index)];
+            if(PresetInfo(preset).delivered)
+                SetGuiPreset(preset);
+        } else if(index == std::ssize(kPresetMenuOrder) + 1) {
+            ReloadSkin();
+        } else if(index == std::ssize(kPresetMenuOrder) + 2) {
+            OpenUserSkinFolder();
+        }
     });
+}
+
+void Editor::ReloadSkin() {
+    if(!frame)
+        return;
+    auto skin = std::make_shared<Skin>(settings_.preset);
+    skin->SetAccent(settings_.Accent());
+    skin_ = std::move(skin);
+    ApplySkin();
+    Guarded([&] { frame->invalid(); });
 }
 
 void Editor::ShowSizeMenu() {
@@ -994,6 +1089,7 @@ void Editor::ApplySettings(const EditorSettings& settings) {
     const GuiPreset preset =
         IsGuiPreset(static_cast<std::int32_t>(settings.preset)) ? settings.preset : GuiPreset::kSlate;
     const std::int32_t old_accent = settings_.Accent();
+    const std::int32_t old_wave = settings_.WavePercent();
     settings_.accents = settings.accents;
     if(preset != settings_.preset) {
         // A loaded project brings its look. If it cannot be made, the old one stays on
@@ -1011,11 +1107,9 @@ void Editor::ApplySettings(const EditorSettings& settings) {
         skin_->SetAccent(settings_.Accent());
         ApplySkin();
     }
-    const std::int32_t trail = std::clamp(settings.trail_ms, kTrailMinMs, kTrailMaxMs);
-    if(trail != settings_.trail_ms) {
-        settings_.trail_ms = trail;
-        Guarded([&] { ApplyTrail(); });
-    }
+    settings_.wave_percent = ClampWaveSetting(settings.wave_percent);
+    if(settings_.WavePercent() != old_wave)
+        Guarded([&] { ApplyWave(); });
     if(zoom == settings_.zoom && settings.keyboard == settings_.keyboard
        && settings.details == settings_.details && transpose == settings_.transpose)
         return;
@@ -1092,14 +1186,8 @@ void Editor::valueChanged(CControl* control) {
             SetAccent(static_cast<std::int32_t>(std::lround(control->getValueNormalized() * kAccentMaxHue)));
             return;
         }
-        if(control == trail_knob_) {
-            const auto milliseconds =
-                kTrailMinMs + static_cast<int32_t>(std::lround(control->getValueNormalized() * kTrailSpan));
-            if(milliseconds != settings_.trail_ms) {
-                settings_.trail_ms = milliseconds;
-                UserChanged();
-                ApplyTrail();
-            }
+        if(control == wave_slider_) {
+            SetWave(kWaveMinPercent + static_cast<int32_t>(std::lround(control->getValueNormalized() * kWaveSpan)));
             return;
         }
         if(!controller)
@@ -1113,12 +1201,12 @@ void Editor::valueChanged(CControl* control) {
 }
 
 void Editor::beginEdit(int32_t tag) {
-    if(tag != kAccentTag && tag != kTrailTag)
+    if(tag != kAccentTag && tag != kWaveTag)
         VSTGUIEditor::beginEdit(tag);
 }
 
 void Editor::endEdit(int32_t tag) {
-    if(tag != kAccentTag && tag != kTrailTag)
+    if(tag != kAccentTag && tag != kWaveTag)
         VSTGUIEditor::endEdit(tag);
 }
 

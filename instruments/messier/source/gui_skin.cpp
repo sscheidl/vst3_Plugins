@@ -8,9 +8,20 @@
 #include "vstgui/lib/platform/platformfactory.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdio>
+#include <fstream>
+#include <sstream>
 #include <utility>
 #include <vector>
+
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shellapi.h>
+#include <shlobj.h>
 
 namespace messier {
 
@@ -277,8 +288,285 @@ CPoint SkinImageSize(SkinImageId id) {
     return CPoint(spec.width, spec.height);
 }
 
-Skin::Skin(GuiPreset preset) : preset_(ShownPreset(preset)), colours_(PresetInfo(preset_).colours) {
+namespace {
+
+struct ColourField {
+    const char* name;
+    CColor SkinColours::*member;
+};
+constexpr ColourField kColourFields[] = {
+    {"metal", &SkinColours::metal},          {"stain", &SkinColours::stain},
+    {"glass", &SkinColours::glass},          {"text", &SkinColours::text},
+    {"dim", &SkinColours::dim},              {"marker", &SkinColours::marker},
+    {"engrave_light", &SkinColours::engrave_light}, {"engrave_dark", &SkinColours::engrave_dark},
+    {"rule_dark", &SkinColours::rule_dark},  {"rule_light", &SkinColours::rule_light},
+    {"grid_line", &SkinColours::grid_line},  {"grid_cross", &SkinColours::grid_cross},
+    {"plate_text", &SkinColours::plate_text}, {"nebula_a", &SkinColours::nebula_a},
+    {"nebula_b", &SkinColours::nebula_b},    {"grain", &SkinColours::grain},
+    {"tail", &SkinColours::tail},            {"playhead", &SkinColours::playhead},
+    {"loop_fill", &SkinColours::loop_fill},  {"spray_fill", &SkinColours::spray_fill},
+    {"loop_edge", &SkinColours::loop_edge},  {"wave", &SkinColours::wave},
+    {"wave_outside", &SkinColours::wave_outside}, {"plate_wave", &SkinColours::plate_wave},
+    {"groove", &SkinColours::groove},        {"tick", &SkinColours::tick},
+    {"pointer", &SkinColours::pointer},      {"button_text", &SkinColours::button_text},
+    {"warning", &SkinColours::warning},      {"control", &SkinColours::control},
+    {"value", &SkinColours::value},
+};
+
+std::string Trim(std::string text) {
+    while(!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))
+        text.pop_back();
+    std::size_t start = 0;
+    while(start < text.size() && std::isspace(static_cast<unsigned char>(text[start])))
+        ++start;
+    return text.substr(start);
+}
+
+bool ParseHex(const std::string& text, CColor& colour) {
+    if(text.size() != 7 && text.size() != 9)
+        return false;
+    if(text[0] != '#')
+        return false;
+    unsigned value[4] = {0, 0, 0, 255};
+    for(std::size_t k = 0; k + 1 < text.size(); k += 2) {
+        unsigned byte = 0;
+        for(std::size_t d = 1 + k; d < 3 + k; ++d) {
+            const char c = static_cast<char>(std::tolower(static_cast<unsigned char>(text[d])));
+            if(c >= '0' && c <= '9')
+                byte = byte * 16 + static_cast<unsigned>(c - '0');
+            else if(c >= 'a' && c <= 'f')
+                byte = byte * 16 + static_cast<unsigned>(c - 'a' + 10);
+            else
+                return false;
+        }
+        value[k / 2] = byte;
+    }
+    colour = CColor(static_cast<uint8_t>(value[0]), static_cast<uint8_t>(value[1]), static_cast<uint8_t>(value[2]),
+                    static_cast<uint8_t>(value[3]));
+    return true;
+}
+
+// A custom skin's file, or none: missing, a folder, larger than any skin file needs, not
+// an image the platform reads. Never throws; the caller checks the size.
+constexpr std::uintmax_t kMaxSkinFileBytes = 32u << 20;
+PlatformBitmapPtr BitmapFromFile(const std::filesystem::path& file) noexcept {
+    try {
+        std::error_code error;
+        if(file.empty() || !std::filesystem::is_regular_file(file, error))
+            return nullptr;
+        const std::uintmax_t bytes = std::filesystem::file_size(file, error);
+        if(error || bytes == 0 || bytes > kMaxSkinFileBytes)
+            return nullptr;
+        const std::u8string path = file.u8string();
+        return getPlatformFactory().createBitmapFromPath(reinterpret_cast<const char*>(path.c_str()));
+    } catch(...) {
+        return nullptr;
+    }
+}
+
+// The first of `folders` with a bitmap `name` of exactly `size` pixels.
+PlatformBitmapPtr BitmapFromFolders(const std::vector<std::filesystem::path>& folders, const std::string& name,
+                                    CPoint size) noexcept {
+    for(const std::filesystem::path& folder : folders) {
+        PlatformBitmapPtr file = BitmapFromFile(folder / name);
+        if(file && file->getSize() == size)
+            return file;
+    }
+    return nullptr;
+}
+
+// A colour table's text, or nothing (missing, unreadable, larger than a table can be).
+bool ReadSkinTable(const std::filesystem::path& file, std::string& text) noexcept {
+    try {
+        std::error_code error;
+        if(!std::filesystem::is_regular_file(file, error))
+            return false;
+        const std::uintmax_t bytes = std::filesystem::file_size(file, error);
+        if(error || bytes > 64u << 10)
+            return false;
+        std::ifstream in(file, std::ios::binary);
+        if(!in)
+            return false;
+        std::ostringstream read;
+        read << in.rdbuf();
+        text = read.str();
+        return true;
+    } catch(...) {
+        return false;
+    }
+}
+
+} // namespace
+
+std::filesystem::path UserSkinFolder() {
+    try {
+        PWSTR documents = nullptr;
+        std::filesystem::path folder;
+        if(SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Documents, KF_FLAG_DEFAULT, nullptr, &documents)) && documents)
+            folder = std::filesystem::path(documents) / "Messier-Skin";
+        CoTaskMemFree(documents);
+        return folder;
+    } catch(...) {
+        return {};
+    }
+}
+
+std::filesystem::path BundleSkinFolder() {
+    // This module's file: ...\Messier.vst3\Contents\x86_64-win\Messier.vst3; the folder
+    // sits beside the bundle.
+    HMODULE module = nullptr;
+    if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCWSTR>(&BundleSkinFolder), &module))
+        return {};
+    wchar_t buffer[32768];
+    const DWORD length = GetModuleFileNameW(module, buffer, static_cast<DWORD>(std::size(buffer)));
+    if(length == 0 || length >= std::size(buffer))
+        return {};
+    std::filesystem::path file(std::wstring(buffer, length));
+    std::filesystem::path bundle = file.parent_path().parent_path().parent_path();
+    // Outside a bundle (a test program): beside the program.
+    if(bundle.extension() != ".vst3")
+        bundle = file;
+    return bundle.parent_path() / "Messier-Skin";
+}
+
+namespace {
+bool g_folders_fixed = false;
+std::vector<std::filesystem::path> g_fixed_folders;
+} // namespace
+
+void UseSkinFolders(std::vector<std::filesystem::path> folders) {
+    g_fixed_folders = std::move(folders);
+    g_folders_fixed = true;
+}
+
+std::vector<std::filesystem::path> SkinFolders() {
+    if(g_folders_fixed)
+        return g_fixed_folders;
+    std::vector<std::filesystem::path> folders;
+    for(std::filesystem::path folder : {UserSkinFolder(), BundleSkinFolder()})
+        if(!folder.empty())
+            folders.push_back(std::move(folder));
+    return folders;
+}
+
+std::string SkinFolderGuide() {
+    std::string text =
+        "Messier custom skin\n"
+        "===================\n\n"
+        "Messier takes the files below from this folder before its own, file by file. A file\n"
+        "that is missing, unreadable or not exactly the size given is replaced by the built-in\n"
+        "one. Palette menu > \"Reload skin folders\" reads the folders again.\n\n"
+        "Folders, the first that has a file wins:\n"
+        "  1. Messier-Skin in your Documents folder\n"
+        "  2. Messier-Skin beside Messier.vst3 (for all users; needs administrator rights)\n\n"
+        "Bitmaps: PNG, the size below for @1x and exactly twice that for @2x.\n"
+        "<preset> is slate, silver, plum or gold.\n\n";
+    char line[128];
+    for(const ImageSpec& spec : kImages) {
+        const std::string name = std::string("messier_") + (spec.per_preset ? "<preset>_" : "") + spec.stem + "@1x.png";
+        std::snprintf(line, sizeof line, "  %-36s %4d x %-4d   @2x.png: %d x %d\n", name.c_str(), spec.width,
+                      spec.height, spec.width * 2, spec.height * 2);
+        text += line;
+    }
+    text += "\nThe two nebula bitmaps are white; the colours nebula_a and nebula_b tint them.\n\n"
+            "Colour tables: messier_<preset>_colours.txt, one line per colour,\n"
+            "  name = #RRGGBB or #RRGGBBAA (AA: opacity); from \";\" on a comment.\n"
+            "A line left out keeps the built-in colour. The tables of both folders apply;\n"
+            "where both set a colour, the one in Documents wins. Names:\n";
+    for(const ColourField& field : kColourFields) {
+        text += "  ";
+        text += field.name;
+        text += "\n";
+    }
+    text += "  negative = true or false (dark ink on bright glass)\n";
+    return text;
+}
+
+bool OpenUserSkinFolder() noexcept {
+    try {
+        const std::filesystem::path folder = UserSkinFolder();
+        std::error_code error;
+        if(folder.empty() || (!std::filesystem::create_directories(folder, error) && error))
+            return false;
+        const std::filesystem::path guide = folder / "Messier skin files.txt";
+        if(!std::filesystem::exists(guide, error)) {
+            std::ofstream out(guide, std::ios::binary);
+            out << SkinFolderGuide();
+        }
+        const auto result = reinterpret_cast<INT_PTR>(
+            ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+        return result > 32;
+    } catch(...) {
+        return false;
+    }
+}
+
+std::string ColourTableFileName(GuiPreset preset) {
+    return std::string("messier_") + PresetInfo(preset).file_key + "_colours.txt";
+}
+
+std::string ColourTableText(const SkinColours& colours) {
+    std::string text;
+    char line[64];
+    for(const ColourField& field : kColourFields) {
+        const CColor& c = colours.*field.member;
+        if(c.alpha == 255)
+            std::snprintf(line, sizeof line, "%-14s = #%02X%02X%02X\n", field.name, c.red, c.green, c.blue);
+        else
+            std::snprintf(line, sizeof line, "%-14s = #%02X%02X%02X%02X\n", field.name, c.red, c.green, c.blue, c.alpha);
+        text += line;
+    }
+    text += std::string("negative       = ") + (colours.negative ? "true" : "false") + "\n";
+    return text;
+}
+
+int ApplyColourTable(const std::string& text, SkinColours& colours) {
+    int taken = 0;
+    std::istringstream lines(text);
+    std::string line;
+    while(std::getline(lines, line)) {
+        const std::size_t comment = line.find(';');
+        if(comment != std::string::npos)
+            line.erase(comment);
+        const std::size_t equals = line.find('=');
+        if(equals == std::string::npos)
+            continue;
+        std::string name = Trim(line.substr(0, equals));
+        const std::string value = Trim(line.substr(equals + 1));
+        std::transform(name.begin(), name.end(), name.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if(name == "negative") {
+            if(value == "true" || value == "false") {
+                colours.negative = value == "true";
+                ++taken;
+            }
+            continue;
+        }
+        for(const ColourField& field : kColourFields) {
+            CColor colour;
+            if(name == field.name && ParseHex(value, colour)) {
+                colours.*field.member = colour;
+                ++taken;
+            }
+        }
+    }
+    return taken;
+}
+
+Skin::Skin(GuiPreset preset) : Skin(preset, SkinFolders()) {}
+
+Skin::Skin(GuiPreset preset, const std::vector<std::filesystem::path>& folders)
+: preset_(ShownPreset(preset)), base_colours_(PresetInfo(preset_).colours), colours_(base_colours_) {
     const IPlatformFactory& factory = getPlatformFactory();
+    // Custom skins (0.2.7): the folders' colour tables, the first folder's last so that
+    // it wins, and their bitmaps before the built-in ones.
+    for(auto folder = folders.rbegin(); folder != folders.rend(); ++folder) {
+        std::string text;
+        if(ReadSkinTable(*folder / ColourTableFileName(preset_), text))
+            overrides_ += ApplyColourTable(text, base_colours_);
+    }
+    colours_ = base_colours_;
     for(std::size_t i = 0; i < kSkinImageCount; ++i) {
         const auto id = static_cast<SkinImageId>(i);
         SkinImage& image = images_[i];
@@ -286,12 +574,21 @@ Skin::Skin(GuiPreset preset) : preset_(ShownPreset(preset)), colours_(PresetInfo
         // Only a bitmap of the size the brief gives is taken; another one is left out
         // and drawn as the stand-in, so a wrong file cannot distort the layout.
         const std::string name1 = SkinImageFileName(preset_, id, 1);
-        if(auto bitmap = factory.createBitmap(CResourceDescription(name1.c_str()))) {
+        PlatformBitmapPtr file1 = BitmapFromFolders(folders, name1, CPoint(image.size.x, image.size.y));
+        if(file1) {
+            image.x1 = makeOwned<CBitmap>(file1);
+            ++overrides_;
+        } else if(auto bitmap = factory.createBitmap(CResourceDescription(name1.c_str()))) {
             if(bitmap->getSize() == CPoint(image.size.x, image.size.y))
                 image.x1 = makeOwned<CBitmap>(bitmap);
         }
         const std::string name2 = SkinImageFileName(preset_, id, 2);
-        if(auto bitmap = factory.createBitmap(CResourceDescription(name2.c_str()))) {
+        PlatformBitmapPtr file2 = BitmapFromFolders(folders, name2, CPoint(image.size.x * 2, image.size.y * 2));
+        if(file2) {
+            file2->setScaleFactor(2.0);
+            image.x2 = makeOwned<CBitmap>(file2);
+            ++overrides_;
+        } else if(auto bitmap = factory.createBitmap(CResourceDescription(name2.c_str()))) {
             if(bitmap->getSize() == CPoint(image.size.x * 2, image.size.y * 2)) {
                 bitmap->setScaleFactor(2.0);
                 image.x2 = makeOwned<CBitmap>(bitmap);
@@ -313,34 +610,25 @@ VSTGUI::CColor AccentColour(double hue) noexcept {
 }
 
 void Skin::SetAccent(std::int32_t hue) noexcept {
-    const SkinColours& original = PresetInfo(preset_).colours;
+    const SkinColours& original = base_colours_;
     colours_ = original;
     if(hue == kPresetAccent || !IsAccent(hue))
         return;
-
-    const CColor accent = AccentColour(hue);
-    colours_.control = accent;
-
-    // Keep the chosen hue on the chassis by moving its ink toward black or white
-    // only if the selected colour needs more contrast.
-    const auto luminance = [](CColor colour) {
-        const auto linear = [](int channel) {
-            const double srgb = channel / 255.0;
-            return srgb <= 0.04045 ? srgb / 12.92 : std::pow((srgb + 0.055) / 1.055, 2.4);
-        };
-        return 0.2126 * linear(colour.red) + 0.7152 * linear(colour.green) + 0.0722 * linear(colour.blue);
+    // 0.2.6 (the user's wish): only the hue turns. Each colour keeps its own lightness and
+    // saturation, so contrast and brightness stay as the preset made them; near-grey ink
+    // (most labels) hardly changes, the coloured controls and values take the new hue.
+    const auto turned = [&](CColor colour) {
+        double h = 0, saturation = 0, lightness = 0;
+        colour.toHSL(h, saturation, lightness);
+        CColor result = colour;
+        result.fromHSL(static_cast<double>(hue), saturation, lightness);
+        result.alpha = colour.alpha;
+        return result;
     };
-    const double back = luminance(original.metal) + 0.05;
-    const int toward = back >= 0.225 ? 0 : 255;
-    CColor ink = accent;
-    for(int step = 1; step <= 32; ++step) {
-        const double light = luminance(ink) + 0.05;
-        if(std::max(light, back) / std::min(light, back) >= 4.5)
-            break;
-        const auto shift = [&](int component) { return component + (toward - component) * step / 32; };
-        ink = Rgb(shift(accent.red), shift(accent.green), shift(accent.blue));
-    }
-    colours_.text = colours_.value = colours_.button_text = ink;
+    colours_.control = turned(original.control);
+    colours_.value = turned(original.value);
+    colours_.text = turned(original.text);
+    colours_.button_text = turned(original.button_text);
 }
 
 CFontRef Skin::FontOf(int kind, double size) const {

@@ -10,7 +10,7 @@
 #
 # Its own version; moduleinfo.json takes it from here. Keep it equal to
 # FULL_VERSION_STR in source/version.h and to components.json.
-project(Messier VERSION 0.2.5 LANGUAGES CXX)
+project(Messier VERSION 0.2.7 LANGUAGES CXX)
 
 # The SDK compiles everything with /fp:fast. The DSP, the adapter and their tests
 # use /fp:precise: the bit-exact comparison with the reference needs IEEE semantics.
@@ -72,6 +72,7 @@ add_library(messier_shell STATIC
     source/file_loader.cpp
     source/file_loader.h
     source/latest_value.h
+    source/message_text.h
     source/file_drop.cpp
     source/file_drop.h
     source/gui_layout.h
@@ -101,6 +102,9 @@ add_library(messier_shell STATIC
 target_include_directories(messier_shell PUBLIC source)
 target_compile_options(messier_shell PRIVATE ${MESSIER_FP} /W4 /permissive-)
 target_compile_definitions(messier_shell PUBLIC NOMINMAX)
+# Custom skins (0.2.7, a test build's switch MESSIER_SKIN_FOLDER in 0.2.6): the window
+# finds the user's Documents folder and opens it in Explorer.
+target_link_libraries(messier_shell PRIVATE shell32 ole32)
 target_link_libraries(messier_shell PUBLIC
     messier_adapter messier_engine sdk vstgui_support)
 # The window draws the core's own grain windows as the WINDOW symbol (since 0.1.8).
