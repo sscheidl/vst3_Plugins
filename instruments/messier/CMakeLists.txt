@@ -10,7 +10,7 @@
 #
 # Its own version; moduleinfo.json takes it from here. Keep it equal to
 # FULL_VERSION_STR in source/version.h and to components.json.
-project(Messier VERSION 0.2.1 LANGUAGES CXX)
+project(Messier VERSION 0.2.2 LANGUAGES CXX)
 
 # The SDK compiles everything with /fp:fast. The DSP, the adapter and their tests
 # use /fp:precise: the bit-exact comparison with the reference needs IEEE semantics.
@@ -119,7 +119,7 @@ set_target_properties(Messier PROPERTIES FOLDER "Messier")
 set(MESSIER_GUI_IMAGES
     messier_slate_chassis messier_slate_bezel messier_slate_plate messier_nebula_a
     messier_nebula_b messier_slate_knob_l messier_slate_knob_s messier_slate_thumb
-    messier_slate_button messier_slate_button_down messier_slate_screw messier_keys_white
+    messier_slate_button messier_slate_button_down messier_keys_white
     messier_keys_black)
 set(MESSIER_GUI_BITMAPS "")
 foreach(image IN LISTS MESSIER_GUI_IMAGES)
@@ -195,6 +195,13 @@ if(BUILD_TESTING)
             "-DBUILD_VERSION=${PROJECT_VERSION}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_provenance.cmake")
 
+    # The window drawn into PNG files for design rounds (0.2.2); run by hand, not a test.
+    add_executable(preview_messier_window tests/preview_window.cpp)
+    target_compile_options(preview_messier_window PRIVATE ${MESSIER_FP} /permissive-)
+    target_link_libraries(preview_messier_window PRIVATE messier_shell sdk_hosting)
+    target_compile_definitions(preview_messier_window PRIVATE
+        "MESSIER_GUI_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/resource/gui\"")
+
     # Measurements for the build report; run by hand, not a test.
     add_executable(bench_messier tests/bench.cpp)
     target_include_directories(bench_messier PRIVATE source)
@@ -203,5 +210,6 @@ if(BUILD_TESTING)
 
     set_target_properties(test_messier_vocoder messier_reference test_messier_engine
         test_messier_adapter test_messier_loader test_messier_plugin bench_messier
+        preview_messier_window
         PROPERTIES FOLDER "Messier")
 endif()

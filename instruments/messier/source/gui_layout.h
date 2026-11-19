@@ -1,7 +1,8 @@
 // Where things are in the window (0.2.0), in window units at 100 %: the window study,
-// version 3, with the user's decisions of 2026-11-18 (STOP in the header, LATCH beside
-// the keyboard, 15 keys at the key bitmap's size). Free of VSTGUI types, so the tests
-// can check it.
+// version 3, with the user's decisions of 2026-11-18 (STOP in the header, 15 keys at the
+// key bitmap's size) and the design round of 2026-11-19 (0.2.2: SPRAY in the upper row,
+// LATCH and KEYS under it, the octave keys as large as those, a lane of its own for the
+// position triangle, no screws). Free of VSTGUI types, so the tests can check it.
 #pragma once
 
 #include <cmath>
@@ -18,12 +19,12 @@ constexpr double kMargin = 20;
 // The header.
 constexpr double kHeaderRule = 44;
 constexpr double kButtonTop = 12, kButtonHeight = 26;
-// 8 units further left than in the study, clear of the screw in the corner.
-constexpr double kStopLeft = 646, kStopRight = 706;
-constexpr double kKeysLeft = 714, kKeysRight = 780;
-constexpr double kSizeLeft = 786, kSizeRight = 816;
+// STOP and the two symbol keys as one group, 6 units apart (0.2.2).
+constexpr double kHeaderGap = 6;
 constexpr double kPresetLeft = 822, kPresetRight = 852;
-constexpr double kVersionRight = 636;
+constexpr double kSizeRight = kPresetLeft - kHeaderGap, kSizeLeft = kSizeRight - 30;
+constexpr double kStopRight = kSizeLeft - kHeaderGap, kStopLeft = kStopRight - 60;
+constexpr double kVersionRight = kStopLeft - 14;
 
 // The file line.
 constexpr double kLoadLeft = 22, kLoadTop = 52, kLoadRight = 108, kLoadBottom = 80;
@@ -36,10 +37,13 @@ constexpr double kFileNameTop = 48, kFileNameBottom = 70, kFileInfoBottom = 86;
 constexpr double kMapLeft = 8, kMapTop = 84, kMapRight = 872, kMapBottom = 426;
 constexpr double kTimeLeft = 20, kTimeRight = 860;
 constexpr double kBezelEdge = 12;
-// Inside the plate view, from its top.
-constexpr double kAxisBottom = 20;   // the axis labels above, the ticks reach down to the bezel
-constexpr double kPlateTop = 32;     // the glass: its bitmap (186 high) stretched to 242
-constexpr double kPlateHeight = 242; // 0.2.0: 186, with the waveform below it
+// Inside the plate view, from its top: the axis labels, their ticks, the lane of the
+// position triangle (0.2.2, taken from the plate's height so the window keeps its size),
+// the bezel and the glass.
+constexpr double kAxisBottom = 20;   // the axis labels above, then the ticks
+constexpr double kMarkerTop = 21, kMarkerBottom = 30; // the position triangle's lane
+constexpr double kPlateTop = 42;     // the glass: its bitmap (186 high) stretched to 232
+constexpr double kPlateHeight = 232; // 0.2.0: 186, with the waveform below it; 0.2.1: 242
 constexpr double kSliderTop = 290, kSliderHeight = 30;
 constexpr double kRowTop = 322, kRowHeight = 18;
 
@@ -51,24 +55,25 @@ constexpr double kNameTop = 434, kKnobTop = 450, kKnobSize = 72, kValueTop = 522
 constexpr double kRuleBetweenRows = 546;
 constexpr double kSmallNameTop = 552, kSmallKnobTop = 566, kSmallKnobSize = 48, kSmallValueTop = 614;
 constexpr double kColumnRuleX = kMargin + 8 * kColumnWidth - 2; // beside Volume, FREEZE, RESET
+// The keys of the lower row, all of one size: LATCH and KEYS in the first column (0.2.2),
+// FREEZE and RESET in the last; the octave keys beside the keyboard have that size too.
 constexpr double kButtonWidth = 82;
 constexpr double kFreezeTop = 556, kResetTop = 594;
+constexpr double kLatchTop = kFreezeTop, kKeysTop = kResetTop;
 
 constexpr double ColumnLeft(int column) {
     return kMargin + column * kColumnWidth;
 }
 
-// The keyboard section: LATCH, the octave keys, 15 white keys of 36 units.
+// The keyboard section: the octave keys, 15 white keys of 36 units.
 constexpr double kKeyboardRule = kTopHeight + 2;
-constexpr double kKeysTop = kTopHeight + 10, kKeysHeight = 66;
+constexpr double kPianoTop = kTopHeight + 10, kPianoHeight = 66;
 constexpr double kKeyboardWidth = 15 * 36;
 constexpr double kKeyboardLeft = (kWidth - kKeyboardWidth) / 2;
-constexpr double kLatchLeft = 40, kLatchRight = 110;
-constexpr double kOctaveWidth = 36;
-constexpr double kKeyButtonTop = kKeysTop + 20;
+constexpr double kOctaveGap = 10; // between an octave key and the keyboard
+constexpr double kKeyButtonTop = kPianoTop + (kPianoHeight - kButtonHeight) / 2;
 
 constexpr double kGripSize = 18;
-constexpr double kScrewInset = 16; // centre of the screws from the window's edges
 
 // A pleasant step for the seconds axis of a file of `seconds`, drawn `pixels` wide:
 // labels at least `spacing` window units apart.

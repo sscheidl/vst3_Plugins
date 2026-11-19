@@ -111,7 +111,7 @@ void KeyboardView::DrawUnchecked(CDrawContext* context) {
     context->setDrawMode(kAntiAliasing | kNonIntegralMode);
     const SkinImage* white = skin_ ? &skin_->Image(SkinImageId::kKeyWhite) : nullptr;
     const SkinImage* black = skin_ ? &skin_->Image(SkinImageId::kKeyBlack) : nullptr;
-    const CColor pressed = skin_ ? WithAlpha(skin_->Colours().accent, 0.55) : kPressed;
+    const CColor pressed = skin_ ? WithAlpha(skin_->Colours().control, 0.85) : kPressed;
 
     for(int note = kKeyboardLowNote; note <= kKeyboardHighNote; ++note) {
         if(IsBlackKey(note))
@@ -326,6 +326,11 @@ void ToggleButton::SetSkin(std::shared_ptr<const Skin> skin) {
     invalid();
 }
 
+void ToggleButton::SetValueInk(bool on) {
+    value_ink_ = on;
+    invalid();
+}
+
 void ToggleButton::SetIcon(Icon icon) {
     icon_ = icon;
     invalid();
@@ -358,12 +363,16 @@ void ToggleButton::DrawUnchecked(CDrawContext* context) {
         FillRoundRect(context, area, 3.0, down ? c.stain : c.metal);
         StrokeRoundRect(context, area, 3.0, c.rule_dark);
     }
-    const CColor ink = !getMouseEnabled() ? WithAlpha(c.dim, 0.6) : (down ? c.accent : c.button_text);
+    // 0.2.2: a switch that is on shows its text in the controls' light colour on the pressed
+    // face; the octave keys carry that colour always. Disabled: dimmed.
+    const CColor lit = down || value_ink_ ? c.value : c.button_text;
+    const CColor ink = !getMouseEnabled() ? WithAlpha(value_ink_ ? c.value : c.dim, value_ink_ ? 0.32 : 0.6) : lit;
     if(icon_ == Icon::kNone) {
         CRect text = area;
         if(down)
             text.offset(0, 1); // pressed in
-        DrawTracked(context, title_, text, kCenterText, 1.1, skin_->Sans(11.5), ink); // sans since 0.2.1
+        // Sans since 0.2.1, regular and spaced since 0.2.2.
+        DrawTracked(context, title_, text, kCenterText, 1.8, skin_->Sans(12), ink);
         setDirty(false);
         return;
     }
@@ -455,7 +464,7 @@ void MetalKnob::DrawUnchecked(CDrawContext* context) {
         if(auto path = owned(context->createGraphicsPath())) {
             path->addArc(CRect(centre.x - arc, centre.y - arc, centre.x + arc, centre.y + arc), low - 90.0,
                          high - 90.0, true);
-            context->setFrameColor(c.accent);
+            context->setFrameColor(c.control);
             context->setLineWidth(small_ ? 1.8 : 2.4);
             context->drawGraphicsPath(path, CDrawContext::kPathStroked);
         }

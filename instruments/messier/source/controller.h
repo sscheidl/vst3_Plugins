@@ -7,6 +7,8 @@
 #include "public.sdk/source/vst/vsteditcontroller.h"
 
 #include <array>
+#include <chrono>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -48,6 +50,12 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
     void editorRemoved(Steinberg::Vst::EditorView* editor) SMTG_OVERRIDE;
     void editorDestroyed(Steinberg::Vst::EditorView* editor) SMTG_OVERRIDE;
     std::size_t OpenEditorCount() const { return editors_.size(); }
+    // MS-R44: calls `call` for each window registered now, each held for the call and
+    // called only while it is still registered: a call may reach the host, which may
+    // open, close or let go of windows on the way. An exception of one call ends only
+    // that call. Never throws (without memory for the copy no window is called). Public
+    // for tests.
+    void ForEachEditor(const std::function<void(Editor&)>& call) noexcept;
     const EditorSettings& WindowSettings() const { return editor_; }
 
     // Plays and releases a note through the processor, as the screen keyboard does.
@@ -164,6 +172,8 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
     std::string awaiting_;
     int await_ticks_ = 0;
     unsigned poll_ticks_ = 0;
+    std::chrono::steady_clock::time_point last_poll_{};
+    static constexpr std::chrono::milliseconds kPollSpacing{20};
     static constexpr int kAwaitTicks = 400;          // about 12 s at 30 ms
     static constexpr unsigned kStatusEveryTicks = 16; // about 0.5 s
     EngineDisplay display_{};

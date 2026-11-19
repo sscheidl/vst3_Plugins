@@ -9,13 +9,16 @@ namespace messier {
 
 static_assert(std::is_trivially_copyable_v<EngineDisplay>);
 static_assert(std::is_trivially_copyable_v<WaveOverview>);
-static_assert(sizeof(EngineDisplay) == 288, "no padding: the bytes travel to the controller");
+static_assert(sizeof(EngineDisplay) == 456, "no padding: the bytes travel to the controller");
 static_assert(sizeof(WaveOverview) == 8216, "no padding: the bytes travel to the controller");
 
 namespace {
 bool Within(double value, double low, double high) {
     return std::isfinite(value) && value >= low && value <= high;
 }
+// Far above any speed the core reaches (4x at 768 kHz for the playhead; a grain at 32x
+// two octaves up at 48 kHz is about 6 million frames a second).
+constexpr double kMaxSpeed = 1e8;
 } // namespace
 
 bool ReadDisplayBytes(const void* data, std::uint32_t size, EngineDisplay& display) noexcept {
@@ -23,7 +26,8 @@ bool ReadDisplayBytes(const void* data, std::uint32_t size, EngineDisplay& displ
         return false;
     EngineDisplay d;
     std::memcpy(&d, data, sizeof d);
-    if(d.frozen > 1 || d.swapping > 1 || d.grain_count > EngineDisplay::kMaxGrains)
+    if(d.frozen > 1 || d.swapping > 1 || d.grain_count > EngineDisplay::kMaxGrains
+       || !Within(d.head_speed, -kMaxSpeed, kMaxSpeed))
         return false;
     if(d.frames == 0) {
         // No file: nothing else counts.
@@ -37,7 +41,8 @@ bool ReadDisplayBytes(const void* data, std::uint32_t size, EngineDisplay& displ
             return false;
         for(std::uint32_t i = 0; i < d.grain_count; ++i) {
             const GrainDot& g = d.grains[i];
-            if(!Within(g.position, 0, limit) || !Within(g.pan, 0, 1) || !Within(g.phase, 0, 1))
+            if(!Within(g.position, 0, limit) || !Within(g.pan, 0, 1) || !Within(g.phase, 0, 1)
+               || !Within(g.speed, -kMaxSpeed, kMaxSpeed) || !Within(g.phase_rate, 0, kMaxSpeed))
                 return false;
         }
     }

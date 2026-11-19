@@ -1,7 +1,8 @@
 // The window's look (0.2.0): the four GUI presets the user chose on 2026-11-18 (Slate,
 // Silver, Copper, Photo plate), their colours, and their bitmaps. The bitmaps carry only
 // surfaces and material (docs/GRAFIKAUFTRAG_GUI.md): metal, glass, nebula, knob caps,
-// screws, keys. Everything that carries information (text, scales, grid, waveform,
+// keys. Since 0.2.2 knob caps, thumb and key faces of Slate are drawn by
+// tools/make_metal_bitmaps.py (interim, light metal); the screws are gone. Everything that carries information (text, scales, grid, waveform,
 // grains, pointers) the window draws itself, in the colours below.
 //
 // The bitmaps lie in the bundle's Contents/Resources folder as
@@ -35,7 +36,10 @@ constexpr bool IsGuiPreset(std::int32_t value) {
 struct SkinColours {
     VSTGUI::CColor metal, stain; // the stand-in for the chassis bitmap
     VSTGUI::CColor glass;        // the stand-in for the plate bitmap
-    VSTGUI::CColor text, dim, accent;
+    VSTGUI::CColor text, dim;
+    // Orange (0.2.2: only the position markers): the loop's brackets and the loop in the
+    // legend, the position triangle on the time axis.
+    VSTGUI::CColor marker;
     VSTGUI::CColor engrave_light, engrave_dark; // the copies 1 px below and above engraved text
     VSTGUI::CColor rule_dark, rule_light;       // engraved rules
     VSTGUI::CColor grid_line, grid_cross, plate_text;
@@ -48,6 +52,9 @@ struct SkinColours {
     VSTGUI::CColor button_text;
     VSTGUI::CColor warning;
     bool negative = false; // Photo plate: dark marks on light glass
+    // The controls (0.2.2, the user's design round): knob arcs, the START rail, the WINDOW
+    // curve, pressed keys, small ornaments; and the values in it, lighter for reading.
+    VSTGUI::CColor control, value;
 };
 
 struct GuiPresetInfo {
@@ -76,7 +83,6 @@ enum class SkinImageId {
     kThumb,
     kButton,
     kButtonDown,
-    kScrew,
     kKeyWhite,
     kKeyBlack,
     kCount
@@ -107,7 +113,8 @@ class Skin {
 
     // Engraved serif capitals: the brand and the version.
     VSTGUI::CFontRef Caps(double size) const;
-    // The controls' texts (0.2.1, the user's wish): names, buttons, scales, legend.
+    // The controls' texts (0.2.1, the user's wish): names, buttons, scales, legend. Since
+    // 0.2.2 in the lighter regular weight, with letter spacing (DrawTracked).
     VSTGUI::CFontRef Sans(double size) const;
     VSTGUI::CFontRef Italic(double size) const;
     VSTGUI::CFontRef Mono(double size) const;

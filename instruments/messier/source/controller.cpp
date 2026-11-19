@@ -191,11 +191,28 @@ void Controller::SetValue(ParamID tag, ParamValue value) noexcept {
 }
 
 void Controller::ShowParameter(ParamID tag) noexcept {
+    // Out of memory while drawing a text: the value is set, the window is late.
+    ForEachEditor([&](Editor& editor) { editor.ParameterChanged(tag, getParamNormalized(tag)); });
+}
+
+void Controller::ForEachEditor(const std::function<void(Editor&)>& call) noexcept {
+    std::vector<IPtr<Editor>> held;
     try {
+        held.reserve(editors_.size());
         for(const OpenEditor& open : editors_)
-            open.editor->ParameterChanged(tag, getParamNormalized(tag));
+            held.emplace_back(open.editor); // a reference of our own
     } catch(...) {
-        // Out of memory while drawing a text: the value is set, the window is late.
+        return;
+    }
+    for(const IPtr<Editor>& editor : held) {
+        const bool registered = std::any_of(editors_.begin(), editors_.end(),
+                                            [&](const OpenEditor& open) { return open.editor == editor.get(); });
+        if(!registered)
+            continue; // closed by an earlier call
+        try {
+            call(*editor);
+        } catch(...) {
+        }
     }
 }
 
@@ -264,12 +281,8 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
     editor_.keyboard = keyboard != 0;
     editor_.transpose = transpose;
     editor_.preset = static_cast<GuiPreset>(preset);
-    try {
-        for(const OpenEditor& open : editors_)
-            open.editor->ApplySettings(editor_);
-    } catch(...) {
-        // The settings are taken; an open window shows them when it can.
-    }
+    // The settings are taken; an open window shows them when it can.
+    ForEachEditor([&](Editor& editor) { editor.ApplySettings(editor_); });
     return kResultOk;
 }
 
@@ -410,8 +423,7 @@ tresult Controller::ReadDisplayUnchecked(IMessage* message) {
 }
 
 void Controller::ShowDisplay() noexcept {
-    for(const OpenEditor& open : editors_)
-        open.editor->ShowDisplay(display_, ShownWave());
+    ForEachEditor([&](Editor& editor) { editor.ShowDisplay(display_, ShownWave()); });
 }
 
 tresult PLUGIN_API Controller::notify(IMessage* message) {
@@ -494,12 +506,8 @@ void Controller::MarkChanged() noexcept {
 }
 
 void Controller::ShowFile() noexcept {
-    try {
-        for(const OpenEditor& open : editors_)
-            open.editor->ShowFileStatus(file_);
-    } catch(...) {
-        // The window shows the status when it next can.
-    }
+    // The window shows the status when it next can.
+    ForEachEditor([&](Editor& editor) { editor.ShowFileStatus(file_); });
 }
 
 IPlugView* PLUGIN_API Controller::createView(FIDString name) {
@@ -523,6 +531,12 @@ Editor* Controller::MakeEditor() {
     // While a file is being read, the window asks how it goes on every timer tick.
     // On every tick it asks for what it shows (since 0.1.4).
     callbacks.poll = [this] {
+        // Several windows of this instance together ask no more often than one (Codex'
+        // note on 0.2.1): every display goes to all of them.
+        const auto now = std::chrono::steady_clock::now();
+        if(now - last_poll_ < kPollSpacing)
+            return;
+        last_poll_ = now;
         ++poll_ticks_;
         if(await_ticks_ > 0)
             --await_ticks_;

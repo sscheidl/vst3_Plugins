@@ -1,5 +1,47 @@
 # Changes
 
+## 0.2.2 (2026-11-19)
+
+Codex' check of 0.2.1 (`docs/CODEX_REVIEW_0.2.1.md`) and the user's design round for
+Slate; details in `docs/BUILD_REPORT_0.2.2.md`. The sound is unchanged.
+
+* Light satin metal for the knob caps and the START thumb (the small caps a step
+  darker), dark knob pointers; key faces in dark satin metal, pressed in while on (a
+  shadow under the upper edge, a lit lower edge). Interim bitmaps drawn by
+  `tools/make_metal_bitmaps.py` at 1x and 2x.
+* Blue-violet for the controls: knob arcs, START rail, WINDOW curve, values, the struck
+  key, the active keys' texts, the small strokes in header and file line. Orange stays
+  for the position markers only: loop brackets, the loop in the legend, the position
+  triangle.
+* SPRAY is a large knob at the head of the upper row; LATCH and KEYS sit under it, as
+  FREEZE and RESET under Volume. LATCH stays in place without the keyboard, dimmed. The
+  header groups STOP with the two symbol keys.
+* The octave keys read "- OCT" and "OCT +", as large as the other keys, and dim at the
+  keyboard's limits.
+* The position triangle has a lane of its own below the axis labels (taken from the
+  plate's height; the window keeps its size).
+* Grains in front: warm-white heads with a soft warm halo; their path glows on for
+  0.3 s, also after the grain ended; a new file clears it.
+* The nebula drifts with the effective signed tempo (forward right, backward left,
+  eased, at most about 22 units a second), at rest at 0x, STOP and Freeze.
+* The waveform is a little brighter between the loop brackets (40 % instead of 30 %);
+  the playhead has a dark edge, so it reads over bright waveform.
+* No screws; the controls' texts in Bahnschrift's regular weight, spaced wider; the
+  places for the audio input's knobs stay empty until 0.3.0.
+* MS-R44: a parameter change no longer asks the processor from inside the controller's
+  call (later, on VSTGUI's main queue, for that window only); the controller calls its
+  windows from a held list, only while registered; several windows ask no more often
+  than one.
+* MS-R45, MS-R43: the display carries the core's own playhead and grain speeds; the
+  window no longer measures them from two displays (no wrong direction on short loops or
+  files, nothing kept after a pause).
+* MS-R46: the loop follows START and SIZE for 0.3 s after a change in the window, then the
+  loop the core reports (also automation the processor alone gets).
+* MS-R47: a waveform bitmap that cannot be made is tried again only after 2 s or for
+  another key; the three parts of the waveform are drawn once each.
+* MS-R40, MS-R41 (rest): a menu is taken out when it is a child of the frame; the file
+  info's colour is set on its own.
+
 ## 0.2.1 (2026-11-18)
 
 From the user's first look at 0.2.0 in Studio One and Codex' check of 0.2.0

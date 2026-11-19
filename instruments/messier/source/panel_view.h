@@ -1,7 +1,7 @@
-// The window's background (0.2.0): the chassis bitmap of the GUI preset, its screws,
-// the engraved rules, and the fixed engraved texts: the brand, the subtitle, the
-// version, the knobs' names and the places kept free for the audio input (0.3.0). It
-// takes no mouse; the controls lie on top of it.
+// The window's background (0.2.0): the chassis bitmap of the GUI preset, the engraved
+// rules, and the fixed engraved texts: the brand, the subtitle, the version and the
+// knobs' names. It takes no mouse; the controls lie on top of it. Since 0.2.2 without
+// screws, and without the places kept for the audio input (they return with 0.3.0).
 #pragma once
 
 #include "gui_skin.h"
@@ -18,11 +18,11 @@ class PanelView : public VSTGUI::CView {
   public:
     explicit PanelView(const VSTGUI::CRect& size);
 
-    enum class LabelKind { kKnob, kSmallKnob, kReserved };
-    // A fixed text, centred in `box`; a reserved place may have two lines ("\n").
+    enum class LabelKind { kKnob, kSmallKnob };
+    // A fixed text, centred in `box`.
     void AddLabel(const VSTGUI::CRect& box, std::string text, LabelKind kind);
     void SetSkin(std::shared_ptr<const Skin> skin);
-    // The keyboard section below: its rule and where the lower screw sits.
+    // The keyboard section below: its rule.
     void SetKeyboard(bool shown);
 
     void draw(VSTGUI::CDrawContext* context) override;

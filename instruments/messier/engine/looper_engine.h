@@ -21,7 +21,7 @@
 
 namespace messier {
 
-constexpr const char* kEngineVersion = "0.1.4";
+constexpr const char* kEngineVersion = "0.1.5";
 
 // A sample file in the core's format: interleaved PCM16, mono or stereo, at the
 // file's own rate (the core converts the rate when it reads). Immutable once handed
@@ -60,6 +60,12 @@ struct GrainDot {
     float position = 0; // read position
     float pan = 0;      // 0 left .. 1 right, as the core spreads it
     float phase = 0;    // of the grain's window, 0 at its start .. 1 at its end
+    // Since 0.2.2 (MS-R43, MS-R45): how the grain moves, from its own step and window
+    // increment, so the window need not guess it from two displays. Frames of the file
+    // per second (signed; without the input's grain FM, 0.3.0) and window phase per
+    // second.
+    float speed = 0;
+    float phase_rate = 0;
 };
 struct EngineDisplay {
     static constexpr unsigned kMaxGrains = 20; // both grain channels of the core
@@ -73,6 +79,11 @@ struct EngineDisplay {
     std::uint8_t frozen = 0;
     std::uint8_t swapping = 0; // a new file waits for the old one to fade out
     std::uint8_t unused[2] = {}; // no padding: every byte that travels is set
+    // Since 0.2.2 (MS-R45): the playhead's speed, frames of the file per second
+    // (signed, 0 while frozen), and the quanta rendered so far (wraps): a display with
+    // the same count is one without audio in between.
+    float head_speed = 0;
+    std::uint32_t rendered = 0;
     GrainDot grains[kMaxGrains]{}; // the sounding grains, first grain_count
 };
 
@@ -152,6 +163,7 @@ class LooperEngine {
     const FileData* current_ = nullptr;
     const FileData* next_ = nullptr;
     bool swapping_ = false;
+    std::uint32_t rendered_ = 0; // quanta, for the display (0.2.2)
     float volume_ = 1.0f, volume_target_ = 1.0f;
     const FileData* released_[4] = {};
     int released_count_ = 0;

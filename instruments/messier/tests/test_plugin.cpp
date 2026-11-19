@@ -48,6 +48,7 @@
 #include <filesystem>
 #include <functional>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -1482,7 +1483,8 @@ class CoalescingHandler : public IComponentHandler, public IComponentHandler2 {
 // same load, never the new values with the old file. In the end the last project
 // plays, also as the first block of an export.
 // The window of 0.2.1, without a window: the snowflake ends Freeze (the user's wish);
-// grains are followed only by plausible, unambiguous matches (MS-R43); the menus carry
+// playhead and grains move on at the display's speeds (0.2.2: MS-R43, MS-R45), the loop
+// returns to the core's after a preview (MS-R46); the menus carry
 // their ticks (MS-R42) and a menu that could not be shown leaves the frame (MS-R40);
 // RESET sets every knob and START to its default and Freeze off (the user's wish).
 void TestWindow021() {
@@ -1515,60 +1517,74 @@ void TestWindow021() {
         map->Release();
         CHECK(calls.size() == 4 && calls[1] == "begin" && calls[2] == "start" && calls[3] == "end");
     }
-    // MS-R43: Codex' case, a new grain 40,000 frames away in 25 ms with the same
-    // panorama and a higher phase, gets no speed; a grain that moves evenly gets its
-    // speed after two moves that agree; two candidates that fit alike give none.
+    // 0.2.2 (MS-R43, MS-R45): playhead and grains move on at the speeds the display
+    // carries, the playhead inside the display's own loop; nothing is kept from the
+    // display before. Codex' cases: a 2,000-frame loop at +1x (30 ms: 1,440 frames
+    // forward, not 560 back), a 2,000-frame file with a grain at 48,000 frames/s, and a
+    // display after a long pause with its own speed.
     {
         auto map = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
         EngineDisplay d;
         d.sequence = 1;
-        d.frames = 480000;
-        d.loop_length = 480000;
+        d.frames = 48000;
+        d.loop_start = 1000;
+        d.loop_length = 2000;
+        d.playhead = 1100;
+        d.head_speed = 48000.0f;
+        d.rendered = 1;
         d.grain_count = 1;
-        d.grains[0] = {1000.0f, 0.5f, 0.3f};
+        d.grains[0] = {100.0f, 0.5f, 0.2f, 48000.0f, 4.0f};
         Clock::time_point t{};
         t += std::chrono::seconds(1);
         map->ShowAt(d, nullptr, t);
-        d.grains[0] = {41000.0f, 0.5f, 0.5f};
-        t += std::chrono::milliseconds(25);
-        map->ShowAt(d, nullptr, t);
-        CHECK(map->GrainSpeed(0) == 0.0); // one move: not yet a speed
-        d.grains[0] = {41000.0f + 1200.0f, 0.5f, 0.55f};
-        t += std::chrono::milliseconds(25);
-        map->ShowAt(d, nullptr, t);
-        CHECK(map->GrainSpeed(0) == 0.0); // 1.6 million, then 48,000 frames/s: no agreement
-        for(int k = 2; k <= 4; ++k) {
-            d.grains[0] = {41000.0f + 1200.0f * static_cast<float>(k), 0.5f, 0.55f + 0.05f * static_cast<float>(k - 1)};
-            t += std::chrono::milliseconds(25);
-            map->ShowAt(d, nullptr, t);
-        }
-        CHECK(std::abs(map->GrainSpeed(0) - 48000.0) < 1.0); // even moves: the real speed
-        // Two old grains at the same panorama, equally near: ambiguous, no speed.
-        d.grain_count = 2;
-        d.grains[0] = {100000.0f, 0.2f, 0.10f};
-        d.grains[1] = {100400.0f, 0.2f, 0.10f};
-        t += std::chrono::milliseconds(25);
-        map->ShowAt(d, nullptr, t);
-        d.grain_count = 1;
-        d.grains[0] = {100200.0f, 0.2f, 0.2f};
-        t += std::chrono::milliseconds(25);
-        map->ShowAt(d, nullptr, t);
-        d.grains[0] = {100300.0f, 0.2f, 0.3f};
-        t += std::chrono::milliseconds(25);
-        map->ShowAt(d, nullptr, t);
-        CHECK(map->GrainSpeed(0) == 0.0);
-        // Across more than a quarter of a short file: no direction is guessed.
+        const auto ms = [](int n) { return std::chrono::milliseconds(n); };
+        CHECK(map->HeadAt(t) == 1100.0);
+        CHECK(std::abs(map->HeadAt(t + ms(30)) - 2540.0) < 1e-6);         // forward, inside the loop
+        CHECK(std::abs(map->HeadAt(t + ms(30) * 2) - (1000.0 + 980.0)) < 1e-6); // around it
+        CHECK(std::abs(map->HeadAt(t + std::chrono::seconds(5)) - (1000.0 + 1300.0)) < 1e-6); // 0.15 s at most
+        CHECK(map->GrainSpeed(0) == 48000.0);
+        CHECK(std::abs(map->GrainAt(0, t + ms(30)) - 1540.0) < 1e-6);
+        // A file of 2,000 frames: the grain goes round it forward (Codex: -2,000 before).
         d.frames = 2000;
-        d.loop_length = 2000;
-        d.grains[0] = {100.0f, 0.7f, 0.1f};
-        t += std::chrono::milliseconds(25);
-        map->ShowAt(d, nullptr, t);
-        for(int k = 1; k <= 3; ++k) {
-            d.grains[0] = {static_cast<float>((100 + 900 * k) % 2000), 0.7f, 0.1f + 0.1f * static_cast<float>(k)};
-            t += std::chrono::milliseconds(25);
-            map->ShowAt(d, nullptr, t);
-        }
-        CHECK(map->GrainSpeed(0) == 0.0);
+        d.loop_start = 0;
+        d.playhead = 100;
+        d.rendered = 2;
+        map->ShowAt(d, nullptr, t + ms(40));
+        CHECK(map->GrainSpeed(0) == 48000.0);
+        CHECK(std::abs(map->GrainAt(0, t + ms(80)) - 20.0) < 1e-6); // 100 + 1,920, round the file
+        // The same display again after a while: the engine rests, nothing moves on.
+        map->ShowAt(d, nullptr, t + ms(200));
+        CHECK(map->HeadAt(t + ms(210)) == 100.0 && map->GrainAt(0, t + ms(210)) == 100.0);
+        // After a long pause a display with another speed: only its own counts.
+        d.rendered = 3;
+        d.playhead = 1500;
+        d.head_speed = -24000.0f;
+        map->ShowAt(d, nullptr, t + ms(1000));
+        CHECK(std::abs(map->HeadAt(t + ms(1010)) - 1260.0) < 1e-6);
+        // Frozen: the playhead stands where the display has it.
+        d.rendered = 4;
+        d.frozen = 1;
+        d.head_speed = 0.0f;
+        map->ShowAt(d, nullptr, t + ms(1100));
+        CHECK(map->HeadAt(t + ms(1130)) == 1500.0);
+    }
+    // MS-R46: the loop from START and SIZE only for a moment after the window's change;
+    // then the loop the core reports, also when only the processor got the automation.
+    {
+        auto map = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
+        map->SetStart(0.0);
+        map->SetSize(1.0);
+        EngineDisplay d;
+        d.sequence = 1;
+        d.frames = 48000;
+        d.loop_start = 24000;
+        d.loop_length = 1500;
+        d.playhead = 24100;
+        map->Show(d, nullptr);
+        const MapView::Loop preview = map->ShownLoop(Clock::now());
+        CHECK(preview.start == 0.0 && preview.length == 48000.0);
+        const MapView::Loop later = map->ShownLoop(Clock::now() + MapView::kPreview + std::chrono::milliseconds(1));
+        CHECK(later.start == 24000.0 && later.length == 1500.0);
     }
     // MS-R42: the ticks. Menus need VSTGUI set up (their default font), as the plug-in
     // has it in a host. Showing one needs a real window (MS-R40 is checked in the code).
@@ -1615,9 +1631,164 @@ void TestWindow021() {
         view = nullptr;
         CHECK(controller->terminate() == kResultOk);
     }
-    std::printf("window 0.2.1: the snowflake ends Freeze; grains followed only by plausible, unambiguous "
-                "matches (MS-R43); menus with ticks (MS-R42); "
-                "RESET to defaults and Freeze off\n");
+    // MS-R44: a change the controller reports asks the processor nothing from inside its
+    // call (and a window not open never asks); the controller calls each window from a
+    // held copy of its list, only while the window is still registered; a window let go
+    // without removed() takes itself out of the list.
+    {
+        IPtr<HostApplication> app = owned(new HostApplication());
+        IPtr<Controller> controller = owned(new Controller());
+        CHECK(controller->initialize(app) == kResultOk);
+        int polls = 0;
+        EditorCallbacks callbacks;
+        callbacks.poll = [&] { ++polls; };
+        IPtr<Editor> lone(new Editor(controller, EditorSettings{}, std::move(callbacks)), false);
+        lone->ParameterChanged(kParamSpeed, 0.3);
+        lone->notify(nullptr, VSTGUI::CVSTGUITimer::kMsgTimer);
+        CHECK(polls == 0);
+        lone = nullptr;
+        IPtr<IPlugView> first = owned(controller->createView(ViewType::kEditor));
+        IPtr<IPlugView> second = owned(controller->createView(ViewType::kEditor));
+        auto* one = dynamic_cast<Editor*>(first.get());
+        auto* two = dynamic_cast<Editor*>(second.get());
+        CHECK(one && two);
+        controller->editorAttached(one);
+        controller->editorAttached(two);
+        CHECK(controller->OpenEditorCount() == 2);
+        std::vector<Editor*> called;
+        controller->ForEachEditor([&](Editor& editor) {
+            called.push_back(&editor);
+            if(&editor == one) { // the host closes and lets go of the other on the way
+                controller->editorRemoved(two);
+                second = nullptr;
+            }
+        });
+        CHECK(called == std::vector<Editor*>{one});
+        CHECK(controller->OpenEditorCount() == 1);
+        first = nullptr; // let go while registered
+        CHECK(controller->OpenEditorCount() == 0);
+        controller->setParamNormalized(kParamSpeed, 0.2); // nothing left to call
+        CHECK(controller->terminate() == kResultOk);
+    }
+    std::printf("window 0.2.1/0.2.2: no request from inside the controller's call, windows from a held list "
+                "(MS-R44); the snowflake ends Freeze; playhead and grains at the display's speeds (MS-R43, "
+                "MS-R45); the core's loop after a preview (MS-R46); menus with ticks (MS-R42); RESET to "
+                "defaults and Freeze off\n");
+}
+
+// 0.2.2, the user's design round: the nebula drifts with the signed tempo the display
+// carries (forward right, backward left, at rest when frozen, stopped or without tempo,
+// never turned round by the playhead's jump at the loop's end), eased; ended grains glow
+// on for kTrail, and another file clears them; the layout keeps the window's size.
+void TestWindow022() {
+    using Clock = MapView::Clock;
+    const auto ms = [](int n) { return std::chrono::milliseconds(n); };
+    {
+        auto map = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
+        EngineDisplay d;
+        d.sequence = 1;
+        d.frames = 96000;
+        d.loop_start = 0;
+        d.loop_length = 96000;
+        d.playhead = 90000;
+        d.head_speed = 48000.0f; // 1x forward (no overview: 48 kHz)
+        d.rendered = 1;
+        Clock::time_point now{};
+        now += std::chrono::seconds(1);
+        // The window draws about every 20 ms; each frame moves the drift on.
+        const auto run = [&](int frames) {
+            for(int k = 0; k < frames; ++k) {
+                now += ms(20);
+                map->AdvanceDrift(now);
+            }
+        };
+        const auto show = [&](std::uint32_t rendered) {
+            d.rendered = rendered;
+            map->ShowAt(d, nullptr, now);
+        };
+        show(1);
+        CHECK(std::abs(map->DriftTarget() - 9.0) < 1e-9);
+        run(300); // 6 s: eased all the way
+        CHECK(std::abs(map->DriftSpeed() - 9.0) < 0.01);
+        // The loop turns: the read position jumps back, the tempo stays; so does the drift.
+        d.playhead = 1000;
+        show(2);
+        run(1);
+        CHECK(map->DriftTarget() > 0 && map->DriftSpeed() > 8.99);
+        // Backward: the drift turns smoothly, not at once.
+        d.head_speed = -96000.0f;
+        show(3);
+        CHECK(std::abs(map->DriftTarget() + 18.0) < 1e-9);
+        run(1);
+        CHECK(map->DriftSpeed() > 0); // still easing round
+        run(300);
+        CHECK(std::abs(map->DriftSpeed() + 18.0) < 0.01);
+        // A very fast tempo: at most kMaxDrift.
+        d.head_speed = 48000.0f * 8;
+        show(4);
+        CHECK(map->DriftTarget() == 22.0);
+        // Frozen (the core reports no tempo then), stopped: at rest.
+        d.frozen = 1;
+        d.head_speed = 0.0f;
+        show(5);
+        CHECK(map->DriftTarget() == 0.0);
+        d.frozen = 0;
+        d.head_speed = 48000.0f;
+        show(6);
+        map->SetStopped(true);
+        CHECK(map->DriftTarget() == 0.0);
+        run(300);
+        CHECK(map->DriftSpeed() == 0.0);
+        map->SetStopped(false);
+        CHECK(map->DriftTarget() == 9.0);
+    }
+    {
+        auto map = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
+        EngineDisplay d;
+        d.sequence = 1;
+        d.frames = 96000;
+        d.loop_length = 96000;
+        d.rendered = 1;
+        d.grain_count = 2;
+        d.grains[0] = {1000.0f, 0.2f, 0.9f, 48000.0f, 10.0f}; // ends in 10 ms
+        d.grains[1] = {5000.0f, 0.7f, 0.5f, 48000.0f, 2.0f};  // sounds on
+        Clock::time_point t{};
+        t += std::chrono::seconds(1);
+        map->ShowAt(d, nullptr, t);
+        CHECK(map->Afterglows(t) == 0);
+        // The next display: the first grain has ended, the second is still in it.
+        EngineDisplay next = d;
+        next.rendered = 2;
+        next.grain_count = 1;
+        next.grains[0] = d.grains[1];
+        next.grains[0].phase = 0.56f;
+        map->ShowAt(next, nullptr, t + ms(30));
+        CHECK(map->Afterglows(t + ms(30)) == 1);
+        CHECK(map->Afterglows(t + ms(10 + 299)) == 1); // kTrail: 0.3 s after it ended
+        CHECK(map->Afterglows(t + ms(10 + 301)) == 0);
+        // Another file: the glow is gone at once.
+        EngineDisplay other = next;
+        other.sequence = 2;
+        other.rendered = 3;
+        map->ShowAt(other, nullptr, t + ms(60));
+        CHECK(map->Afterglows(t + ms(60)) == 0);
+    }
+    // The layout: STOP and the symbol keys one group with even gaps; LATCH and KEYS as
+    // high as FREEZE and RESET; the triangle's lane between the axis and the bezel, taken
+    // from the plate, whose bottom (and the window's size) stays.
+    CHECK(layout::kStopRight + layout::kHeaderGap == layout::kSizeLeft
+          && layout::kSizeRight + layout::kHeaderGap == layout::kPresetLeft);
+    CHECK(layout::kLatchTop == layout::kFreezeTop && layout::kKeysTop == layout::kResetTop);
+    CHECK(layout::kAxisBottom < layout::kMarkerTop && layout::kMarkerBottom <= layout::kPlateTop - layout::kBezelEdge);
+    CHECK(layout::kPlateTop + layout::kPlateHeight == 274 && layout::kTopHeight == 640);
+    // Slate: blue-violet controls, orange markers, kept apart.
+    const SkinColours& slate = PresetInfo(GuiPreset::kSlate).colours;
+    CHECK(slate.control == VSTGUI::CColor(157, 172, 235) && slate.value == VSTGUI::CColor(190, 200, 255));
+    CHECK(slate.marker == VSTGUI::CColor(227, 115, 61));
+    std::printf("window 0.2.2 design: the nebula drifts with the signed tempo, eased, at rest when frozen or "
+                "stopped, not turned by a loop's turn; ended grains glow on for %.1f s, a new file clears "
+                "them; header group, LATCH/KEYS, the triangle's lane; control and marker colours apart\n",
+                MapView::kTrail);
 }
 
 // The GUI presets (0.2.0): the bitmaps the window asks for are in the plug-in's
@@ -1645,7 +1816,7 @@ void TestGuiPresets() {
             ++checked;
         }
     }
-    CHECK(checked == 26);
+    CHECK(checked == 24); // 12 images (no screw since 0.2.2), 1x and 2x
     CHECK(SkinImageFileName(GuiPreset::kPhotoPlate, SkinImageId::kChassis, 2) == "messier_plate_chassis@2x.png");
     CHECK(SkinImageFileName(GuiPreset::kCopper, SkinImageId::kNebulaA, 1) == "messier_nebula_a@1x.png");
     CHECK(PresetInfo(GuiPreset::kSlate).delivered && ShownPreset(GuiPreset::kSilver) == GuiPreset::kSlate);
@@ -2471,6 +2642,11 @@ void TestDisplayPath() {
     CHECK(refused([](EngineDisplay& d) { d.playhead = 1e9; }));
     CHECK(refused([](EngineDisplay& d) { d.frozen = 2; }));
     CHECK(refused([](EngineDisplay& d) { d.grains[0].pan = 1.5f; }));
+    // 0.2.2: the speeds must be numbers in range.
+    CHECK(refused([](EngineDisplay& d) { d.head_speed = std::numeric_limits<float>::quiet_NaN(); }));
+    CHECK(refused([](EngineDisplay& d) { d.grains[0].speed = std::numeric_limits<float>::infinity(); }));
+    CHECK(refused([](EngineDisplay& d) { d.grains[0].phase_rate = -1.0f; }));
+    CHECK(!refused([](EngineDisplay& d) { d.head_speed = -192000.0f; }));
     CHECK(refused([](EngineDisplay& d) { d.sequence = 0; }));
     CHECK(refused([](EngineDisplay& d) { d.frames = 0; })); // no file, yet a sequence
     // A long file (above 2^24 frames): positions as floats round to just beyond the
@@ -2772,6 +2948,7 @@ int main() {
     TestResizeGrip();
     TestGuiPresets();
     TestWindow021();
+    TestWindow022();
     TestState();
     TestExportStart();
     TestMessagesAndKeyboard();

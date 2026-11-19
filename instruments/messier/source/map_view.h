@@ -7,10 +7,16 @@
 // legend. The playhead runs across the plate, with a snowflake while Freeze holds it.
 //
 // It draws what the controller last received. Between two displays (about 30 ms apart,
-// later while the host is busy) it moves playhead and grains on at their measured speeds
-// (0.2.1), and the loop follows START and SIZE at once, so the plate stays fluid. A click
+// later while the host is busy) it moves playhead and grains on at the speeds the display
+// carries (0.2.1; since 0.2.2 the core's own, not measured), and the loop follows START
+// and SIZE at once for a moment (then the core's loop again), so the plate stays fluid. A click
 // or drag sets START to that place in the file, a click on the snowflake ends Freeze
 // (0.2.1), the wheel widens or narrows SPRAY (since 0.1.8), and a WAV can be dropped on it.
+//
+// 0.2.2 (the user's design round): the grains glow on along their path for kTrail after
+// they passed (also after a grain ended; a new file clears that), the nebula drifts with
+// the effective signed tempo the display carries (never with the read position's jumps),
+// and the position triangle has a lane of its own between the axis labels and the plate.
 #pragma once
 
 #include "gui_skin.h"
@@ -21,6 +27,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -44,10 +51,19 @@ class MapView : public VSTGUI::CView {
     void SetSkin(std::shared_ptr<const Skin> skin) noexcept;
     // BLEND (normalized): the nebula fades and the grains brighten towards Granular.
     void SetBlend(double blend) noexcept;
-    // START and SIZE (normalized): the slider's thumb and the loop as the core will set
-    // it (START x length; SIZE squared of the rest), ahead of the next display.
+    // START and SIZE (normalized): the slider's thumb, and for kPreview after a change
+    // the loop as the core will set it (START x length; SIZE squared of the rest), ahead
+    // of the displays. MS-R46: after that the loop the core reports, which also follows
+    // automation the processor gets and the controller does not.
     void SetStart(double start) noexcept;
     void SetSize(double size) noexcept;
+    static constexpr std::chrono::milliseconds kPreview{300};
+    // STOP (0.2.2): the nebula's drift comes to rest at once, not only once the displays
+    // stand still.
+    void SetStopped(bool stopped) noexcept { stopped_ = stopped; }
+    // How long a grain's path glows on after the grain passed (0.2.2, the user's start
+    // value; display only).
+    static constexpr double kTrail = 0.3;
     // The window's timer and the user's edits: the plate is drawn again, about as often
     // as displays come, so that nebula, playhead and grains move on.
     void Tick() noexcept;
@@ -85,40 +101,67 @@ class MapView : public VSTGUI::CView {
     // For tests: what the view would draw.
     const EngineDisplay& Shown() const { return display_; }
     bool ShowsWave() const { return wave_ != nullptr; }
-    // The speed (frames per second, signed) of a sounding grain once two moves in a row
-    // agree, else 0: the grain's real motion through the file, which its tail shows. The
-    // display carries no grain numbers; a grain is followed by its panorama, its growing
-    // window phase and its position (MS-R43: implausible or ambiguous matches start anew).
+    // The speed (frames per second, signed) of a sounding grain, as the display carries
+    // it: the grain's real motion through the file, which its tail shows (since 0.2.2;
+    // MS-R43: 0.2.1 guessed it from two displays).
     double GrainSpeed(std::uint32_t index) const;
+    // Where the playhead and a grain are drawn at `now`: the display's place moved on at
+    // its speed for at most a short while, the playhead inside the display's own loop
+    // (MS-R45, MS-R46), nothing moved while frozen or resting.
+    double HeadAt(Clock::time_point now) const;
+    double GrainAt(std::uint32_t index, Clock::time_point now) const;
+    // The loop as drawn at `now`, in frames.
+    struct Loop {
+        double start = 0, length = 1;
+    };
+    Loop ShownLoop(Clock::time_point now) const;
+    // MS-R47: whether the waveform's bitmap could not be made (the plate is then drawn
+    // without it, and the bitmap is tried again only for another key or after a while).
+    bool WaveFailed() const { return wave_failed_; }
     // Where the snowflake is while Freeze holds, relative to the view; empty otherwise.
     VSTGUI::CRect SnowflakeBox() const;
+    // The nebula's drift (0.2.2): the speed it heads for, in window units per second
+    // (signed: forward to the right), from the effective tempo of the display; 0 while
+    // stopped, frozen, resting or without a file. AdvanceDrift moves the drift on to `now`
+    // (each frame), easing its speed towards that target.
+    double DriftTarget() const;
+    void AdvanceDrift(Clock::time_point now) noexcept;
+    double DriftSpeed() const { return drift_speed_; }
+    // Grains that ended and still glow at `now` (tests).
+    std::size_t Afterglows(Clock::time_point now) const;
 
   private:
-    // What the view keeps of a grain between two displays.
-    struct Trail {
-        float pan = 0, phase = 0;
-        double position = 0;
-        double speed = 0;      // frames per second, from the last match
-        double phase_rate = 0; // window phase per second
-        int matches = 0;       // moves in a row that agree
-    };
-    void FollowGrains(const EngineDisplay& before, const EngineDisplay& now, double seconds);
-    void FollowPlayhead(const EngineDisplay& before, const EngineDisplay& now, double seconds);
     double Share(double x) const;
-    double LoopStart() const;
-    double LoopLength() const;
+    double Ahead(Clock::time_point now) const;
     void DrawDropHighlight(VSTGUI::CDrawContext* context);
     void DrawWave(VSTGUI::CDrawContext* context, const VSTGUI::CRect& plate, double loop_left,
-                  double loop_right);
+                  double loop_right, Clock::time_point now);
+    // A grain's glowing path: its head at `x` (where it was `since` seconds ago, 0 for a
+    // sounding grain) moving `speed` units a second; the path glows back to where it was
+    // `reach` seconds ago, at most kTrail.
+    void DrawTrail(VSTGUI::CDrawContext* context, double x, double y, double speed, double since, double reach,
+                   double thickness, double alpha);
+
+    // A grain that ended (0.2.2): where and when, how fast it moved, how long it lived.
+    struct Ended {
+        GrainDot dot; // position: where it ended
+        Clock::time_point at;
+        double life = 0;
+    };
+    static constexpr std::size_t kMaxEnded = 48;
+    void Keep(const Ended& ended) noexcept;
+    std::array<Ended, kMaxEnded> ended_{};
+    std::size_t ended_count_ = 0;
+    bool stopped_ = false;
+    double drift_speed_ = 0, drift_offset_ = 0;
+    Clock::time_point drift_at_{};
 
     EngineDisplay display_{};
     std::shared_ptr<const WaveOverview> wave_;
     std::shared_ptr<const Skin> skin_;
-    std::array<Trail, EngineDisplay::kMaxGrains> trails_{};
-    double head_speed_ = 0;   // the playhead's, frames per second
-    bool head_measured_ = false;
     bool resting_ = false; // the same display for a while: nothing moves on
     Clock::time_point shown_at_{};
+    Clock::time_point loop_changed_at_{}; // START or SIZE changed here (MS-R46)
     Clock::time_point born_ = Clock::now();
     Clock::time_point drawn_at_{};
     VSTGUI::CCoord inset_ = 0;
@@ -136,6 +179,8 @@ class MapView : public VSTGUI::CView {
     std::shared_ptr<const Skin> cached_skin_;
     double cached_scale_ = 0;
     VSTGUI::CPoint cached_size_;
+    bool wave_failed_ = false; // for the key above
+    Clock::time_point wave_failed_at_{};
 };
 
 } // namespace messier

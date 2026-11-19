@@ -16,7 +16,6 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <limits>
 
 namespace messier {
 
@@ -25,16 +24,23 @@ namespace L = layout;
 
 namespace {
 constexpr double kPi = 3.14159265358979323846;
-// A shooting star's tail: where the grain was this long ago, at its measured speed.
-constexpr double kTailSeconds = 0.12;
-constexpr CCoord kMaxTail = 80;
+// A grain's glowing path (0.2.2): at most this long on the plate.
+constexpr CCoord kMaxTrail = 220;
+// The nebula's drift (0.2.2): window units a second per 1x of tempo, at most kMaxDrift,
+// its speed eased towards the tempo's over about kDriftEase seconds.
+constexpr double kDriftPerTempo = 9.0;
+constexpr double kMaxDrift = 22.0;
+constexpr double kDriftEase = 0.7;
 // The plate is drawn again at least this often while the window is open (0.2.1: the
 // nebula moves, playhead and grains move on between displays).
 constexpr auto kFrameInterval = std::chrono::milliseconds(25);
 // Between displays, playhead and grains move on for at most this long.
 constexpr double kMaxAhead = 0.15;
-// Two moves of a grain agree when their speeds differ by less than this share (MS-R43).
-constexpr double kAgree = 0.35;
+// The same display for longer than this (a large host buffer is shorter): the engine
+// rests, nothing moves on.
+constexpr double kRestAfter = 0.1;
+// A waveform bitmap that could not be made is tried again after this (MS-R47).
+constexpr auto kWaveRetry = std::chrono::seconds(2);
 
 double Seconds(MapView::Clock::duration d) {
     return std::chrono::duration<double>(d).count();
@@ -45,14 +51,12 @@ void FillPath(CDrawContext* context, CGraphicsPath* path, CColor colour) {
     context->drawGraphicsPath(path, CDrawContext::kPathFilled);
 }
 
-// `move` across the end of a file of `frames`, the shorter way; NaN if both ways are
-// long enough to be either (MS-R43: no direction is guessed).
-double ShortMove(double move, double frames) {
-    if(move > frames / 2)
-        move -= frames;
-    else if(move < -frames / 2)
-        move += frames;
-    return std::abs(move) <= frames / 4 ? move : std::numeric_limits<double>::quiet_NaN();
+// `position` wrapped into [from, from + length).
+double Wrap(double position, double from, double length) {
+    if(!(length > 0))
+        return from;
+    const double into = std::fmod(position - from, length);
+    return from + (into < 0 ? into + length : into);
 }
 } // namespace
 
@@ -68,128 +72,134 @@ void MapView::Show(const EngineDisplay& display, std::shared_ptr<const WaveOverv
 
 void MapView::ShowAt(const EngineDisplay& display, std::shared_ptr<const WaveOverview> wave,
                      Clock::time_point now) noexcept {
-    const bool same_wave = wave == wave_;
-    if(same_wave && std::memcmp(&display, &display_, sizeof display) == 0) {
-        // The same again: no audio block in between (a large host buffer), or the engine
-        // rests (STOP, Bypass, a host that stopped processing). Only a display unchanged
-        // for longer than a large buffer stops playhead and grains where they are.
-        if(Seconds(now - shown_at_) > 0.1)
+    if(wave == wave_ && std::memcmp(&display, &display_, sizeof display) == 0) {
+        // The same again, the count of rendered quanta too: no audio block in between
+        // (a large host buffer), or the engine rests (STOP, Bypass, a host that stopped
+        // processing). Only a display unchanged for longer than a large buffer stops
+        // playhead and grains where the display has them.
+        if(Seconds(now - shown_at_) > kRestAfter)
             resting_ = true;
         return;
     }
+    // 0.2.2: the grains of the display before that have ended by now glow on a while;
+    // another file clears them all (its grains read elsewhere).
+    if(display.sequence != display_.sequence || display.frames != display_.frames) {
+        ended_count_ = 0;
+    } else if(!resting_) {
+        for(std::uint32_t i = 0; i < std::min(display_.grain_count, EngineDisplay::kMaxGrains); ++i) {
+            const GrainDot& g = display_.grains[i];
+            if(!(g.phase_rate > 0) || !(g.phase < 1))
+                continue;
+            const double left = (1.0 - g.phase) / g.phase_rate; // seconds still to sound
+            const Clock::time_point at =
+                shown_at_ + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(left));
+            if(at > now || Seconds(now - at) >= kTrail)
+                continue; // sounds on in the new display, or its glow is gone
+            // The display may have been made just before the grain ended: then it is still
+            // in it (its pan, speed and window rate are its own for its whole life).
+            bool sounds = false;
+            for(std::uint32_t k = 0; k < std::min(display.grain_count, EngineDisplay::kMaxGrains); ++k) {
+                const GrainDot& h = display.grains[k];
+                sounds = sounds || (h.pan == g.pan && h.speed == g.speed && h.phase_rate == g.phase_rate);
+            }
+            if(sounds)
+                continue;
+            Ended ended;
+            ended.dot = g;
+            ended.dot.position = static_cast<float>(Wrap(g.position + g.speed * left, 0.0, display_.frames));
+            ended.at = at;
+            ended.life = 1.0 / g.phase_rate;
+            Keep(ended);
+        }
+    }
+    // MS-R45: nothing else is kept from the display before; each carries its own speeds.
     resting_ = false;
-    const double seconds = Seconds(now - shown_at_);
-    FollowPlayhead(display_, display, seconds);
-    FollowGrains(display_, display, seconds);
     shown_at_ = now;
     display_ = display;
     wave_ = std::move(wave);
     Guarded([&] { invalid(); }); // a noexcept function (MS-R37)
 }
 
-void MapView::FollowPlayhead(const EngineDisplay& before, const EngineDisplay& now, double seconds) {
-    const bool comparable = before.sequence == now.sequence && before.frames == now.frames && now.frames > 0
-                            && std::abs(before.loop_start - now.loop_start) < 1.0
-                            && std::abs(before.loop_length - now.loop_length) < 1.0;
-    if(now.frozen || now.frames == 0) {
-        head_speed_ = 0;
-        head_measured_ = now.frozen != 0;
+void MapView::Keep(const Ended& ended) noexcept {
+    if(ended_count_ < kMaxEnded) {
+        ended_[ended_count_++] = ended;
         return;
     }
-    if(!comparable || !(seconds > 0.004 && seconds < 0.5)) {
-        if(!comparable)
-            head_measured_ = false;
-        return;
-    }
-    const double length = now.loop_length;
-    double move = now.playhead - before.playhead;
-    if(move > length / 2) // around the loop
-        move -= length;
-    else if(move < -length / 2)
-        move += length;
-    const double speed = move / seconds;
-    head_speed_ = head_measured_ ? 0.5 * head_speed_ + 0.5 * speed : speed;
-    head_measured_ = true;
+    // Full: in place of the one that ended first.
+    std::size_t oldest = 0;
+    for(std::size_t i = 1; i < kMaxEnded; ++i)
+        if(ended_[i].at < ended_[oldest].at)
+            oldest = i;
+    if(ended_[oldest].at < ended.at)
+        ended_[oldest] = ended;
 }
 
-void MapView::FollowGrains(const EngineDisplay& before, const EngineDisplay& now, double seconds) {
-    // The display carries no grain numbers. A grain keeps its panorama and its window
-    // phase grows, so a grain of the display before with the same panorama, a smaller
-    // phase and a position near where it would be now may be the same one. MS-R43: a
-    // match that two candidates fit about equally, or that jumps across more than a
-    // quarter of the file, is not taken; a speed counts only once two moves in a row
-    // agree, so a new grain that takes the place of an old one shows no tail.
-    std::array<Trail, EngineDisplay::kMaxGrains> next{};
-    bool used[EngineDisplay::kMaxGrains] = {};
-    const bool same_file = before.sequence == now.sequence && before.frames == now.frames && now.frames > 0;
-    const double frames = now.frames;
-    const std::uint32_t count = std::min(now.grain_count, EngineDisplay::kMaxGrains);
-    const std::uint32_t count_before = std::min(before.grain_count, EngineDisplay::kMaxGrains);
-    for(std::uint32_t i = 0; i < count; ++i) {
-        const GrainDot& g = now.grains[i];
-        Trail trail;
-        trail.pan = g.pan;
-        trail.phase = g.phase;
-        trail.position = g.position;
-        if(same_file && seconds > 0.004 && seconds < 0.5) {
-            int best = -1;
-            double best_error = std::numeric_limits<double>::infinity(), second_error = best_error, best_move = 0;
-            for(std::uint32_t j = 0; j < count_before; ++j) {
-                const Trail& old = trails_[j];
-                if(used[j] || old.pan != g.pan || !(g.phase > old.phase))
-                    continue;
-                const double move = ShortMove(g.position - old.position, frames);
-                if(std::isnan(move))
-                    continue;
-                const double error = std::abs(move - (old.matches > 0 ? old.speed * seconds : 0.0));
-                if(error < best_error) {
-                    second_error = best_error;
-                    best = static_cast<int>(j);
-                    best_error = error;
-                    best_move = move;
-                } else if(error < second_error) {
-                    second_error = error;
-                }
-            }
-            // Ambiguous: another candidate fits nearly as well.
-            const bool clear = best >= 0 && !(second_error < 2.0 * best_error + 64.0);
-            if(clear) {
-                used[best] = true;
-                const Trail& old = trails_[static_cast<std::size_t>(best)];
-                const double speed = best_move / seconds;
-                const double phase_rate = (g.phase - old.phase) / seconds;
-                const bool agrees = old.matches > 0
-                                    && std::abs(speed - old.speed) <= kAgree * std::max(std::abs(speed), std::abs(old.speed));
-                trail.matches = agrees ? std::min(old.matches + 1, 8) : 1;
-                trail.speed = agrees ? 0.5 * old.speed + 0.5 * speed : speed;
-                trail.phase_rate = old.matches > 0 ? 0.5 * old.phase_rate + 0.5 * phase_rate : phase_rate;
-            }
-        }
-        next[i] = trail;
-    }
-    trails_ = next;
+std::size_t MapView::Afterglows(Clock::time_point now) const {
+    std::size_t glowing = 0;
+    for(std::size_t i = 0; i < ended_count_; ++i)
+        glowing += now >= ended_[i].at && Seconds(now - ended_[i].at) < kTrail ? 1 : 0;
+    return glowing;
+}
+
+double MapView::DriftTarget() const {
+    const EngineDisplay& d = display_;
+    if(stopped_ || resting_ || d.frozen || d.frames == 0)
+        return 0.0;
+    // The effective signed tempo: the core's own playhead speed through the file over the
+    // file's rate (1 forward at the file's pitch). Never the change of the read position,
+    // which jumps back at every turn of the loop or the file.
+    const double rate = wave_ && wave_->sequence == d.sequence && wave_->rate > 0 ? wave_->rate : 48000.0;
+    const double tempo = d.head_speed / rate;
+    return std::isfinite(tempo) ? std::clamp(tempo * kDriftPerTempo, -kMaxDrift, kMaxDrift) : 0.0;
+}
+
+void MapView::AdvanceDrift(Clock::time_point now) noexcept {
+    const double dt = drift_at_ == Clock::time_point{} ? 0.0 : std::clamp(Seconds(now - drift_at_), 0.0, 0.1);
+    drift_at_ = now;
+    const double target = DriftTarget();
+    drift_speed_ += (target - drift_speed_) * (1.0 - std::exp(-dt / kDriftEase));
+    if(target == 0.0 && std::abs(drift_speed_) < 0.01)
+        drift_speed_ = 0.0; // at rest
+    drift_offset_ = std::fmod(drift_offset_ + drift_speed_ * dt, 1.0e6);
+}
+
+double MapView::Ahead(Clock::time_point now) const {
+    return resting_ ? 0.0 : std::clamp(Seconds(now - shown_at_), 0.0, kMaxAhead);
 }
 
 double MapView::GrainSpeed(std::uint32_t index) const {
-    return index < display_.grain_count && index < trails_.size() && trails_[index].matches >= 2
-               ? trails_[index].speed
-               : 0.0;
+    return index < std::min(display_.grain_count, EngineDisplay::kMaxGrains) ? display_.grains[index].speed : 0.0;
 }
 
-double MapView::LoopStart() const {
-    const double frames = display_.frames;
-    if(frames <= 0)
-        return 0;
-    return start_known_ ? std::min(start_ * frames, frames - 1) : display_.loop_start;
+double MapView::GrainAt(std::uint32_t index, Clock::time_point now) const {
+    if(index >= std::min(display_.grain_count, EngineDisplay::kMaxGrains) || display_.frames == 0)
+        return 0.0;
+    const GrainDot& g = display_.grains[index];
+    // The core wraps a grain around the whole file.
+    return Wrap(g.position + g.speed * Ahead(now), 0.0, display_.frames);
 }
 
-double MapView::LoopLength() const {
+double MapView::HeadAt(Clock::time_point now) const {
+    const EngineDisplay& d = display_;
+    if(d.frames == 0)
+        return 0.0;
+    if(d.frozen || d.head_speed == 0)
+        return d.playhead;
+    // MS-R46: inside the loop of the display the playhead belongs to, not the loop that
+    // START and SIZE in the window will make.
+    return Wrap(d.playhead + d.head_speed * Ahead(now), d.loop_start, d.loop_length);
+}
+
+MapView::Loop MapView::ShownLoop(Clock::time_point now) const {
     const double frames = display_.frames;
     if(frames <= 0)
-        return 1;
-    if(!start_known_ || !size_known_)
-        return display_.loop_length;
-    return std::max(1.0, size_ * size_ * (frames - LoopStart()));
+        return {};
+    if(start_known_ && size_known_ && now - loop_changed_at_ < kPreview) {
+        // A moment after the window's edit: the loop as the core will set it (0.2.1).
+        const double start = std::min(start_ * frames, frames - 1);
+        return {start, std::max(1.0, size_ * size_ * (frames - start))};
+    }
+    return {display_.loop_start, display_.loop_length};
 }
 
 CRect MapView::SnowflakeBox() const {
@@ -215,8 +225,10 @@ void MapView::SetStart(double start) noexcept {
     const bool changed = !start_known_ || start != start_;
     start_ = start;
     start_known_ = true;
-    if(changed)
+    if(changed) {
+        loop_changed_at_ = Clock::now();
         Guarded([&] { invalid(); }); // the slider and the loop follow at once
+    }
 }
 
 void MapView::SetSize(double size) noexcept {
@@ -224,8 +236,10 @@ void MapView::SetSize(double size) noexcept {
     const bool changed = !size_known_ || size != size_;
     size_ = size;
     size_known_ = true;
-    if(changed)
+    if(changed) {
+        loop_changed_at_ = Clock::now();
         Guarded([&] { invalid(); });
+    }
 }
 
 void MapView::Tick() noexcept {
@@ -237,18 +251,30 @@ void MapView::draw(CDrawContext* context) {
     Guarded([&] { DrawUnchecked(context); }); // MS-R37
 }
 
-void MapView::DrawWave(CDrawContext* context, const CRect& plate, double loop_left, double loop_right) {
+void MapView::DrawWave(CDrawContext* context, const CRect& plate, double loop_left, double loop_right,
+                       Clock::time_point now) {
     if(!skin_ || !wave_ || wave_->columns == 0 || wave_->sequence != display_.sequence)
         return;
     const SkinColours& c = skin_->Colours();
     const CGraphicsTransform t = context->getCurrentTransform();
     const double scale = std::max(1.0, std::round(context->getScaleFactor() * std::abs(t.m11) * 4) / 4);
     const CPoint size(plate.getWidth(), plate.getHeight());
-    if(!wave_cache_ || cached_wave_ != wave_ || cached_skin_ != skin_ || cached_scale_ != scale
-       || cached_size_ != size) {
+    const bool same_key = cached_wave_ == wave_ && cached_skin_ == skin_ && cached_scale_ == scale
+                          && cached_size_ == size;
+    if(!wave_cache_ || !same_key) {
+        // MS-R47: a bitmap that could not be made for this key is not tried on every
+        // frame of the animation; the plate goes on without the waveform.
+        if(same_key && wave_failed_ && now - wave_failed_at_ < kWaveRetry)
+            return;
         // Once per file, look and size: the waveform as lines into a bitmap, in the
         // plate's wave colour; drawn then with two strengths, inside and outside the loop.
         wave_cache_ = nullptr;
+        cached_wave_ = wave_;
+        cached_skin_ = skin_;
+        cached_scale_ = scale;
+        cached_size_ = size;
+        wave_failed_ = true; // until the bitmap is made
+        wave_failed_at_ = now;
         auto offscreen = COffscreenContext::create(size, scale);
         if(!offscreen)
             return;
@@ -274,24 +300,57 @@ void MapView::DrawWave(CDrawContext* context, const CRect& plate, double loop_le
         }
         offscreen->endDraw();
         wave_cache_ = offscreen->getBitmap();
-        cached_wave_ = wave_;
-        cached_skin_ = skin_;
-        cached_scale_ = scale;
-        cached_size_ = size;
+        wave_failed_ = !wave_cache_;
     }
     if(!wave_cache_)
         return;
-    // Faint outside the loop, clearer inside: behind the grains, above the nebula.
-    context->drawBitmap(wave_cache_, plate, CPoint(0, 0), 0.16f);
-    if(loop_right > loop_left) {
-        const CRect inside(loop_left, plate.top, loop_right, plate.bottom);
-        context->drawBitmap(wave_cache_, inside, CPoint(loop_left - plate.left, 0), 0.30f);
+    // Faint outside the loop, clearer inside: behind the grains, above the nebula. Each
+    // part once (MS-R47: 16 % and, since 0.2.2, 40 % inside, not one over the other).
+    loop_left = std::clamp<double>(loop_left, plate.left, plate.right);
+    loop_right = std::clamp<double>(loop_right, loop_left, plate.right);
+    const auto part = [&](double from, double to, float alpha) {
+        if(to > from)
+            context->drawBitmap(wave_cache_, CRect(from, plate.top, to, plate.bottom), CPoint(from - plate.left, 0),
+                                alpha);
+    };
+    part(plate.left, loop_left, 0.16f);
+    part(loop_left, loop_right, 0.40f);
+    part(loop_right, plate.right, 0.16f);
+}
+
+void MapView::DrawTrail(CDrawContext* context, double x, double y, double speed, double since, double reach,
+                        double thickness, double alpha) {
+    // A point of the path glows 1 - age / kTrail, age being how long ago the grain
+    // passed it; eased, so the glow fades softly.
+    reach = std::min(reach, kTrail);
+    if(!(reach > since) || !(alpha > 0.0))
+        return;
+    CCoord length = std::abs(speed) * (reach - since);
+    if(length < 1.0)
+        return;
+    double far = reach;
+    if(length > kMaxTrail) { // a fast grain on a short file: only the newest part
+        far = since + (reach - since) * kMaxTrail / length;
+        length = kMaxTrail;
     }
+    const CCoord from = speed > 0 ? x - length : x + length;
+    const auto glow = [&](double age) { return std::pow(std::clamp(1.0 - age / kTrail, 0.0, 1.0), 1.6) * alpha; };
+    const SkinColours& c = skin_->Colours();
+    auto path = owned(context->createGraphicsPath());
+    if(!path)
+        return;
+    path->addRect(CRect(std::min(from, x), y - thickness / 2, std::max(from, x), y + thickness / 2));
+    auto gradient = owned(CGradient::create(0.0, 1.0, WithAlpha(c.tail, glow(far)), WithAlpha(c.tail, glow(since))));
+    if(!gradient)
+        return;
+    gradient->addColorStop(0.5, WithAlpha(c.tail, glow((far + since) / 2)));
+    context->fillLinearGradient(path, *gradient, CPoint(from, y), CPoint(x, y));
 }
 
 void MapView::DrawUnchecked(CDrawContext* context) {
     const Clock::time_point now = Clock::now();
     drawn_at_ = now;
+    AdvanceDrift(now);
     setDirty(false);
     if(!skin_)
         return;
@@ -314,9 +373,8 @@ void MapView::DrawUnchecked(CDrawContext* context) {
     const double rate = wave_ && wave_->sequence == d.sequence ? wave_->rate : 0;
     const double seconds = file && rate > 0 ? frames / rate : 0.0;
     auto x_of = [&](double frame) { return left + width * frame / frames; };
-    // How far playhead and grains have moved on since the display (0.2.1).
-    const double ahead = resting_ ? 0.0 : std::clamp(Seconds(now - shown_at_), 0.0, kMaxAhead);
-    const double loop_start = LoopStart(), loop_length = LoopLength();
+    const Loop loop = ShownLoop(now);
+    const double loop_start = loop.start, loop_length = loop.length;
 
     // The seconds axis on the metal.
     const double step = L::AxisStep(seconds, width);
@@ -352,9 +410,11 @@ void MapView::DrawUnchecked(CDrawContext* context) {
             context->setFillColor(c.glass);
             context->drawRect(plate, kDrawFilled);
         }
-        // Two nebulae move slowly against each other, swell a little and take turns
-        // (0.2.1: periods of 45 to 90 s, about 6 units a second at most); they step back
-        // as BLEND goes towards Granular.
+        // Two nebulae swell a little, rise and sink a little and take turns (0.2.1: periods
+        // of 45 to 90 s); they step back as BLEND goes towards Granular. Across they drift
+        // with the tempo (0.2.2): forward to the right, backward to the left, the farther
+        // one slower; at rest without tempo. Each repeats across the plate, so the drift
+        // can go on in one direction.
         const double t = Seconds(now - born_);
         const auto wave_of = [&](double period, double phase) { return std::sin(2 * kPi * t / period + phase); };
         const double fade = 0.5 + 0.5 * wave_of(45, 0);
@@ -365,16 +425,25 @@ void MapView::DrawUnchecked(CDrawContext* context) {
             if(!image || alpha <= 0.002)
                 return;
             const CCoord w = (width + 120) * swell, h = (plate.getHeight() + 40) * swell;
-            const CCoord cx = (plate.left + plate.right) / 2 + dx, cy = (plate.top + plate.bottom) / 2 + dy;
-            DrawSkinImage(context, image, CRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), static_cast<float>(alpha));
+            const CCoord period = w * 0.9; // the clouds' faded ends overlap a little
+            const CCoord cx0 = (plate.left + plate.right) / 2 + std::fmod(dx, period);
+            const CCoord cy = (plate.top + plate.bottom) / 2 + dy;
+            for(int n = -2; n <= 2; ++n) {
+                const CCoord cx = cx0 + n * period;
+                if(cx + w / 2 <= plate.left || cx - w / 2 >= plate.right)
+                    continue;
+                DrawSkinImage(context, image, CRect(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2),
+                              static_cast<float>(alpha));
+            }
         };
-        cloud(nebula_a, wave_of(70, 0) * 70, wave_of(53, 1.1) * 12, 1.0 + 0.05 * wave_of(90, 0.4), strength * (0.35 + 0.65 * fade));
-        cloud(nebula_b, -wave_of(83, 1.0) * 80, wave_of(61, 2.3) * 12, 1.0 + 0.05 * wave_of(77, 2.0),
-              strength * (0.35 + 0.65 * (1.0 - fade)));
+        cloud(nebula_a, drift_offset_, wave_of(53, 1.1) * 12, 1.0 + 0.05 * wave_of(90, 0.4),
+              strength * (0.35 + 0.65 * fade));
+        cloud(nebula_b, drift_offset_ * 0.62 + (width + 120) * 0.45, wave_of(61, 2.3) * 12,
+              1.0 + 0.05 * wave_of(77, 2.0), strength * (0.35 + 0.65 * (1.0 - fade)));
 
         // The waveform on the glass (0.2.1, the user's trial).
         if(file)
-            DrawWave(context, plate, loop_left, loop_right);
+            DrawWave(context, plate, loop_left, loop_right, now);
 
         // The grid: faint lines at the axis' labels, crosses between them at each quarter
         // of the panorama.
@@ -430,9 +499,9 @@ void MapView::DrawUnchecked(CDrawContext* context) {
             }
             context->setLineWidth(1.5);
             for(const auto& [x, dir] : {std::pair{loop_left + 0.75, 1.0}, std::pair{loop_right - 0.75, -1.0}}) {
-                context->setFrameColor(WithAlpha(c.accent, 0.5));
+                context->setFrameColor(WithAlpha(c.marker, 0.5));
                 context->drawLine(CPoint(x, plate.top + 6), CPoint(x, plate.bottom - 6));
-                context->setFrameColor(c.accent);
+                context->setFrameColor(c.marker);
                 if(auto path = owned(context->createGraphicsPath())) {
                     path->beginSubpath(CPoint(x + dir * 7, plate.top + 1));
                     path->addLine(CPoint(x, plate.top + 1));
@@ -444,48 +513,60 @@ void MapView::DrawUnchecked(CDrawContext* context) {
                 }
             }
 
-            // The grains as shooting stars: a head that flares with the grain's window and
-            // burns out, and a tail along its real motion through the file (across only;
-            // down is its panorama, which does not move). Between displays they move on at
-            // their measured speeds.
-            const double alpha = 0.35 + 0.65 * blend_;
+            // The grains as shooting stars, in front of nebula, waveform and loop (0.2.2): a
+            // warm-white head that flares with the grain's window and burns out, and its
+            // path through the file glowing on for kTrail (across only; down is its
+            // panorama, which does not move), also a while after the grain ended. Between
+            // displays they move on at their own speeds.
+            const double alpha = 0.85 + 0.15 * blend_;
             const double frame_width = width / frames;
+            const double ahead = Ahead(now);
+            const auto y_of = [&](float pan) {
+                return plate.top + 12 + std::clamp(static_cast<double>(pan), 0.0, 1.0) * (plate.getHeight() - 24);
+            };
+            for(std::size_t i = 0; i < ended_count_; ++i) {
+                const Ended& e = ended_[i];
+                if(now < e.at)
+                    continue;
+                const double since = Seconds(now - e.at);
+                DrawTrail(context, x_of(e.dot.position), y_of(e.dot.pan), e.dot.speed * frame_width, since,
+                          since + e.life, 1.4, alpha * 0.75);
+            }
             for(std::uint32_t i = 0; i < std::min(d.grain_count, EngineDisplay::kMaxGrains); ++i) {
                 const GrainDot& g = d.grains[i];
-                const Trail& trail = trails_[i];
-                const bool sure = trail.matches >= 2;
-                double phase = g.phase + (sure ? trail.phase_rate * ahead : 0.0);
-                if(phase >= 1.0)
-                    continue; // over by now
-                phase = std::clamp(phase, 0.0, 1.0);
-                double position = g.position + (sure ? trail.speed * ahead : 0.0);
-                position = std::fmod(position, frames);
-                if(position < 0)
-                    position += frames;
+                const double phase = std::max(0.0, g.phase + g.phase_rate * ahead);
+                const double life = g.phase_rate > 0 ? 1.0 / g.phase_rate : 0.0;
+                const CCoord y = y_of(g.pan);
+                const double speed = GrainSpeed(i) * frame_width;
+                if(phase >= 1.0) {
+                    // Over by now, and not yet among the ended (that comes with the next
+                    // display): only its glow, from where it ended.
+                    if(life <= 0)
+                        continue;
+                    const double since = (phase - 1.0) * life;
+                    const double at = Wrap(g.position + g.speed * (1.0 - g.phase) * life, 0.0, frames);
+                    DrawTrail(context, x_of(at), y, speed, since, since + life, 1.4, alpha * 0.75);
+                    continue;
+                }
                 const double level = std::sin(kPi * phase);
                 const double burn = std::max(0.0, (phase - 0.6) / 0.4);
-                const CCoord x = x_of(position);
-                const CCoord y = plate.top + 12 + std::clamp(static_cast<double>(g.pan), 0.0, 1.0) * (plate.getHeight() - 24);
-                const double speed = GrainSpeed(i);
-                const CCoord tail = std::min(kMaxTail, std::abs(speed) * kTailSeconds * frame_width)
-                                    * std::min(1.0, phase * 3.0);
-                if(tail >= 1.5) {
-                    const CCoord from = speed > 0 ? x - tail : x + tail;
-                    const CCoord thick = 0.8 + 1.4 * level;
-                    if(auto path = owned(context->createGraphicsPath())) {
-                        path->addRect(CRect(std::min(from, x), y - thick / 2, std::max(from, x), y + thick / 2));
-                        if(auto gradient = owned(CGradient::create(0.0, 1.0, WithAlpha(c.tail, 0.0),
-                                                                    WithAlpha(c.tail, alpha * (0.6 * level + 0.12)))))
-                            context->fillLinearGradient(path, *gradient, CPoint(from, y), CPoint(x, y));
+                const CCoord x = x_of(GrainAt(i, now));
+                DrawTrail(context, x, y, speed, 0.0, phase * life, 1.0 + 1.0 * level, alpha * (0.45 + 0.4 * level));
+                const CCoord r = 1.2 + 2.4 * level * (1.0 - 0.5 * burn);
+                // A soft warm halo; a thin dark seam keeps the head apart from a bright
+                // waveform behind it.
+                const CCoord halo = r * 3.6 + 3.0;
+                if(auto path = owned(context->createGraphicsPath())) {
+                    path->addEllipse(CRect(x - halo, y - halo, x + halo, y + halo));
+                    if(auto gradient = owned(CGradient::create(0.0, 1.0, WithAlpha(c.tail, alpha * level * 0.55),
+                                                               WithAlpha(c.tail, 0.0)))) {
+                        gradient->addColorStop(0.3, WithAlpha(c.tail, alpha * level * 0.22));
+                        context->fillRadialGradient(path, *gradient, CPoint(x, y), halo);
                     }
                 }
-                const CCoord r = 1.0 + 2.4 * level * (1.0 - 0.5 * burn);
-                for(int ring = 3; ring >= 1; --ring) { // the glow
-                    const CCoord rr = r * (1.0 + 1.2 * ring);
-                    context->setFillColor(WithAlpha(c.tail, alpha * level * 0.16));
-                    context->drawEllipse(CRect(x - rr, y - rr, x + rr, y + rr), kDrawFilled);
-                }
-                context->setFillColor(WithAlpha(c.grain, alpha * (0.3 + 0.7 * level)));
+                context->setFillColor(CColor(0, 0, 0, static_cast<uint8_t>(40 + 50 * level)));
+                context->drawEllipse(CRect(x - r - 0.7, y - r - 0.7, x + r + 0.7, y + r + 0.7), kDrawFilled);
+                context->setFillColor(WithAlpha(c.grain, alpha * (0.75 + 0.25 * level)));
                 context->drawEllipse(CRect(x - r, y - r, x + r, y + r), kDrawFilled);
             }
         }
@@ -502,29 +583,28 @@ void MapView::DrawUnchecked(CDrawContext* context) {
     }
 
     if(file) {
-        // The playhead across the plate, moved on at its measured speed inside the loop;
-        // dashed, with a snowflake, while Freeze holds it.
-        double head = d.playhead;
-        if(!d.frozen && head_measured_ && loop_length > 0) {
-            head += head_speed_ * ahead;
-            const double into = std::fmod(head - loop_start, loop_length);
-            head = loop_start + (into < 0 ? into + loop_length : into);
-        }
-        const CCoord x = std::round(x_of(head)) + 0.5;
-        context->setFrameColor(c.playhead);
-        context->setLineWidth(1.25);
+        // The playhead across the plate, moved on at its speed inside its loop; dashed,
+        // with a snowflake, while Freeze holds it.
+        // 0.2.2: a dark shadow on both sides keeps it readable over a bright waveform.
+        const CCoord x = std::round(x_of(HeadAt(now))) + 0.5;
         if(d.frozen) {
             const CCoord dash[] = {4, 3.2};
             context->setLineStyle(CLineStyle(CLineStyle::kLineCapButt, CLineStyle::kLineJoinMiter, 0, 2, dash));
         }
+        context->setFrameColor(CColor(0, 0, 0, 110));
+        context->setLineWidth(3.25);
+        context->drawLine(CPoint(x, plate.top), CPoint(x, plate.bottom));
+        context->setFrameColor(c.playhead);
+        context->setLineWidth(1.25);
         context->drawLine(CPoint(x, plate.top), CPoint(x, plate.bottom));
         context->setLineStyle(kLineSolid);
+        // The position triangle in its own lane (0.2.2), clear of the axis labels.
         if(auto path = owned(context->createGraphicsPath())) {
-            path->beginSubpath(CPoint(x - 6, top + 8));
-            path->addLine(CPoint(x + 6, top + 8));
-            path->addLine(CPoint(x, top + L::kAxisBottom - 1));
+            path->beginSubpath(CPoint(x - 6, top + L::kMarkerTop));
+            path->addLine(CPoint(x + 6, top + L::kMarkerTop));
+            path->addLine(CPoint(x, top + L::kMarkerBottom));
             path->closeSubpath();
-            FillPath(context, path, c.accent);
+            FillPath(context, path, c.marker);
         }
         if(d.frozen) {
             const CRect box = SnowflakeBox().offset(all.left, all.top);
@@ -560,7 +640,7 @@ void MapView::DrawUnchecked(CDrawContext* context) {
         context->setLineWidth(1);
         context->drawLine(CPoint(left, groove_top + 4.5), CPoint(right, groove_top + 4.5));
         const CCoord thumb_x = left + start_ * width;
-        context->setFillColor(WithAlpha(c.accent, 0.95));
+        context->setFillColor(WithAlpha(c.control, 0.95));
         context->drawRect(CRect(left, groove_top + 0.5, thumb_x, groove_top + 3.5), kDrawFilled);
         context->setFrameColor(WithAlpha(c.text, 0.5));
         for(int q = 0; q <= 40; ++q) {
@@ -590,7 +670,7 @@ void MapView::DrawUnchecked(CDrawContext* context) {
         else
             std::snprintf(value, sizeof value, "%d %%", percent);
         context->setFont(skin.Mono(12));
-        context->setFontColor(c.accent);
+        context->setFontColor(c.value);
         context->drawString(value, CRect(row.left + label + 10, row.top, row.left + label + 200, row.bottom), kLeftText);
 
         const CFontRef small = skin.Sans(10.5);
@@ -610,7 +690,7 @@ void MapView::DrawUnchecked(CDrawContext* context) {
                     context->drawLine(CPoint(x + 11, mid - 5), CPoint(x + 11, mid + 5));
                     break;
                 case 1:
-                    context->setFrameColor(c.accent);
+                    context->setFrameColor(c.marker);
                     context->setLineWidth(1.8);
                     for(CCoord dir : {1.0, -1.0}) {
                         const CCoord at = dir > 0 ? x + 2 : x + 20;
@@ -663,7 +743,7 @@ void MapView::DrawDropHighlight(CDrawContext* context) {
         return;
     const SkinColours& c = skin_->Colours();
     const bool usable = drop_state_ == DropShown::kUsable;
-    const CColor colour = usable ? c.accent : c.warning;
+    const CColor colour = usable ? c.control : c.warning;
     const CRect all = getViewSize();
     const CRect area(all.left, all.top + L::kPlateTop - L::kBezelEdge, all.right,
                      all.top + L::kPlateTop + L::kPlateHeight + L::kBezelEdge);

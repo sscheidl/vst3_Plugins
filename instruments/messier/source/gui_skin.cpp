@@ -26,16 +26,19 @@ constexpr CColor Rgba(int r, int g, int b, double a) {
                   static_cast<uint8_t>(a * 255.0 + 0.5));
 }
 
-// The colours of the window study, version 3, and of docs/GRAFIKAUFTRAG_GUI.md.
+// The colours of the window study, version 3, and of docs/GRAFIKAUFTRAG_GUI.md; Slate
+// since 0.2.2 after the user's design round (blue-violet controls, warm-white grains).
+// The presets still to come keep their accent for the controls until they are designed.
 const GuiPresetInfo kPresets[kGuiPresetCount] = {
     {"Slate", "slate", true,
      {Rgb(46, 50, 53), Rgb(62, 74, 82), Rgb(11, 15, 26), Rgb(220, 214, 202), Rgb(142, 137, 127),
       Rgb(227, 115, 61), Rgba(255, 255, 255, 0.07), Rgba(0, 0, 0, 0.75), Rgba(0, 0, 0, 0.6),
       Rgba(255, 255, 255, 0.07), Rgba(175, 190, 215, 0.07), Rgba(175, 190, 215, 0.28),
-      Rgba(220, 226, 236, 0.75), Rgb(104, 82, 156), Rgb(56, 68, 128), Rgb(255, 238, 210),
-      Rgb(255, 214, 170), Rgb(242, 230, 214), Rgba(205, 215, 240, 0.06), Rgba(205, 215, 240, 0.07),
+      Rgba(220, 226, 236, 0.75), Rgb(104, 82, 156), Rgb(56, 68, 128), Rgb(255, 247, 232),
+      Rgb(255, 200, 140), Rgb(242, 240, 236), Rgba(205, 215, 240, 0.06), Rgba(205, 215, 240, 0.07),
       Rgba(220, 226, 236, 0.35), Rgb(242, 220, 188), Rgb(140, 146, 150), Rgb(176, 188, 222), Rgba(0, 0, 0, 0.6),
-      Rgba(220, 214, 200, 0.6), Rgb(18, 20, 21), Rgb(220, 214, 202), Rgb(236, 172, 64), false}},
+      Rgba(220, 214, 200, 0.6), Rgb(18, 20, 21), Rgb(220, 214, 202), Rgb(236, 172, 64), false,
+      Rgb(157, 172, 235), Rgb(190, 200, 255)}},
     {"Silver", "silver", false,
      {Rgb(176, 178, 177), Rgb(150, 154, 153), Rgb(11, 15, 26), Rgb(28, 31, 33), Rgb(75, 79, 81),
       Rgb(201, 83, 28), Rgba(255, 255, 255, 0.55), Rgba(0, 0, 0, 0.18), Rgba(0, 0, 0, 0.3),
@@ -43,7 +46,8 @@ const GuiPresetInfo kPresets[kGuiPresetCount] = {
       Rgba(220, 226, 236, 0.75), Rgb(104, 82, 156), Rgb(56, 68, 128), Rgb(255, 238, 210),
       Rgb(255, 214, 170), Rgb(242, 230, 214), Rgba(205, 215, 240, 0.06), Rgba(205, 215, 240, 0.07),
       Rgba(220, 226, 236, 0.35), Rgb(250, 236, 214), Rgb(92, 96, 98), Rgb(176, 188, 222), Rgba(0, 0, 0, 0.35),
-      Rgba(30, 34, 36, 0.6), Rgb(18, 20, 21), Rgb(28, 31, 33), Rgb(176, 96, 20), false}},
+      Rgba(30, 34, 36, 0.6), Rgb(18, 20, 21), Rgb(28, 31, 33), Rgb(176, 96, 20), false,
+      Rgb(201, 83, 28), Rgb(201, 83, 28)}},
     {"Copper", "copper", false,
      {Rgb(56, 40, 34), Rgb(88, 58, 44), Rgb(15, 9, 9), Rgb(228, 199, 173), Rgb(158, 126, 105),
       Rgb(241, 124, 62), Rgba(255, 255, 255, 0.07), Rgba(0, 0, 0, 0.75), Rgba(0, 0, 0, 0.6),
@@ -51,7 +55,8 @@ const GuiPresetInfo kPresets[kGuiPresetCount] = {
       Rgba(236, 210, 190, 0.75), Rgb(138, 52, 66), Rgb(96, 42, 66), Rgb(255, 196, 140),
       Rgb(244, 146, 86), Rgb(241, 124, 62), Rgba(240, 150, 110, 0.06), Rgba(240, 150, 110, 0.07),
       Rgba(236, 210, 190, 0.35), Rgb(244, 178, 128), Rgb(130, 96, 80), Rgb(226, 170, 150), Rgba(0, 0, 0, 0.6),
-      Rgba(228, 199, 173, 0.55), Rgb(18, 12, 10), Rgb(228, 199, 173), Rgb(236, 172, 64), false}},
+      Rgba(228, 199, 173, 0.55), Rgb(18, 12, 10), Rgb(228, 199, 173), Rgb(236, 172, 64), false,
+      Rgb(241, 124, 62), Rgb(241, 124, 62)}},
     {"Photo plate", "plate", false,
      {Rgb(58, 52, 42), Rgb(64, 96, 79), Rgb(205, 209, 202), Rgb(226, 217, 198), Rgb(164, 154, 134),
       Rgb(208, 168, 92), Rgba(255, 255, 255, 0.07), Rgba(0, 0, 0, 0.75), Rgba(0, 0, 0, 0.6),
@@ -59,7 +64,7 @@ const GuiPresetInfo kPresets[kGuiPresetCount] = {
       Rgb(120, 116, 108), Rgb(150, 142, 128), Rgb(20, 22, 21), Rgb(30, 32, 31), Rgb(29, 32, 31),
       Rgba(20, 22, 21, 0.04), Rgba(20, 22, 21, 0.08), Rgba(20, 22, 21, 0.45), Rgb(232, 222, 200),
       Rgb(130, 124, 110), Rgb(40, 44, 42), Rgba(0, 0, 0, 0.6), Rgba(226, 217, 198, 0.6), Rgb(20, 17, 12), Rgb(226, 217, 198),
-      Rgb(236, 172, 64), true}},
+      Rgb(236, 172, 64), true, Rgb(208, 168, 92), Rgb(208, 168, 92)}},
 };
 
 struct ImageSpec {
@@ -73,7 +78,7 @@ constexpr ImageSpec kImages[kSkinImageCount] = {
     {"chassis", true, 880, 724}, {"bezel", true, 64, 64},      {"plate", true, 840, 186},
     {"nebula_a", false, 1000, 260}, {"nebula_b", false, 1000, 260}, {"knob_l", true, 72, 72},
     {"knob_s", true, 48, 48},    {"thumb", true, 16, 28},      {"button", true, 48, 28},
-    {"button_down", true, 48, 28}, {"screw", true, 14, 14},    {"keys_white", false, 36, 66},
+    {"button_down", true, 48, 28}, {"keys_white", false, 36, 66},
     {"keys_black", false, 22, 40},
 };
 
@@ -199,13 +204,14 @@ CFontRef Skin::FontOf(int kind, double size) const {
             return font.font;
     // System fonts of Windows: Palatino Linotype for the brand, the version and the
     // italic file name, Bahnschrift for the controls' texts (0.2.1), Consolas for values
-    // (the study's web fonts are not in the bundle). Never dropped while the skin lives,
-    // so a font handed out stays valid.
+    // (the study's web fonts are not in the bundle); Bahnschrift in its regular weight
+    // since 0.2.2 (VSTGUI offers regular or bold). Never dropped while the skin lives, so
+    // a font handed out stays valid.
     Font font{kind, size, nullptr};
     switch(kind) {
         case 0: font.font = makeOwned<CFontDesc>("Palatino Linotype", size, kBoldFace); break;
         case 1: font.font = makeOwned<CFontDesc>("Palatino Linotype", size, kItalicFace); break;
-        case 3: font.font = makeOwned<CFontDesc>("Bahnschrift", size, kBoldFace); break;
+        case 3: font.font = makeOwned<CFontDesc>("Bahnschrift", size); break;
         default: font.font = makeOwned<CFontDesc>("Consolas", size); break;
     }
     fonts_.push_back(font);

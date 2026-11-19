@@ -57,18 +57,8 @@ void PanelView::DrawUnchecked(CDrawContext* context) {
         context->drawRect(all, kDrawFilled);
     }
 
-    // Three screws; the fourth corner holds the resize grip.
-    const SkinImage& screw = skin.Image(SkinImageId::kScrew);
-    const CCoord s = L::kScrewInset;
-    for(const CPoint at : {CPoint(s, s), CPoint(L::kWidth - s, s), CPoint(s, height - s)}) {
-        const CRect box(all.left + at.x - 7, all.top + at.y - 7, all.left + at.x + 7, all.top + at.y + 7);
-        if(screw) {
-            DrawSkinImage(context, screw, box);
-        } else {
-            context->setFillColor(c.dim);
-            context->drawEllipse(box, kDrawFilled);
-        }
-    }
+    // No screws since 0.2.2 (the user's design round): the slate runs through to the
+    // corners; the resize grip keeps its corner.
 
     // Engraved rules: under the header, above the knobs, between their rows, beside
     // Volume's column, above the keyboard.
@@ -93,7 +83,7 @@ void PanelView::DrawUnchecked(CDrawContext* context) {
         DrawTracked(context, "MESSIER", CRect(brand_left, all.top + 5, brand_left + brand_width + 4, all.top + 41),
                     kLeftText, 9, brand_font, c.text, &c);
         const CCoord stroke = brand_left + brand_width + 14;
-        context->setFillColor(c.accent);
+        context->setFillColor(c.control);
         context->drawRect(CRect(stroke, all.top + 12, stroke + 2, all.top + 36), kDrawFilled);
         DrawTracked(context, "granular looper & phase vocoder",
                     CRect(stroke + 14, all.top + 10, all.left + L::kVersionRight - 120, all.top + 36), kLeftText, 0.8,
@@ -103,13 +93,14 @@ void PanelView::DrawUnchecked(CDrawContext* context) {
                     kRightText, 1.6, skin.Caps(12), c.text, &c);
     }
 
-    // The file line's accent stroke between LOAD... and the name.
-    context->setFillColor(c.accent);
+    // The file line's stroke between LOAD... and the name.
+    context->setFillColor(c.control);
     context->drawRect(CRect(all.left + 122, all.top + L::kLoadTop, all.left + 124, all.top + L::kLoadBottom),
                       kDrawFilled);
 
-    // The knobs' names in the controls' sans serif (0.2.1, the user's wish). Only those
-    // the redrawn area touches: the plate is drawn about 40 times a second.
+    // The knobs' names in the controls' sans serif (0.2.1, the user's wish; since 0.2.2
+    // regular and spaced wider). Only those the redrawn area touches: the plate is drawn
+    // about 40 times a second.
     CRect clip;
     context->getClipRect(clip);
     for(const Label& label : labels_) {
@@ -118,22 +109,11 @@ void PanelView::DrawUnchecked(CDrawContext* context) {
             continue;
         switch(label.kind) {
             case LabelKind::kKnob:
-                DrawTracked(context, label.text, box, kCenterText, 1.3, skin.Sans(13), c.text, &c);
+                DrawTracked(context, label.text, box, kCenterText, 1.9, skin.Sans(13.5), c.text, &c);
                 break;
             case LabelKind::kSmallKnob:
-                DrawTracked(context, label.text, box, kCenterText, 1.0, skin.Sans(11.5), c.text, &c);
+                DrawTracked(context, label.text, box, kCenterText, 1.5, skin.Sans(12), c.text, &c);
                 break;
-            case LabelKind::kReserved: {
-                const std::size_t split = label.text.find('\n');
-                const CCoord half = box.getHeight() / 2;
-                DrawTracked(context, label.text.substr(0, split), CRect(box.left, box.top, box.right, box.top + half),
-                            kCenterText, 0.9, skin.Sans(10.5), c.dim, &c);
-                if(split != std::string::npos)
-                    DrawTracked(context, label.text.substr(split + 1),
-                                CRect(box.left, box.top + half, box.right, box.bottom), kCenterText, 0.9,
-                                skin.Sans(10.5), c.dim, &c);
-                break;
-            }
         }
     }
 }

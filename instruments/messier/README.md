@@ -9,12 +9,12 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 0.2.1, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 0.2.2, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.2.1:** builds, passes Steinberg's validator, tested automatically (bit for
+**Status 0.2.2:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
@@ -35,7 +35,9 @@ them. Codex released 0.1.10 for the DAW test ([check](docs/CODEX_REVIEW_0.1.10.m
 fixes its two remaining edge cases ([report](docs/BUILD_REPORT_0.1.11.md)). 0.2.0 brings
 the window of the window study ([report](docs/BUILD_REPORT_0.2.0.md)); Codex released it for
 the DAW test with four findings ([check](docs/CODEX_REVIEW_0.2.0.md)), which 0.2.1 fixes
-together with the user's first look at it ([report](docs/BUILD_REPORT_0.2.1.md)). The user
+together with the user's first look at it ([report](docs/BUILD_REPORT_0.2.1.md)). Codex' check
+of 0.2.1 found four more ([check](docs/CODEX_REVIEW_0.2.1.md)); 0.2.2 fixes them and brings the
+user's design round for Slate ([report](docs/BUILD_REPORT_0.2.2.md)). The user
 has tried 0.1.7, 0.1.8 and 0.2.0 in Studio One
 (operation and sound). The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
@@ -44,16 +46,24 @@ open.
 old metal with patina, a measuring plate of dark glass in a milled bezel, and below it
 the wide START slider, on one time axis with the seconds of the file above the plate. On
 the plate a nebula drifts slowly and fades as BLEND goes towards Granular; the waveform
-lies on the glass (since 0.2.1, a trial); a grid of crosses marks the seconds and the
+lies on the glass (since 0.2.1, a trial; since 0.2.2 a little brighter inside the loop);
+since 0.2.2 the nebula drifts with the playback's tempo and direction and rests at 0x, STOP
+and Freeze; a grid of crosses marks the seconds and the
 quarters of the panorama; the loop (following START and SIZE at once),
 the spray range around the playhead and the sounding grains are drawn from the engine's
 real state. Each grain is a shooting star: its head flares with the grain's window and
-burns out, its tail follows the grain's real motion through the file (across only; down
-is its panorama, left at the top). Between the engine's displays playhead and grains move
-on at their measured speeds. While Freeze holds the playhead, it is dashed and carries a
-snowflake; a click on the snowflake ends Freeze. Seven knobs and Volume, six small knobs for the secondary functions,
-FREEZE and RESET lie below (RESET: every knob and START to its default, Freeze off,
-playback back to START); KEYS shows a keyboard with LATCH and two octave keys.
+burns out, its path through the file glows on for 0.3 s (across only; down is its
+panorama, left at the top; since 0.2.2 also a while after the grain ended). Between the
+engine's displays playhead and grains move on at the speeds the engine reports (since
+0.2.2). The orange triangle above the plate, in a lane of its own, marks the playhead. While Freeze holds the playhead, it is dashed and carries a
+snowflake; a click on the snowflake ends Freeze. Below lie SPRAY, seven knobs and Volume
+(since 0.2.2 SPRAY heads the upper row), under them LATCH and KEYS, five small knobs for the
+secondary functions, FREEZE and RESET (RESET: every knob and START to its default, Freeze
+off, playback back to START); KEYS shows a keyboard with the octave keys "- OCT" and
+"OCT +". Since 0.2.2 the controls are blue-violet (knob arcs, values, the START rail, the
+WINDOW curve, keys that are on), the position markers orange (loop brackets, triangle);
+the knob caps and the thumb are light satin metal, interim bitmaps drawn by
+`tools/make_metal_bitmaps.py`.
 Surfaces are bitmaps at 1x and 2x (in the bundle's `Contents/Resources`), everything
 that carries information is drawn by the plug-in. Four GUI presets are planned (Slate,
 Silver, Copper, Photo plate); only Slate's bitmaps are delivered, the menu shows the
@@ -185,7 +195,7 @@ keeps its aspect ratio, from 50 to 200 %. The size is saved with the song.
 **GUI preset:** the palette symbol in the header chooses the look (since 0.2.0); saved
 with the song. A song of 0.1.x opens with Slate.
 
-**LATCH** (beside the keyboard, left of the octave keys): a key struck on the screen keyboard stays held after the mouse
+**LATCH** (under SPRAY since 0.2.2; dimmed while the keyboard is hidden): a key struck on the screen keyboard stays held after the mouse
 is let go, so the pitch stays changed. Clicking another key moves the hold there;
 clicking the held key again, switching LATCH off or closing the window lets it go.
 LATCH is not saved with the song.
@@ -295,7 +305,11 @@ ctest --preset windows-vs2026-x64-release -R messier
 | `messier.provenance` | the copies are what [components.json](components.json) says; the reference differs by the F42 line only |
 
 `bench_messier` (built with the tests, run by hand) measures the load; the numbers are
-in the build report.
+in the build report. `preview_messier_window <folder>` (built with the tests, run by hand,
+since 0.2.2) draws the real window, offscreen, with a made-up file into PNG files: 1x, 2x
+and 0.5x, keyboard shown and hidden, both octave limits, keys on and off. The interim
+metal bitmaps come from `python tools/make_metal_bitmaps.py --preset slate --out
+resource/gui` (numpy, Pillow; the same files every time).
 
 Failing allocations are tested by fault injection: in Release builds every case (the
 loader below 16 bytes, and every allocation of nineteen host calls in turn, parameter

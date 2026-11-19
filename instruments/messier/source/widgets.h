@@ -84,8 +84,9 @@ class WindowShapeView : public VSTGUI::CView {
 };
 
 // A key of the window: a switch (FREEZE, STOP, KEYS, LATCH) shows its state, pressed
-// in and with its text in the accent colour while on; an action (LOAD..., RESET, the
-// octave keys, the size and preset menus) only calls back.
+// in (the preset's pressed face) and with its text in the controls' light colour while
+// on; an action (LOAD..., RESET, the octave keys, the size and preset menus) only calls
+// back.
 // With a skin drawn from the preset's button bitmaps (nine parts), without one as a
 // rounded outline. Its text dims while it is disabled.
 class ToggleButton : public VSTGUI::CView {
@@ -100,6 +101,9 @@ class ToggleButton : public VSTGUI::CView {
     bool On() const { return on_; }
     void SetSkin(std::shared_ptr<const Skin> skin);
     void SetIcon(Icon icon);
+    // The text always in the controls' light colour (0.2.2: the octave keys); dimmed
+    // while disabled.
+    void SetValueInk(bool on);
     void draw(VSTGUI::CDrawContext* context) override;
     void DrawUnchecked(VSTGUI::CDrawContext* context);
     void onMouseDownEvent(VSTGUI::MouseDownEvent& event) override;
@@ -109,6 +113,7 @@ class ToggleButton : public VSTGUI::CView {
     bool on_;
     Style style_;
     Icon icon_ = Icon::kNone;
+    bool value_ink_ = false;
     std::function<void(bool)> toggled_;
     std::shared_ptr<const Skin> skin_;
     VSTGUI::SharedPointer<VSTGUI::CFontDesc> font_;

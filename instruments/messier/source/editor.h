@@ -160,13 +160,14 @@ struct EditorCallbacks {
     std::function<void()> reset;
 };
 
-// The plug-in window (0.2.0, after the window study, version 3): a header with STOP,
-// KEYS and the menus for the window size and the GUI preset; the sample's file line
-// with its LOAD button; the measuring plate (MapView) with the waveform and the START
-// slider on one time axis; seven knobs for the other pots' primary functions and
-// Volume, below them six small knobs for the secondary functions under the pot they
-// belong to, the FREEZE switch and the RESET button; and an on-screen keyboard that
-// KEYS shows and hides, with LATCH and two octave keys beside it. Surfaces come from
+// The plug-in window (0.2.0, after the window study, version 3; rearranged in 0.2.2 after
+// the user's design round): a header with STOP and the menus for the window size and the
+// GUI preset as one group; the sample's file line with its LOAD button; the measuring
+// plate (MapView) with the waveform and the START slider on one time axis; SPRAY, the
+// seven knobs for the other pots' primary functions and Volume in the upper row, below
+// them LATCH and KEYS, five small knobs for the secondary functions under the pot they
+// belong to, FREEZE and RESET; and an on-screen keyboard that KEYS shows and hides, with
+// the octave keys "- OCT" and "OCT +" beside it. Surfaces come from
 // the GUI preset's bitmaps (gui_skin.h); everything that carries information is drawn.
 // The layout is fixed, so the window scales as a whole: by the zoom the user picks
 // (resizing, the grip or the size menu), times the host's display scale factor. The
@@ -272,13 +273,20 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // the plate move on. From the timer and from the user's and the host's edits, so the
     // plate stays fluid while a host holds back the timer during a knob drag.
     void Animate() noexcept;
+    // The same for a change the controller reports (MS-R44): the plate is marked for
+    // drawing at once; the request to the processor waits for VSTGUI's main queue, after
+    // the controller's call has returned, and is for this window only. At most one waits.
+    void AnimateLater() noexcept;
     // Opens the window: counts up, so that a menu's late answer for an earlier window of
     // this editor does nothing (MS-R40).
     std::uint64_t window_serial_ = 0;
+    std::uint64_t animate_window_ = 0; // the window an AnimateLater waits for, 0 for none
     std::chrono::steady_clock::time_point last_poll_{};
     void ShowValue(Knob& knob, Steinberg::Vst::ParamValue normalized);
-    // Puts the file texts into the labels, if the window is open.
+    // Puts the file texts into the labels, if the window is open; each label on its own.
     void ApplyFileTexts();
+    // The info line's colour: warning or dim (MS-R41: also on its own).
+    void ApplyFileInfoColour();
     void ShowFileStatusUnchecked(const FileStatus& status);
     // Forgets the views of a closed window.
     void ForgetViews();

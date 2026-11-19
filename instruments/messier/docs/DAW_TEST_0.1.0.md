@@ -150,8 +150,8 @@ The new window (0.2.0, Slate; judge the look as well as what it shows):
 - [ ] The seconds axis above the plate fits the file's length; the grid's faint lines
       stand at its labels.
 - [ ] Grains as shooting stars: a head that flares and burns out, a horizontal tail
-      behind it, against the direction it reads, longer with higher PITCH; no tail on
-      a grain's first appearance (its speed is measured from two displays).
+      behind it, against the direction it reads, longer with higher PITCH (since 0.2.2
+      the core's own speed, from the first appearance on).
 - [ ] FREEZE: the playhead turns dashed with a snowflake on the plate.
 - [ ] The START slider's thumb follows START (also from automation) and stands where
       the loop's bracket begins; a click or drag on plate, waveform or slider sets START;
@@ -160,10 +160,10 @@ The new window (0.2.0, Slate; judge the look as well as what it shows):
       the palette menu ticks Slate, the other three are greyed "(bitmaps to come)".
 - [ ] A song saved with 0.1.x opens with Slate and its saved size; a song saved with
       0.2.0 keeps preset, size, keyboard and octave.
-- [ ] STOP (header) and LATCH (beside the keyboard) work as before; LATCH and the
-      octave keys hide with the keyboard.
+- [ ] STOP (header) and LATCH work as before (since 0.2.2 LATCH sits under SPRAY and
+      stays, dimmed, while the keyboard is hidden; the octave keys hide with it).
 - [ ] Texts: brand, subtitle, knob names and values readable and not cut at 50 %, 100 %
-      and 200 %; "TAUREON 0.2.0" does not touch STOP.
+      and 200 %; "TAUREON 0.2.2" does not touch STOP.
 - [ ] CPU: the window open costs no more than with 0.1.11 (since 0.2.1 the plate is drawn
       about 40 times a second).
 
@@ -179,6 +179,35 @@ The new window (0.2.0, Slate; judge the look as well as what it shows):
 - [ ] A click on the snowflake ends Freeze.
 - [ ] The sans serif of the controls reads well at 50, 100 and 200 %.
 - [ ] The size and preset menus tick the current entry.
+
+0.2.2 (Codex' check of 0.2.1 and the design round; compare with the previews in
+`out/messier-0.2.2/preview/`):
+
+- [ ] Light metal knobs and START thumb with dark pointers; blue-violet arcs, values,
+      START rail and WINDOW curve; orange only on loop brackets, the legend's loop and
+      the position triangle. Is the light metal right, or should it change before the
+      final renderings?
+- [ ] SPRAY as a large knob first in the upper row, works as before (also the wheel on
+      the plate); LATCH and KEYS under it, level with FREEZE and RESET.
+- [ ] Without the keyboard: LATCH dimmed and inert, KEYS brings the keyboard back.
+- [ ] "- OCT" and "OCT +" beside the keyboard, as large as the other keys; each dims at
+      its limit (C2 to C4 lowest, C6 to C8 highest).
+- [ ] STOP, FREEZE, LATCH and KEYS look pressed in while on, also at 50 %.
+- [ ] STOP and the two symbol keys stand as a group with even gaps; no screws.
+- [ ] The position triangle sits below the seconds labels; "14 s" stays readable when
+      the playhead stands on it.
+- [ ] Grains: warm-white heads in front of nebula and waveform, their paths glowing on
+      for about 0.3 s (on a long file at 1x only a few units; longer or shorter?); a new
+      file clears the old paths at once.
+- [ ] The nebula drifts right while playing forward, left backward, turns smoothly when
+      SPEED crosses 0, rests at 0x, STOP and Freeze, and does not jerk at the loop's end.
+- [ ] The waveform a little brighter inside the loop than 0.2.1, outside still dim; the
+      playhead readable over bright waveform.
+- [ ] Knob names in the lighter, wider spaced sans serif read well at 50, 100 and 200 %.
+- [ ] Automating START or SIZE from the host: the loop brackets follow (MS-R46).
+- [ ] Two windows of one instance open (if the host allows), or closing the window while
+      a file loads: no crash (MS-R44).
+- [ ] A short loop (SIZE low) at +1x: the playhead runs forward (MS-R45).
 
 ## 7. Listening
 

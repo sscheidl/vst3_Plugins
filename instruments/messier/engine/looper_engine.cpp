@@ -189,6 +189,7 @@ void LooperEngine::Render(const float* in_left, const float* in_right, float* le
         swapping_ = false;
     }
     m.engine->Process(in_left, in_right, left, right, kQuantum);
+    ++rendered_;
     // Volume behind the core. At a steady value the gain is that value exactly, so
     // at 100 % the core's samples pass unchanged.
     for(int i = 0; i < kQuantum; ++i) {
@@ -209,6 +210,7 @@ void LooperEngine::Display(EngineDisplay& display) const {
     display = EngineDisplay{};
     display.frozen = e.frozen ? 1 : 0;
     display.swapping = swapping_ ? 1 : 0;
+    display.rendered = rendered_;
     // The file the core reads: the current one, also while it fades out for a swap
     // (current_ changes when the core acknowledges the mute).
     if(!current_ || current_->frames == 0)
@@ -232,6 +234,9 @@ void LooperEngine::Display(EngineDisplay& display) const {
             position += length;
     }
     display.playhead = start + position;
+    // The playhead moves EffectiveSpeed() x the file's rate / the core's rate frames a
+    // sample (core/engine.cpp, `advance`), the core renders kSampleRate samples a second.
+    display.head_speed = e.frozen ? 0.0f : static_cast<float>(double(e.EffectiveSpeed()) * current_->rate);
     const float spray = e.DisplaySecondary(neb::Start);
     display.spray = static_cast<float>(std::min(frames, double(spray) * spray * frames));
     unsigned count = 0;
@@ -245,6 +250,9 @@ void LooperEngine::Display(EngineDisplay& display) const {
             dot.position = static_cast<float>(g.position);
             dot.pan = g.pan;
             dot.phase = std::min(1.0f, std::max(0.0f, g.envelope));
+            // A grain moves `step` frames and its window `increment` a sample.
+            dot.speed = static_cast<float>(double(g.step) * kSampleRate);
+            dot.phase_rate = static_cast<float>(double(g.increment) * kSampleRate);
         }
     }
     display.grain_count = count;
