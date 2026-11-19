@@ -3,6 +3,7 @@
 #include "gui_layout.h"
 #include "gui_skin.h"
 #include "looper_engine.h"
+#include "parameters.h"
 #include "view_layout.h"
 #include "wave_overview.h"
 
@@ -23,6 +24,7 @@ namespace VSTGUI {
 class CFrame;
 class CKnob;
 class COptionMenu;
+class CSlider;
 class CTextLabel;
 } // namespace VSTGUI
 
@@ -126,6 +128,10 @@ struct EditorSettings {
     int transpose = kKeyboardDefaultTranspose; // of the keyboard, in semitones
     GuiPreset preset = GuiPreset::kSlate;       // since 0.2.0
     bool details = false;                       // DETAILS open (0.2.4; closed for a new instance)
+    std::array<std::int32_t, kGuiPresetCount> accents{kPresetAccent, kPresetAccent, kPresetAccent, kPresetAccent};
+    std::int32_t trail_ms = kTrailDefaultMs;
+
+    std::int32_t Accent() const { return accents[static_cast<std::size_t>(preset)]; }
 };
 
 // The sizes the window's size menu offers (0.2.0), as zoom.
@@ -206,6 +212,7 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // The GUI preset, as its menu sets it (0.2.0): saved with the project. A preset whose
     // bitmaps are not delivered yet is kept as the setting and shown as Slate.
     void SetGuiPreset(GuiPreset preset);
+    void SetAccent(std::int32_t hue);
     // The window size as its menu sets it (0.2.0). If the host refuses, nothing changes.
     void SetZoom(double zoom);
     // Freeze as the window's switch does: an edit the host records.
@@ -273,6 +280,9 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // Hands the current skin to every view and label; draws the window anew. Each step on
     // its own (MS-R41): whatever one meets, the others are done.
     void ApplySkin() noexcept;
+    void ApplyTrail();
+    void beginEdit(int32_t tag) override;
+    void endEdit(int32_t tag) override;
     // The window's heartbeat (0.2.1): asks for the display every kDisplayInterval and lets
     // the plate move on. From the timer and from the user's and the host's edits, so the
     // plate stays fluid while a host holds back the timer during a knob drag.
@@ -332,6 +342,9 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     KeyboardView* keyboard_view_ = nullptr; // owned by the frame, like the views below
     ToggleButton* keyboard_button_ = nullptr;
     ToggleButton* details_button_ = nullptr;
+    VSTGUI::CSlider* accent_slider_ = nullptr;
+    MetalKnob* trail_knob_ = nullptr;
+    VSTGUI::CTextLabel* trail_value_ = nullptr;
     ToggleButton* octave_down_ = nullptr;
     ToggleButton* octave_up_ = nullptr;
     ToggleButton* freeze_button_ = nullptr;
@@ -353,7 +366,7 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     ToggleButton* preset_button_ = nullptr;
     VSTGUI::CTextLabel* catalogue_ = nullptr;
     std::uint64_t catalogue_shown_ = ~std::uint64_t(0);
-    std::shared_ptr<const Skin> skin_; // the look of the open window
+    std::shared_ptr<Skin> skin_; // the look of the open window
     bool latch_ = false;
     EngineDisplay shown_display_{};             // the newest display, also while closed
     std::shared_ptr<const WaveOverview> shown_wave_;

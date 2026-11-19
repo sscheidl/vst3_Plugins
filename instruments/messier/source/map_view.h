@@ -13,7 +13,7 @@
 // or drag sets START to that place in the file, a click on the snowflake ends Freeze
 // (0.2.1), the wheel widens or narrows SPRAY (since 0.1.8), and a WAV can be dropped on it.
 //
-// 0.2.2 (the user's design round): the grains glow on along their path for kTrail after
+// 0.2.2 (the user's design round): the grains glow on along their path after
 // they passed (also after a grain ended; a new file clears that), the nebula drifts with
 // the effective signed tempo the display carries (never with the read position's jumps),
 // and the position triangle has a lane of its own between the axis labels and the plate.
@@ -21,6 +21,7 @@
 
 #include "gui_skin.h"
 #include "looper_engine.h"
+#include "parameters.h"
 #include "wave_overview.h"
 
 #include "vstgui/lib/cview.h"
@@ -64,9 +65,8 @@ class MapView : public VSTGUI::CView {
     // STOP (0.2.2): the nebula's drift comes to rest at once, not only once the displays
     // stand still.
     void SetStopped(bool stopped) noexcept { stopped_ = stopped; }
-    // How long a grain's path glows on after the grain passed (0.2.2, the user's start
-    // value; display only).
-    static constexpr double kTrail = 0.3;
+    // How long a grain's path glows on after the grain passed (display only).
+    void SetTrail(std::int32_t milliseconds) noexcept;
     // The window's timer and the user's edits: the plate is drawn again, about as often
     // as displays come, so that nebula, playhead and grains move on.
     void Tick() noexcept;
@@ -114,7 +114,7 @@ class MapView : public VSTGUI::CView {
     double HeadAt(Clock::time_point now) const;
     double GrainAt(std::uint32_t index, Clock::time_point now) const;
     // How long ago a grain of the display ended at `now`, on the wall clock (MS-R54); its
-    // glow is gone kTrail after that. Negative while it still sounds.
+    // glow is gone after the trail time. Negative while it still sounds.
     double EndedFor(std::uint32_t index, Clock::time_point now) const;
     // Where the START thumb and a frame of the file stand across the view (0.2.4: the same
     // mapping, so the thumb stands on the left loop bracket).
@@ -148,7 +148,7 @@ class MapView : public VSTGUI::CView {
                   double loop_right, Clock::time_point now);
     // A grain's glowing path: its head at `x` (where it was `since` seconds ago, 0 for a
     // sounding grain) moving `speed` units a second; the path glows back to where it was
-    // `reach` seconds ago, at most kTrail.
+    // `reach` seconds ago, at most the chosen trail time.
     void DrawTrail(VSTGUI::CDrawContext* context, double x, double y, double speed, double since, double reach,
                    double thickness, double alpha);
 
@@ -158,7 +158,7 @@ class MapView : public VSTGUI::CView {
         Clock::time_point at;
         double life = 0;
     };
-    static constexpr std::size_t kMaxEnded = 48;
+    static constexpr std::size_t kMaxEnded = 96;
     void Keep(const Ended& ended) noexcept;
     std::array<Ended, kMaxEnded> ended_{};
     std::size_t ended_count_ = 0;
@@ -170,6 +170,7 @@ class MapView : public VSTGUI::CView {
     std::shared_ptr<const WaveOverview> wave_;
     std::shared_ptr<const Skin> skin_;
     bool resting_ = false; // the same display for a while: nothing moves on
+    Clock::time_point rest_at_{}; // when it began to rest (MS-R57)
     Clock::time_point shown_at_{};
     Clock::time_point loop_changed_at_{}; // START or SIZE changed here (MS-R46)
     Clock::time_point born_ = Clock::now();
@@ -177,6 +178,7 @@ class MapView : public VSTGUI::CView {
     VSTGUI::CCoord inset_ = 0;
     double blend_ = 0.5;
     double pitch_ = 0;
+    double trail_seconds_ = kTrailDefaultMs / 1000.0;
     VSTGUI::CColor tail_ink_{255, 200, 140, 255}; // the tails' colour this frame
     double start_ = 0.0, size_ = 1.0;
     bool start_known_ = false, size_known_ = false;

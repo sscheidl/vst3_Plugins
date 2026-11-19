@@ -1,5 +1,5 @@
-// The window's look (0.2.0): the four GUI presets the user chose on 2026-11-18 (Slate,
-// Silver, Copper, Photo plate), their colours, and their bitmaps. The bitmaps carry only
+// The window's look (0.2.0): the four GUI presets (Slate, Silver, and since 0.2.5 Plum and
+// Gold in the places of Copper and Photo plate), their colours, and their bitmaps. The bitmaps carry only
 // surfaces and material (docs/GRAFIKAUFTRAG_GUI.md): metal, glass, nebula, knob caps,
 // keys. Since 0.2.2 knob caps, thumb and key faces of Slate are drawn by
 // tools/make_metal_bitmaps.py (interim, light metal); the screws are gone. Everything that carries information (text, scales, grid, waveform,
@@ -26,12 +26,20 @@
 namespace messier {
 
 // Saved with the window settings as its number; the numbers do not change.
-enum class GuiPreset : std::int32_t { kSlate = 0, kSilver = 1, kCopper = 2, kPhotoPlate = 3 };
+enum class GuiPreset : std::int32_t { kSlate = 0, kSilver = 1, kPlum = 2, kGold = 3 };
 constexpr std::int32_t kGuiPresetCount = 4;
 
 constexpr bool IsGuiPreset(std::int32_t value) {
     return value >= 0 && value < kGuiPresetCount;
 }
+
+constexpr std::int32_t kPresetAccent = -1;
+constexpr std::int32_t kAccentMaxHue = 285;
+constexpr bool IsAccent(std::int32_t hue) {
+    return hue >= kPresetAccent && hue <= kAccentMaxHue;
+}
+
+VSTGUI::CColor AccentColour(double hue) noexcept;
 
 struct SkinColours {
     VSTGUI::CColor metal, stain; // the stand-in for the chassis bitmap
@@ -51,7 +59,7 @@ struct SkinColours {
     VSTGUI::CColor groove, tick, pointer;
     VSTGUI::CColor button_text;
     VSTGUI::CColor warning;
-    bool negative = false; // Photo plate: dark marks on light glass
+    bool negative = false; // Plum: dark marks on light glass
     // The controls (0.2.2, the user's design round): knob arcs, the START rail, the WINDOW
     // curve, pressed keys, small ornaments; and the values in it, lighter for reading.
     VSTGUI::CColor control, value;
@@ -60,8 +68,8 @@ struct SkinColours {
 struct GuiPresetInfo {
     const char* name;     // as the menu shows it
     const char* file_key; // in the bitmap names
-    // Its bitmaps are in the bundle. Silver, Copper and Photo plate follow when the
-    // bitmaps are delivered; until then the menu shows them disabled.
+    // Its bitmaps are in the bundle (all four since 0.2.4); a preset without them would
+    // show as Slate and be disabled in the menu.
     bool delivered;
     SkinColours colours;
 };
@@ -109,6 +117,8 @@ class Skin {
 
     GuiPreset Preset() const { return preset_; }
     const SkinColours& Colours() const { return colours_; }
+    // Hue changes affect the ink and control accents without reloading the bitmaps.
+    void SetAccent(std::int32_t hue) noexcept;
     const SkinImage& Image(SkinImageId id) const { return images_[static_cast<std::size_t>(id)]; }
 
     // Engraved serif capitals: the brand and the version.

@@ -21,7 +21,7 @@
 
 namespace messier {
 
-constexpr const char* kEngineVersion = "0.1.5";
+constexpr const char* kEngineVersion = "0.1.6";
 
 // A sample file in the core's format: interleaved PCM16, mono or stereo, at the
 // file's own rate (the core converts the rate when it reads). Immutable once handed
@@ -66,6 +66,9 @@ struct GrainDot {
     // second.
     float speed = 0;
     float phase_rate = 0;
+    // Since 0.2.5 (MS-R55): the number of this grain's start, the same in every display of
+    // its life, another for each new grain (wraps; 0 for none known).
+    std::uint32_t id = 0;
 };
 struct EngineDisplay {
     static constexpr unsigned kMaxGrains = 20; // both grain channels of the core

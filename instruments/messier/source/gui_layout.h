@@ -72,7 +72,7 @@ constexpr double kButtonWidth = 74;
 constexpr double kButtonColumnLeft = ColumnLeft(8) + kColumnWidth + 8;
 constexpr double kFreezeTop = kKnobTop + 4, kResetTop = kKnobTop + 42;
 
-// DETAILS: the bar with its switch, and below it, while open, the five secondary knobs.
+// DETAILS: the bar with its switch, and below it, while open, the secondary controls.
 constexpr double kDetailsBarTop = 528, kDetailsBarHeight = 24;
 constexpr double kDetailsLeft = 380, kDetailsRight = 500;
 constexpr double kSmallNameTop = kTopHeight + 8, kSmallKnobTop = kTopHeight + 24, kSmallKnobSize = 48,
@@ -81,6 +81,12 @@ constexpr int kSmallColumns = 5;
 constexpr double SmallColumnLeft(int column) {
     return (kWidth - kSmallColumns * kColumnWidth) / 2 + column * kColumnWidth;
 }
+// Centre the spectrum slider in the space to the left of the five small knobs.
+constexpr double kAccentWidth = 80;
+constexpr double kAccentCentre = (kMargin + SmallColumnLeft(0)) / 2;
+constexpr double kAccentLeft = kAccentCentre - kAccentWidth / 2;
+constexpr double kAccentRight = kAccentCentre + kAccentWidth / 2;
+constexpr double kTrailCentre = kWidth - kAccentCentre;
 
 // The keyboard section, from its top (TopHeight): LATCH, the octave keys and 15 white keys
 // of 36 units, centred as one row.

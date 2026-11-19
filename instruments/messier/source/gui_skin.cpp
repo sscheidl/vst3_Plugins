@@ -26,9 +26,9 @@ constexpr CColor Rgba(int r, int g, int b, double a) {
                   static_cast<uint8_t>(a * 255.0 + 0.5));
 }
 
-// The colours of the four presets (0.2.4): the delivered bitmap package of 2026-11-19
-// (its FARBTABELLEN.md), all delivered. Slate is the graphite standard of the GUI
-// template; the order is that of the stored preset IDs.
+// The colours of the four presets: the delivered packages of 2026-11-19 (their
+// FARBTABELLEN.md). Slate is the graphite standard of the GUI template; since 0.2.5 Plum
+// and Gold take the places (and stored IDs) of Copper and Photo plate.
 const GuiPresetInfo kPresets[kGuiPresetCount] = {
     {"Slate", "slate", true,
      {
@@ -102,54 +102,18 @@ const GuiPresetInfo kPresets[kGuiPresetCount] = {
          .value = Rgb(38, 56, 102),
      }},
 
-    {"Copper", "copper", true,
+    {"Plum", "plum", true,
      {
-         .metal = Rgb(58, 41, 35),
-         .stain = Rgb(115, 71, 51),
-         .glass = Rgb(22, 16, 25),
-         .text = Rgb(243, 219, 202),
-         .dim = Rgb(211, 177, 158),
-         .marker = Rgb(242, 142, 85),
-         .engrave_light = Rgba(255, 233, 213, 0.10588235),
-         .engrave_dark = Rgba(17, 8, 5, 0.73725490),
-         .rule_dark = Rgba(25, 14, 12, 0.68627451),
-         .rule_light = Rgba(216, 158, 116, 0.18431373),
-         .grid_line = Rgba(203, 169, 194, 0.08235294),
-         .grid_cross = Rgba(216, 174, 198, 0.36078431),
-         .plate_text = Rgb(241, 218, 218),
-         .nebula_a = Rgb(159, 74, 96),
-         .nebula_b = Rgb(98, 47, 81),
-         .grain = Rgb(255, 242, 221),
-         .tail = Rgb(239, 181, 135),
-         .playhead = Rgb(255, 240, 228),
-         .loop_fill = Rgba(210, 162, 152, 0.08627451),
-         .spray_fill = Rgba(217, 167, 146, 0.10196078),
-         .loop_edge = Rgba(242, 142, 85, 0.49019608),
-         .wave = Rgb(242, 185, 180),
-         .wave_outside = Rgb(168, 111, 125),
-         .plate_wave = Rgb(218, 165, 178),
-         .groove = Rgba(16, 12, 10, 0.74901961),
-         .tick = Rgba(229, 191, 171, 0.69411765),
-         .pointer = Rgb(41, 26, 23),
-         .button_text = Rgb(246, 223, 208),
-         .warning = Rgb(255, 170, 132),
-         .negative = false,
-         .control = Rgb(161, 207, 189),
-         .value = Rgb(195, 230, 214),
-     }},
-
-    {"Photo plate", "plate", true,
-     {
-         .metal = Rgb(48, 41, 31),
-         .stain = Rgb(88, 98, 80),
+         .metal = Rgb(237, 232, 237),
+         .stain = Rgb(226, 220, 229),
          .glass = Rgb(224, 226, 213),
-         .text = Rgb(243, 231, 205),
-         .dim = Rgb(211, 194, 162),
+         .text = Rgb(43, 28, 47),
+         .dim = Rgb(82, 69, 86),
          .marker = Rgb(196, 80, 43),
-         .engrave_light = Rgba(255, 245, 219, 0.13725490),
-         .engrave_dark = Rgba(24, 17, 10, 0.73725490),
-         .rule_dark = Rgba(24, 18, 10, 0.72156863),
-         .rule_light = Rgba(201, 177, 125, 0.25882353),
+         .engrave_light = Rgba(255, 255, 255, 0.49019608),
+         .engrave_dark = Rgba(81, 64, 94, 0.12549020),
+         .rule_dark = Rgba(67, 44, 81, 0.26274510),
+         .rule_light = Rgba(255, 255, 255, 0.50980392),
          .grid_line = Rgba(55, 63, 61, 0.10980392),
          .grid_cross = Rgba(55, 65, 61, 0.47058824),
          .plate_text = Rgb(46, 58, 57),
@@ -164,14 +128,50 @@ const GuiPresetInfo kPresets[kGuiPresetCount] = {
          .wave = Rgb(64, 72, 89),
          .wave_outside = Rgb(102, 108, 115),
          .plate_wave = Rgb(63, 74, 86),
-         .groove = Rgba(16, 14, 9, 0.76862745),
-         .tick = Rgba(225, 197, 150, 0.70196078),
-         .pointer = Rgb(45, 34, 19),
-         .button_text = Rgb(246, 232, 201),
-         .warning = Rgb(255, 183, 119),
+         .groove = Rgba(69, 50, 74, 0.37647059),
+         .tick = Rgba(93, 76, 96, 0.67058824),
+         .pointer = Rgb(42, 34, 46),
+         .button_text = Rgb(46, 32, 51),
+         .warning = Rgb(145, 46, 53),
          .negative = true,
-         .control = Rgb(220, 197, 139),
-         .value = Rgb(243, 223, 178),
+         .control = Rgb(101, 54, 83),
+         .value = Rgb(80, 39, 68),
+     }},
+
+    {"Gold", "gold", true,
+     {
+         .metal = Rgb(239, 222, 185),
+         .stain = Rgb(219, 199, 160),
+         .glass = Rgb(7, 24, 14),
+         .text = Rgb(25, 40, 27),
+         .dim = Rgb(56, 75, 51),
+         .marker = Rgb(213, 106, 34),
+         .engrave_light = Rgba(255, 246, 222, 0.54901961),
+         .engrave_dark = Rgba(71, 54, 23, 0.14901961),
+         .rule_dark = Rgba(89, 75, 43, 0.34901961),
+         .rule_light = Rgba(255, 242, 207, 0.52941176),
+         .grid_line = Rgba(109, 175, 87, 0.20000000),
+         .grid_cross = Rgba(154, 205, 118, 0.56078431),
+         .plate_text = Rgb(184, 223, 155),
+         .nebula_a = Rgb(38, 74, 43),
+         .nebula_b = Rgb(32, 57, 35),
+         .grain = Rgb(255, 244, 220),
+         .tail = Rgb(229, 215, 158),
+         .playhead = Rgb(235, 242, 207),
+         .loop_fill = Rgba(102, 157, 57, 0.08235294),
+         .spray_fill = Rgba(140, 182, 96, 0.09411765),
+         .loop_edge = Rgba(247, 148, 82, 0.57254902),
+         .wave = Rgb(115, 169, 94),
+         .wave_outside = Rgb(76, 121, 71),
+         .plate_wave = Rgb(103, 164, 81),
+         .groove = Rgba(56, 71, 50, 0.62745098),
+         .tick = Rgba(74, 101, 76, 0.65882353),
+         .pointer = Rgb(32, 56, 35),
+         .button_text = Rgb(30, 53, 34),
+         .warning = Rgb(142, 55, 36),
+         .negative = false,
+         .control = Rgb(52, 91, 56),
+         .value = Rgb(44, 77, 45),
      }},
 };
 
@@ -304,6 +304,43 @@ Skin::Skin(GuiPreset preset) : preset_(ShownPreset(preset)), colours_(PresetInfo
         Tint(image.x1, tint);
         Tint(image.x2, tint);
     }
+}
+
+VSTGUI::CColor AccentColour(double hue) noexcept {
+    CColor colour;
+    colour.fromHSV(hue, 0.76, 0.87);
+    return colour;
+}
+
+void Skin::SetAccent(std::int32_t hue) noexcept {
+    const SkinColours& original = PresetInfo(preset_).colours;
+    colours_ = original;
+    if(hue == kPresetAccent || !IsAccent(hue))
+        return;
+
+    const CColor accent = AccentColour(hue);
+    colours_.control = accent;
+
+    // Keep the chosen hue on the chassis by moving its ink toward black or white
+    // only if the selected colour needs more contrast.
+    const auto luminance = [](CColor colour) {
+        const auto linear = [](int channel) {
+            const double srgb = channel / 255.0;
+            return srgb <= 0.04045 ? srgb / 12.92 : std::pow((srgb + 0.055) / 1.055, 2.4);
+        };
+        return 0.2126 * linear(colour.red) + 0.7152 * linear(colour.green) + 0.0722 * linear(colour.blue);
+    };
+    const double back = luminance(original.metal) + 0.05;
+    const int toward = back >= 0.225 ? 0 : 255;
+    CColor ink = accent;
+    for(int step = 1; step <= 32; ++step) {
+        const double light = luminance(ink) + 0.05;
+        if(std::max(light, back) / std::min(light, back) >= 4.5)
+            break;
+        const auto shift = [&](int component) { return component + (toward - component) * step / 32; };
+        ink = Rgb(shift(accent.red), shift(accent.green), shift(accent.blue));
+    }
+    colours_.text = colours_.value = colours_.button_text = ink;
 }
 
 CFontRef Skin::FontOf(int kind, double size) const {

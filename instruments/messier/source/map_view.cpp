@@ -86,8 +86,10 @@ void MapView::ShowAt(const EngineDisplay& display, std::shared_ptr<const WaveOve
         // (a large host buffer), or the engine rests (STOP, Bypass, a host that stopped
         // processing). Only a display unchanged for longer than a large buffer stops
         // playhead and grains where the display has them.
-        if(Seconds(now - shown_at_) > kRestAfter)
+        if(!resting_ && Seconds(now - shown_at_) > kRestAfter) {
             resting_ = true;
+            rest_at_ = now; // MS-R57: ends predicted until now stay ended
+        }
         // 0.2.3: an overview that arrives late is drawn, but it is no new display: the
         // playhead's and grains' prediction and the resting go on as they were.
         if(wave != wave_) {
@@ -112,14 +114,25 @@ void MapView::ShowAt(const EngineDisplay& display, std::shared_ptr<const WaveOve
         const std::uint32_t new_count = std::min(display.grain_count, EngineDisplay::kMaxGrains);
         std::array<bool, EngineDisplay::kMaxGrains> taken{};
         const auto take = [&](const GrainDot& g, double expected) {
-            // The same grain: its pan, speed and window rate are its own for its whole life,
-            // its window where it should be by now (a little slack for the input's FM).
+            // MS-R55 (0.2.5): a grain whose start the engine numbered is the one with that
+            // number, and no other.
+            if(g.id != 0) {
+                for(std::uint32_t k = 0; k < new_count; ++k)
+                    if(!taken[k] && display.grains[k].id == g.id) {
+                        taken[k] = true;
+                        return true;
+                    }
+                return false;
+            }
+            // Without numbers (a display made elsewhere): the same grain has its pan, speed
+            // and window rate for its whole life, its window where it should be by now (a
+            // little slack for the input's FM).
             const double slack = 0.01 + g.phase_rate * kSameGrainSlack;
             int best = -1;
             double best_miss = slack;
             for(std::uint32_t k = 0; k < new_count; ++k) {
                 const GrainDot& h = display.grains[k];
-                if(taken[k] || h.pan != g.pan || h.speed != g.speed || h.phase_rate != g.phase_rate)
+                if(taken[k] || h.id != 0 || h.pan != g.pan || h.speed != g.speed || h.phase_rate != g.phase_rate)
                     continue;
                 const double miss = std::abs(h.phase - expected);
                 if(miss <= best_miss) {
@@ -145,8 +158,8 @@ void MapView::ShowAt(const EngineDisplay& display, std::shared_ptr<const WaveOve
                 continue;
             const double left = (1.0 - g.phase) / g.phase_rate; // audio seconds it still sounded
             // Compared in seconds before a time point is made (MS-R52).
-            if(!(left <= audio) || audio - left >= kTrail)
-                continue; // sounds on in the new display, or its glow is gone
+            if(!(left <= audio) || audio - left >= kTrailMaxMs / 1000.0)
+                continue; // keep enough history to lengthen the trail while editing
             if(take(g, g.phase + g.phase_rate * audio))
                 continue; // the new display was made just before its end
             Ended ended;
@@ -183,7 +196,7 @@ void MapView::Keep(const Ended& ended) noexcept {
 std::size_t MapView::Afterglows(Clock::time_point now) const {
     std::size_t glowing = 0;
     for(std::size_t i = 0; i < ended_count_; ++i)
-        glowing += now >= ended_[i].at && Seconds(now - ended_[i].at) < kTrail ? 1 : 0;
+        glowing += now >= ended_[i].at && Seconds(now - ended_[i].at) < trail_seconds_ ? 1 : 0;
     return glowing;
 }
 
@@ -250,9 +263,12 @@ double MapView::EndedFor(std::uint32_t index, Clock::time_point now) const {
         return -1.0;
     // MS-R54 (0.2.4): on the wall clock, not stopped where the prediction of places stops
     // (kMaxAhead): a grain predicted to have ended fades out even if no display comes.
-    const double wall = resting_ ? 0.0 : std::max(0.0, Seconds(now - shown_at_));
+    // MS-R57 (0.2.5): once the display rests, no grain ends any more, but one predicted to
+    // have ended before keeps fading on the wall clock.
+    const double wall = std::max(0.0, Seconds(now - shown_at_));
+    const double ended_by = resting_ ? std::max(0.0, Seconds(rest_at_ - shown_at_)) : wall;
     const double left = (1.0 - g.phase) / g.phase_rate;
-    return wall >= left ? wall - left : -1.0;
+    return ended_by >= left ? wall - left : -1.0;
 }
 
 MapView::Loop MapView::ShownLoop(Clock::time_point now) const {
@@ -299,6 +315,14 @@ CColor MapView::PitchTint(const CColor& warm, double octaves) {
 
 void MapView::SetBlend(double blend) noexcept {
     blend_ = std::clamp(blend, 0.0, 1.0);
+}
+
+void MapView::SetTrail(std::int32_t milliseconds) noexcept {
+    const double seconds = std::clamp(milliseconds, kTrailMinMs, kTrailMaxMs) / 1000.0;
+    if(seconds == trail_seconds_)
+        return;
+    trail_seconds_ = seconds;
+    Guarded([&] { invalid(); });
 }
 
 void MapView::SetStart(double start) noexcept {
@@ -401,9 +425,9 @@ void MapView::DrawWave(CDrawContext* context, const CRect& plate, double loop_le
 
 void MapView::DrawTrail(CDrawContext* context, double x, double y, double speed, double since, double reach,
                         double thickness, double alpha) {
-    // A point of the path glows 1 - age / kTrail, age being how long ago the grain
+    // A point of the path glows 1 - age / trail_seconds_, age being how long ago the grain
     // passed it; eased, so the glow fades softly.
-    reach = std::min(reach, kTrail);
+    reach = std::min(reach, trail_seconds_);
     if(!(reach > since) || !(alpha > 0.0))
         return;
     CCoord length = std::abs(speed) * (reach - since);
@@ -415,7 +439,7 @@ void MapView::DrawTrail(CDrawContext* context, double x, double y, double speed,
         length = kMaxTrail;
     }
     const CCoord from = speed > 0 ? x - length : x + length;
-    const auto glow = [&](double age) { return std::pow(std::clamp(1.0 - age / kTrail, 0.0, 1.0), 1.6) * alpha; };
+    const auto glow = [&](double age) { return std::pow(std::clamp(1.0 - age / trail_seconds_, 0.0, 1.0), 1.6) * alpha; };
     auto path = owned(context->createGraphicsPath());
     if(!path)
         return;
@@ -536,6 +560,15 @@ void MapView::DrawUnchecked(CDrawContext* context) {
                 context->drawLine(CPoint(x, plate.top), CPoint(x, plate.bottom));
             }
         }
+        if(skin.Preset() == GuiPreset::kGold) {
+            // 0.2.5: Gold's technical glass also has faint lines across, at the quarters of
+            // the panorama (its scanlines are in the plate bitmap).
+            context->setFrameColor(c.grid_line);
+            for(int p = 1; p < 4; ++p) {
+                const CCoord y = std::round(plate.top + p / 4.0 * plate.getHeight()) + 0.5;
+                context->drawLine(CPoint(plate.left, y), CPoint(plate.right, y));
+            }
+        }
         context->setFrameColor(c.grid_cross);
         const double cross_step = step > 0 ? step / 2 : 0;
         const int crosses = cross_step > 0 ? static_cast<int>(seconds / cross_step) : 16;
@@ -596,7 +629,7 @@ void MapView::DrawUnchecked(CDrawContext* context) {
 
             // The grains as shooting stars, in front of nebula, waveform and loop (0.2.2): a
             // warm-white head that flares with the grain's window and burns out, and its
-            // path through the file glowing on for kTrail (across only; down is its
+            // path through the file glowing on for the chosen trail time (across only; down is its
             // panorama, which does not move), also a while after the grain ended. Between
             // displays they move on at their own speeds.
             const double alpha = 0.85 + 0.15 * blend_;
@@ -867,6 +900,11 @@ void MapView::DrawDropHighlight(CDrawContext* context) {
 }
 
 double MapView::StartX() const {
+    // MS-R56 (0.2.5): with a file, START's place as the core clamps the loop's start, to
+    // the last frame; so the thumb stays on the bracket also at 100 % of a short file.
+    const double frames = display_.frames;
+    if(frames > 0)
+        return FrameX(std::min(start_ * frames, frames - 1));
     return inset_ + (getViewSize().getWidth() - 2 * inset_) * start_;
 }
 

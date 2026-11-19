@@ -220,8 +220,9 @@ The new window (0.2.0, Slate; judge the look as well as what it shows):
 
 0.2.4 (the GUI standard):
 
-- [ ] Switch between Slate, Silver, Copper and Photo plate: only material and colours
-      change, every control stays where it is. On Photo plate waveform, playhead and
+- [ ] Switch between Slate, Silver, Plum and Gold (0.2.5: in the places of Copper and
+      Photo plate): only material and colours change, every control stays where it is.
+      On Plum waveform, playhead and
       grains read well on the light glass.
 - [ ] DETAILS: closed in a new instance; opening it grows the window by the row of the
       five secondary knobs, closing shrinks it; their values and automation stay. A
@@ -231,6 +232,22 @@ The new window (0.2.0, Slate; judge the look as well as what it shows):
 - [ ] START at the start, in the middle and near the end: the thumb stands exactly on
       the left loop bracket.
 - [ ] Projects of 0.2.3 open with their preset, size, keyboard and transposition.
+
+0.2.5:
+
+- [ ] Plum: light glass with grey waveform and dark grains, the waveform a little clearer
+      inside the loop. Gold: dark green glass with faint scanlines and lines across, a
+      green waveform without glowing edges, inside the loop a little stronger; warm grains
+      and orange markers readable.
+- [ ] Projects that used Copper or Photo plate open in Plum or Gold.
+- [ ] HUE (DETAILS, left): labels, knob arcs, START fill and the held key follow it live;
+      a double-click brings back the preset's colour; each preset keeps its own hue in the
+      project.
+- [ ] TRAIL (DETAILS, right): 150 to 900 ms, 450 by default; the grains' paths fade
+      accordingly; saved with the project.
+- [ ] A dense cloud of grains (DENSITY high): every grain that ends leaves its path
+      (MS-R55); after STOP the fading paths fade out, no grain head comes back (MS-R57).
+- [ ] START at 100 % of a very short file: the thumb on the loop bracket (MS-R56).
 
 ## 7. Listening
 

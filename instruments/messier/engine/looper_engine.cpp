@@ -20,6 +20,29 @@ struct LooperEngine::Impl {
     alignas(neb::Engine) unsigned char storage[sizeof(neb::Engine)];
     neb::Engine* engine = nullptr;
     neb::FileBridge bridge;
+    // 0.2.5 (MS-R55): a number for each grain start, for the display only. A slot whose
+    // grain starts to sound, or whose window began again, gets the next number.
+    std::uint32_t grain_id[2][neb::MAX_GRAINS]{};
+    float grain_envelope[2][neb::MAX_GRAINS]{};
+    bool grain_sounding[2][neb::MAX_GRAINS]{};
+    std::uint32_t next_grain_id = 0;
+
+    void TrackGrains() {
+        for(unsigned c = 0; c < 2; ++c) {
+            const neb::Grain* grains = engine->DisplayGrains(c);
+            for(int i = 0; i < neb::MAX_GRAINS; ++i) {
+                const neb::Grain& g = grains[i];
+                const bool sounding = g.active && g.delay == 0;
+                if(sounding && (!grain_sounding[c][i] || g.envelope < grain_envelope[c][i])) {
+                    if(++next_grain_id == 0)
+                        next_grain_id = 1; // 0 means none
+                    grain_id[c][i] = next_grain_id;
+                }
+                grain_sounding[c][i] = sounding;
+                grain_envelope[c][i] = g.envelope;
+            }
+        }
+    }
 
     void Destroy() {
         if(engine)
@@ -84,6 +107,12 @@ void LooperEngine::Reset(const FileData* file, const EngineSettings& settings) {
     m.bridge.generation.store(0);
     m.bridge.published = {};
     m.engine = new(m.storage) neb::Engine();
+    for(unsigned c = 0; c < 2; ++c)
+        for(int i = 0; i < neb::MAX_GRAINS; ++i) {
+            m.grain_id[c][i] = 0;
+            m.grain_envelope[c][i] = 0;
+            m.grain_sounding[c][i] = false;
+        }
     neb::Engine& e = *m.engine;
     // The pots before Init(), which starts the smoothing from them.
     for(unsigned i = 0; i < kPrimaryCount; ++i) {
@@ -190,6 +219,7 @@ void LooperEngine::Render(const float* in_left, const float* in_right, float* le
     }
     m.engine->Process(in_left, in_right, left, right, kQuantum);
     ++rendered_;
+    m.TrackGrains(); // reads only (the sound is the core's alone)
     // Volume behind the core. At a steady value the gain is that value exactly, so
     // at 100 % the core's samples pass unchanged.
     for(int i = 0; i < kQuantum; ++i) {
@@ -253,6 +283,7 @@ void LooperEngine::Display(EngineDisplay& display) const {
             // A grain moves `step` frames and its window `increment` a sample.
             dot.speed = static_cast<float>(double(g.step) * kSampleRate);
             dot.phase_rate = static_cast<float>(double(g.increment) * kSampleRate);
+            dot.id = impl_->grain_id[c][i];
         }
     }
     display.grain_count = count;

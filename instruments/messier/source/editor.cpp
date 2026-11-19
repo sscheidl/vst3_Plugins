@@ -15,11 +15,14 @@
 #include "public.sdk/source/vst/vsteditcontroller.h"
 #include "vstgui/lib/cfileselector.h"
 #include "vstgui/lib/cfont.h"
+#include "vstgui/lib/cdrawcontext.h"
 #include "vstgui/lib/cframe.h"
+#include "vstgui/lib/cgraphicspath.h"
 #include "vstgui/lib/cvstguitimer.h"
 #include "vstgui/lib/tasks.h"
 #include "vstgui/lib/controls/cknob.h"
 #include "vstgui/lib/controls/coptionmenu.h"
+#include "vstgui/lib/controls/cslider.h"
 #include "vstgui/lib/controls/ctextlabel.h"
 
 #include <algorithm>
@@ -45,6 +48,65 @@ constexpr CCoord kWidth = kEditorWidth;
 // After the last step of a drag, wait this long before telling the host the
 // project changed. Hosts may do real work for that message.
 constexpr auto kSettleDelay = std::chrono::milliseconds(400);
+constexpr int32_t kAccentTag = -2;
+constexpr int32_t kTrailTag = -3;
+constexpr int32_t kTrailSpan = kTrailMaxMs - kTrailMinMs;
+
+constexpr float TrailNormalized(int32_t milliseconds) {
+    return static_cast<float>(milliseconds - kTrailMinMs) / kTrailSpan;
+}
+
+class AccentSlider : public CSlider {
+    static constexpr double kTrackInset = 4.0;
+
+  public:
+    AccentSlider(const CRect& rect, IControlListener* listener, std::function<void()> restore)
+    // VSTGUI uses a one-pixel handle even without a bitmap.
+    : CSlider(rect, listener, kAccentTag, CPoint(kTrackInset + 0.5, 0),
+              int32_t(rect.getWidth() - 2 * kTrackInset + 1), nullptr, nullptr),
+      restore_(std::move(restore)) {
+        setSliderMode(CSliderMode::FreeClick);
+        setWheelInc(1.0f / kAccentMaxHue);
+        setTooltipText("Accent colour: red to violet. Double-click to restore the preset colour.");
+    }
+
+    CMouseEventResult onMouseDown(CPoint& point, const CButtonState& buttons) override {
+        return Guarded(kMouseEventHandled, [&] {
+            if(buttons.isLeftButton() && buttons.isDoubleClick()) {
+                restore_();
+                return kMouseEventHandled;
+            }
+            return CSlider::onMouseDown(point, buttons);
+        });
+    }
+
+    void draw(CDrawContext* context) override {
+        Guarded([&] {
+            const CRect area = getViewSize();
+            const double y = area.getCenter().y;
+            const double left = area.left + kTrackInset, right = area.right - kTrackInset;
+            const double x = left + (right - left) * getValueNormalized();
+            context->setDrawMode(kAntiAliasing);
+            if(auto track = VSTGUI::owned(context->createGraphicsPath())) {
+                track->addRect(CRect(left, y - 2, right, y + 2));
+                if(auto colours = VSTGUI::owned(CGradient::create(0, 1, AccentColour(0), AccentColour(kAccentMaxHue)))) {
+                    for(const double hue : {60.0, 120.0, 180.0, 240.0})
+                        colours->addColorStop(hue / kAccentMaxHue, AccentColour(hue));
+                    context->fillLinearGradient(track, *colours, CPoint(left, y), CPoint(right, y));
+                }
+            }
+            const CRect thumb(x - 4, y - 6, x + 4, y + 6);
+            context->setFillColor(kWhiteCColor);
+            context->setFrameColor(kBlackCColor);
+            context->setLineWidth(1);
+            context->drawEllipse(thumb, kDrawFilledAndStroked);
+            setDirty(false);
+        });
+    }
+
+  private:
+    std::function<void()> restore_;
+};
 
 struct KnobSpec {
     ParamID id;
@@ -107,6 +169,8 @@ Editor::Editor(EditController* controller, const EditorSettings& settings,
     settings_.details = settings.details;
     settings_.transpose = ClampKeyboardTranspose(settings.transpose);
     settings_.preset = IsGuiPreset(static_cast<std::int32_t>(settings.preset)) ? settings.preset : GuiPreset::kSlate;
+    settings_.accents = settings.accents;
+    settings_.trail_ms = std::clamp(settings.trail_ms, kTrailMinMs, kTrailMaxMs);
     setRect(ScaledSize());
 }
 
@@ -131,6 +195,9 @@ void Editor::ForgetViews() {
     keyboard_view_ = nullptr;
     keyboard_button_ = nullptr;
     details_button_ = nullptr;
+    accent_slider_ = nullptr;
+    trail_knob_ = nullptr;
+    trail_value_ = nullptr;
     octave_down_ = nullptr;
     octave_up_ = nullptr;
     freeze_button_ = nullptr;
@@ -185,7 +252,8 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     applied_zoom_ = 1.0;
     drag_ = DragConstraint{};
     ++window_serial_;
-    skin_ = std::make_shared<const Skin>(settings_.preset);
+    skin_ = std::make_shared<Skin>(settings_.preset);
+    skin_->SetAccent(settings_.Accent());
     const Skin& skin = *skin_;
     const SkinColours& colours = skin.Colours();
 
@@ -368,6 +436,28 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     details_button_->SetFlat(true);
     details_button_->setTooltipText("Details: the secondary knobs (pan, displacement, pitch and size random, mask)");
 
+    panel_->AddLabel(Box(L::kAccentLeft, L::kSmallNameTop, L::kAccentRight, L::kSmallKnobTop),
+                     "HUE", PanelView::LabelKind::kSmallKnob);
+    accent_slider_ = Add(new AccentSlider(Box(L::kAccentLeft, L::kSmallKnobTop, L::kAccentRight,
+                                             L::kSmallKnobTop + L::kSmallKnobSize),
+                                         this, [this] { SetAccent(kPresetAccent); }));
+    accent_slider_->setVisible(settings_.details);
+
+    const double trail_left = L::kTrailCentre - L::kSmallKnobSize / 2;
+    const double trail_right = L::kTrailCentre + L::kSmallKnobSize / 2;
+    panel_->AddLabel(Box(trail_left, L::kSmallNameTop, trail_right, L::kSmallKnobTop),
+                     "TRAIL", PanelView::LabelKind::kSmallKnob);
+    trail_knob_ = Add(new MetalKnob(Box(trail_left, L::kSmallKnobTop, trail_right, L::kSmallKnobTop + L::kSmallKnobSize),
+                                    this, kTrailTag, true, false));
+    trail_knob_->setDefaultValue(TrailNormalized(kTrailDefaultMs));
+    trail_knob_->setWheelInc(10.0f / kTrailSpan);
+    trail_knob_->setTooltipText("Trail: how long the grain paths glow (display only)");
+    trail_value_ = Add(MakeLabel(Box(trail_left, L::kSmallValueTop, trail_right, L::kSmallValueTop + 14),
+                                 "", small_value_font, colours.value, kCenterText));
+    trail_knob_->setVisible(settings_.details);
+    trail_value_->setVisible(settings_.details);
+    ApplyTrail();
+
     // Freeze and Reset beside Volume.
     const CCoord column = L::kButtonColumnLeft;
     const bool frozen = controller && IsOn(controller->getParamNormalized(kParamFreeze));
@@ -405,6 +495,14 @@ void Editor::ApplySkin() noexcept {
     if(!frame || !skin_)
         return;
     const SkinColours colours = skin_->Colours();
+    Guarded([&] {
+        if(accent_slider_) {
+            double hue = 0, saturation = 0, brightness = 0;
+            colours.control.toHSV(hue, saturation, brightness);
+            accent_slider_->setValueNormalized(static_cast<float>(std::clamp(hue / kAccentMaxHue, 0.0, 1.0)));
+            accent_slider_->invalid();
+        }
+    });
     // Every view of the frame that draws with the skin gets it; each on its own (MS-R41).
     Guarded([&] {
         frame->forEachChild([&](CView* view) {
@@ -439,6 +537,10 @@ void Editor::ApplySkin() noexcept {
             if(knob.value)
                 knob.value->setFontColor(colours.value);
         });
+    Guarded([&] {
+        if(trail_value_)
+            trail_value_->setFontColor(colours.value);
+    });
     Guarded([&] {
         if(file_name_)
             file_name_->setFontColor(colours.text);
@@ -528,6 +630,14 @@ void Editor::LayOut(int32 width, int32 height) {
         knob.knob->setVisible(settings_.details);
         if(knob.value)
             knob.value->setVisible(settings_.details);
+    }
+    const std::array<CView*, 3> display_controls{accent_slider_, trail_knob_, trail_value_};
+    for(CView* view : display_controls) {
+        if(!view)
+            continue;
+        if(!settings_.details && frame->getFocusView() == view)
+            frame->setFocusView(nullptr);
+        view->setVisible(settings_.details);
     }
     if(details_button_)
         details_button_->SetOn(settings_.details);
@@ -633,12 +743,38 @@ void Editor::SetGuiPreset(GuiPreset preset) {
     if(frame) {
         // The new look first: if it cannot be made, nothing changes. Then every view gets
         // it; only then the setting (MS-R41).
-        auto skin = std::make_shared<const Skin>(preset);
+        auto skin = std::make_shared<Skin>(preset);
+        skin->SetAccent(settings_.accents[static_cast<std::size_t>(preset)]);
         skin_ = std::move(skin);
         ApplySkin();
     }
     settings_.preset = preset;
     UserChanged();
+}
+
+void Editor::SetAccent(std::int32_t hue) {
+    if(!IsAccent(hue) || hue == settings_.Accent())
+        return;
+    settings_.accents[static_cast<std::size_t>(settings_.preset)] = hue;
+    if(frame && skin_ && skin_->Preset() == ShownPreset(settings_.preset)) {
+        skin_->SetAccent(hue);
+        ApplySkin();
+    }
+    UserChanged();
+}
+
+void Editor::ApplyTrail() {
+    if(map_view_)
+        map_view_->SetTrail(settings_.trail_ms);
+    if(trail_knob_) {
+        trail_knob_->setValueNormalized(TrailNormalized(settings_.trail_ms));
+        trail_knob_->invalid();
+    }
+    if(trail_value_) {
+        char text[16];
+        std::snprintf(text, sizeof text, "%d ms", static_cast<int>(settings_.trail_ms));
+        trail_value_->setText(text);
+    }
 }
 
 SharedPointer<COptionMenu> MakePresetMenu(GuiPreset current) {
@@ -857,6 +993,8 @@ void Editor::ApplySettings(const EditorSettings& settings) {
     const int transpose = ClampKeyboardTranspose(settings.transpose);
     const GuiPreset preset =
         IsGuiPreset(static_cast<std::int32_t>(settings.preset)) ? settings.preset : GuiPreset::kSlate;
+    const std::int32_t old_accent = settings_.Accent();
+    settings_.accents = settings.accents;
     if(preset != settings_.preset) {
         // A loaded project brings its look. If it cannot be made, the old one stays on
         // screen, the setting is the project's, and the rest below is taken all the same
@@ -864,10 +1002,19 @@ void Editor::ApplySettings(const EditorSettings& settings) {
         settings_.preset = preset;
         if(frame)
             Guarded([&] {
-                auto skin = std::make_shared<const Skin>(preset);
+                auto skin = std::make_shared<Skin>(preset);
+                skin->SetAccent(settings_.Accent());
                 skin_ = std::move(skin);
                 ApplySkin();
             });
+    } else if(frame && skin_ && skin_->Preset() == ShownPreset(preset) && old_accent != settings_.Accent()) {
+        skin_->SetAccent(settings_.Accent());
+        ApplySkin();
+    }
+    const std::int32_t trail = std::clamp(settings.trail_ms, kTrailMinMs, kTrailMaxMs);
+    if(trail != settings_.trail_ms) {
+        settings_.trail_ms = trail;
+        Guarded([&] { ApplyTrail(); });
     }
     if(zoom == settings_.zoom && settings.keyboard == settings_.keyboard
        && settings.details == settings_.details && transpose == settings_.transpose)
@@ -939,7 +1086,23 @@ void Editor::FinishEdits() {
 
 void Editor::valueChanged(CControl* control) {
     Guarded([&] {
-        if(!controller || !control)
+        if(!control)
+            return;
+        if(control == accent_slider_) {
+            SetAccent(static_cast<std::int32_t>(std::lround(control->getValueNormalized() * kAccentMaxHue)));
+            return;
+        }
+        if(control == trail_knob_) {
+            const auto milliseconds =
+                kTrailMinMs + static_cast<int32_t>(std::lround(control->getValueNormalized() * kTrailSpan));
+            if(milliseconds != settings_.trail_ms) {
+                settings_.trail_ms = milliseconds;
+                UserChanged();
+                ApplyTrail();
+            }
+            return;
+        }
+        if(!controller)
             return;
         const auto id = static_cast<ParamID>(control->getTag());
         const ParamValue normalized = control->getValueNormalized();
@@ -947,6 +1110,16 @@ void Editor::valueChanged(CControl* control) {
         controller->performEdit(id, normalized);
     });
     Animate(); // 0.2.1: the plate moves on while the host holds back the timer
+}
+
+void Editor::beginEdit(int32_t tag) {
+    if(tag != kAccentTag && tag != kTrailTag)
+        VSTGUIEditor::beginEdit(tag);
+}
+
+void Editor::endEdit(int32_t tag) {
+    if(tag != kAccentTag && tag != kTrailTag)
+        VSTGUIEditor::endEdit(tag);
 }
 
 void Editor::SetFreeze(bool on) {

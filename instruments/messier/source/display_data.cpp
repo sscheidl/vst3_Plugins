@@ -9,7 +9,7 @@ namespace messier {
 
 static_assert(std::is_trivially_copyable_v<EngineDisplay>);
 static_assert(std::is_trivially_copyable_v<WaveOverview>);
-static_assert(sizeof(EngineDisplay) == 456, "no padding: the bytes travel to the controller");
+static_assert(sizeof(EngineDisplay) == 536, "no padding: the bytes travel to the controller");
 static_assert(sizeof(WaveOverview) == 8216, "no padding: the bytes travel to the controller");
 
 namespace {

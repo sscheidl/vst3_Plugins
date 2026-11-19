@@ -9,4 +9,4 @@
 #define stringPluginName "Messier"
 
 // Keep equal to the version in ../CMakeLists.txt and ../components.json.
-#define FULL_VERSION_STR "0.2.4"
+#define FULL_VERSION_STR "0.2.5"

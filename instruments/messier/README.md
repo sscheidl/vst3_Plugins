@@ -9,12 +9,12 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 0.2.4, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 0.2.5, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.2.4:** builds, passes Steinberg's validator, tested automatically (bit for
+**Status 0.2.5:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
@@ -41,7 +41,9 @@ user's design round for Slate ([report](docs/BUILD_REPORT_0.2.2.md)); 0.2.3 fixe
 probe checks of 0.2.2 showed and adds the grains' rays and PITCH tint
 ([report](docs/BUILD_REPORT_0.2.3.md)). Codex released 0.2.3 for the DAW test
 ([check](docs/CODEX_REVIEW_0.2.3.md)); 0.2.4 fixes its two findings and brings the GUI
-standard with all four presets ([report](docs/BUILD_REPORT_0.2.4.md)). The user
+standard with all four presets ([report](docs/BUILD_REPORT_0.2.4.md)). Codex released 0.2.4
+as well ([check](docs/CODEX_REVIEW_0.2.4.md)); 0.2.5 fixes its three findings, brings HUE and
+TRAIL and the presets Plum and Gold ([report](docs/BUILD_REPORT_0.2.5.md)). The user
 has tried 0.1.7, 0.1.8 and 0.2.0 in Studio One
 (operation and sound). The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
@@ -56,7 +58,7 @@ and Freeze; a grid of crosses marks the seconds and the
 quarters of the panorama; the loop (following START and SIZE at once),
 the spray range around the playhead and the sounding grains are drawn from the engine's
 real state. Each grain is a shooting star: its head flares with the grain's window and
-burns out, its path through the file glows on for 0.3 s (across only; down is its
+burns out, its path through the file glows on for 0.45 s by default (across only; down is its
 panorama, left at the top; since 0.2.2 also a while after the grain ended). Since 0.2.3
 bright heads carry four fine rays, and PITCH tints halo, rays and tails (rose down,
 blue-violet up, warm at 0). Between the
@@ -65,7 +67,8 @@ engine's displays playhead and grains move on at the speeds the engine reports (
 snowflake; a click on the snowflake ends Freeze.
 
 Since 0.2.4 the window follows the GUI standard of 2026-11-19, one layout for all four
-GUI presets (Slate in graphite, the default; Silver; Copper; Photo plate): the header
+GUI presets (Slate in graphite, the default; Silver; since 0.2.5 Plum and Gold in the places
+of Copper and Photo plate): the header
 holds the brand, LOAD and the file, KEYS, STOP and the size and preset menus. The
 primary knobs stand in three groups (SPRAY, SPEED, LOOP SIZE; DENSITY, PITCH, OVERLAP,
 WINDOW; BLEND, VOLUME) with FREEZE and RESET beside them (RESET: every knob and START to
@@ -202,7 +205,14 @@ keeps its aspect ratio, from 50 to 200 %. The size is saved with the song.
 **GUI preset:** the palette symbol in the header chooses the look (since 0.2.0); saved
 with the song. A song of 0.1.x opens with Slate.
 
-**LATCH** (under SPRAY since 0.2.2; dimmed while the keyboard is hidden): a key struck on the screen keyboard stays held after the mouse
+**Accent colour:** open DETAILS and drag the HUE slider to change the labels,
+START fill and held key together. Double-click it to restore the preset's colour. The
+project remembers each preset's accent.
+
+**Trail:** the TRAIL knob on the right of DETAILS sets the grain path's fade time from
+150 to 900 ms. Its default is 450 ms. It affects the display and is saved with the project.
+
+**LATCH** (in the keyboard row since 0.2.4; hidden with the keyboard): a key struck on the screen keyboard stays held after the mouse
 is let go, so the pitch stays changed. Clicking another key moves the hold there;
 clicking the held key again, switching LATCH off or closing the window lets it go.
 LATCH is not saved with the song.

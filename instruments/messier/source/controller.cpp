@@ -258,7 +258,10 @@ tresult PLUGIN_API Controller::getState(IBStream* state) {
        || !stream.writeInt8(editor_.keyboard ? 1 : 0) || !stream.writeInt32(editor_.transpose)
        || !stream.writeInt32(static_cast<int32>(editor_.preset)) || !stream.writeInt8(editor_.details ? 1 : 0))
         return kResultFalse;
-    return kResultOk;
+    for(const int32 accent : editor_.accents)
+        if(!stream.writeInt32(accent))
+            return kResultFalse;
+    return stream.writeInt32(editor_.trail_ms) ? kResultOk : kResultFalse;
 }
 
 tresult PLUGIN_API Controller::setState(IBStream* state) {
@@ -271,6 +274,7 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
     int32 transpose = kKeyboardDefaultTranspose;
     int32 preset = static_cast<int32>(GuiPreset::kSlate); // version 1 (before 0.2.0)
     int8 details = 0;                                     // versions 1 and 2 (before 0.2.4)
+    EditorSettings settings;
     if(!stream.readInt32(version) || version < 1 || version > kControllerStateVersion
        || !stream.readDouble(zoom) || !stream.readInt8(keyboard) || !stream.readInt32(transpose)
        || (version >= 2 && !stream.readInt32(preset)) || (version >= 3 && !stream.readInt8(details)))
@@ -278,11 +282,19 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
     if(!std::isfinite(zoom) || (keyboard != 0 && keyboard != 1) || (details != 0 && details != 1) || transpose % 12 != 0
        || transpose < -kKeyboardTransposeLimit || transpose > kKeyboardTransposeLimit || !IsGuiPreset(preset))
         return kResultFalse;
-    editor_.zoom = ClampEditorZoom(zoom);
-    editor_.keyboard = keyboard != 0;
-    editor_.transpose = transpose;
-    editor_.preset = static_cast<GuiPreset>(preset);
-    editor_.details = details != 0;
+    if(version >= 4)
+        for(int32& accent : settings.accents)
+            if(!stream.readInt32(accent) || !IsAccent(accent))
+                return kResultFalse;
+    if(version >= 5 && (!stream.readInt32(settings.trail_ms) || settings.trail_ms < kTrailMinMs
+                       || settings.trail_ms > kTrailMaxMs))
+        return kResultFalse;
+    settings.zoom = ClampEditorZoom(zoom);
+    settings.keyboard = keyboard != 0;
+    settings.transpose = transpose;
+    settings.preset = static_cast<GuiPreset>(preset);
+    settings.details = details != 0;
+    editor_ = settings;
     // The settings are taken; an open window shows them when it can.
     ForEachEditor([&](Editor& editor) { editor.ApplySettings(editor_); });
     return kResultOk;

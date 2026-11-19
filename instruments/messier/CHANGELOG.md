@@ -1,5 +1,20 @@
 # Changes
 
+## 0.2.5 (2026-11-19)
+
+Window only; the sound, the parameters and the processor's state are unchanged. Details
+in `docs/BUILD_REPORT_0.2.5.md`.
+
+* HUE and TRAIL (the user's worktree, kept as it was): a spectrum slider for the accent
+  colour per preset and a knob for the grains' fade time (150 to 900 ms, 450 by
+  default), both under DETAILS; the controller's state is version 5.
+* Plum and Gold take the places and stored IDs of Copper and Photo plate: 32 new bitmaps
+  and the package's four palettes; Gold's glass gets faint lines across.
+* MS-R55: each grain carries the number of its start (engine 0.1.6, the display 536
+  bytes); the window matches grains by it.
+* MS-R56: the START thumb takes the core's clamp to the last frame.
+* MS-R57: a grain predicted to have ended keeps fading when the display comes to rest.
+
 ## 0.2.4 (2026-11-19)
 
 Window only; the sound, the parameters and the processor's state are unchanged. Details

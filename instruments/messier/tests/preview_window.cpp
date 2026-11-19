@@ -178,14 +178,16 @@ int main(int argc, char** argv) {
     const auto wave = MakeWave();
     const Case cases[] = {
         {"slate_keys_lowest", true, -kKeyboardTransposeLimit, true, false, false, -3.0},
-        {"slate_details_highest_stop", true, kKeyboardTransposeLimit, false, true, false, 0.0, false,
-         GuiPreset::kSlate, true},
-        {"slate_nokeys_freeze", false, kKeyboardDefaultTranspose, true, false, true, 2.0},
+        {"slate_highest_stop", true, kKeyboardTransposeLimit, false, true, false, 0.0},
         {"slate_dense_pitch_down", true, kKeyboardDefaultTranspose, false, false, false, -1.5, true},
-        {"silver_details", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kSilver, true},
-        {"copper_details", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kCopper, true},
-        {"plate_details", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kPhotoPlate,
-         true},
+        {"slate_open", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kSlate, true},
+        {"slate_closed", false, kKeyboardDefaultTranspose, false, false, true, 2.0, false, GuiPreset::kSlate, false},
+        {"silver_open", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kSilver, true},
+        {"silver_closed", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kSilver, false},
+        {"plum_open", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kPlum, true},
+        {"plum_closed", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kPlum, false},
+        {"gold_open", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kGold, true},
+        {"gold_closed", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kGold, false},
     };
     for(const Case& c : cases) {
         controller->setParamNormalized(kParamStop, c.stop ? 1.0 : 0.0);

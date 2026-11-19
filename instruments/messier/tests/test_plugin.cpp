@@ -1683,7 +1683,7 @@ void TestWindow021() {
 // 0.2.2, the user's design round: the nebula drifts with the signed tempo the display
 // carries (forward right, backward left, at rest when frozen, stopped or without tempo,
 // never turned round by the playhead's jump at the loop's end), eased; ended grains glow
-// on for kTrail, and another file clears them; the layout keeps the window's size.
+// on for the selected trail time, and another file clears them; the layout keeps the window's size.
 void TestWindow022() {
     using Clock = MapView::Clock;
     const auto ms = [](int n) { return std::chrono::milliseconds(n); };
@@ -1787,8 +1787,15 @@ void TestWindow022() {
         next.grains[0].phase = 0.56f;
         map->ShowAt(next, nullptr, t + ms(30));
         CHECK(map->Afterglows(t + ms(30)) == 1);
-        CHECK(map->Afterglows(t + ms(10 + 299)) == 1); // kTrail: 0.3 s after it ended
-        CHECK(map->Afterglows(t + ms(10 + 301)) == 0);
+        CHECK(map->Afterglows(t + ms(10 + 449)) == 1); // default: 0.45 s after it ended
+        CHECK(map->Afterglows(t + ms(10 + 451)) == 0);
+        map->SetTrail(kTrailMinMs);
+        CHECK(map->Afterglows(t + ms(10 + 149)) == 1);
+        CHECK(map->Afterglows(t + ms(10 + 151)) == 0);
+        map->SetTrail(kTrailMaxMs);
+        CHECK(map->Afterglows(t + ms(10 + 899)) == 1);
+        CHECK(map->Afterglows(t + ms(10 + 901)) == 0);
+        map->SetTrail(kTrailDefaultMs);
         // 0.2.3 (Codex' check): a running grain with the same pan, speed and window rate
         // but elsewhere in its window does not hide the one that ended.
         auto twin = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
@@ -1818,7 +1825,7 @@ void TestWindow022() {
         close->ShowAt(e, nullptr, t + ms(30));
         CHECK(close->Afterglows(t + ms(30)) == 1);
         // MS-R54 (0.2.4): about 100 ms left and no display after it; the predicted end fades
-        // on the wall clock and is gone kTrail after it.
+        // on the wall clock and is gone after the chosen trail time.
         auto alone = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
         EngineDisplay f = d;
         f.grain_count = 1;
@@ -1826,7 +1833,81 @@ void TestWindow022() {
         alone->ShowAt(f, nullptr, t);
         CHECK(alone->EndedFor(0, t + ms(50)) < 0);
         CHECK(std::abs(alone->EndedFor(0, t + ms(350)) - 0.25) < 1e-6);
-        CHECK(alone->EndedFor(0, t + ms(450)) >= MapView::kTrail);
+        CHECK(alone->EndedFor(0, t + ms(450)) < kTrailDefaultMs / 1000.0);
+        CHECK(alone->EndedFor(0, t + ms(560)) >= kTrailDefaultMs / 1000.0);
+        // MS-R57 (0.2.5): 60 ms left, an identical display after 125 ms sets the rest; the
+        // end predicted before stays and keeps fading on the wall clock.
+        auto rests = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
+        EngineDisplay q = d;
+        q.grain_count = 1;
+        q.grains[0] = {1000.0f, 0.2f, 0.88f, 48000.0f, 2.0f};
+        rests->ShowAt(q, nullptr, t);
+        rests->ShowAt(q, nullptr, t + ms(125));
+        CHECK(std::abs(rests->EndedFor(0, t + ms(130)) - 0.07) < 1e-6);
+        CHECK(rests->EndedFor(0, t + ms(60 + 451)) >= kTrailDefaultMs / 1000.0);
+        auto later = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
+        q.grains[0].phase = 0.2f; // 0.4 s left: resting, it does not end
+        later->ShowAt(q, nullptr, t);
+        later->ShowAt(q, nullptr, t + ms(125));
+        CHECK(later->EndedFor(0, t + ms(900)) < 0);
+        // MS-R55 (0.2.5): the engine's own displays (Codex' case: a mono file of 96,000
+        // frames, DENSITY 0.85, OVERLAP 0.55, DISPLACE 0.08, after 111 and 129 quanta).
+        // Every grain of the first that is gone from the second and has ended by then
+        // glows; the grains carry the number of their start.
+        {
+            const FileImage image = MakeImage(96000, 48000, 1, 31);
+            FileData file;
+            file.frames = image.frames;
+            file.rate = image.rate;
+            file.channels = image.channels;
+            file.sequence = 1;
+            file.pcm.reset(new std::int16_t[image.pcm.size()]);
+            std::copy(image.pcm.begin(), image.pcm.end(), file.pcm.get());
+            EngineSettings settings;
+            settings.control[static_cast<unsigned>(Control::Density)] = 0.85f;
+            settings.control[static_cast<unsigned>(Control::Overlap)] = 0.55f;
+            settings.control[static_cast<unsigned>(Control::Displacement)] = 0.08f;
+            LooperEngine engine;
+            engine.Reset(&file, settings);
+            static const float silence[LooperEngine::kQuantum] = {};
+            float l[LooperEngine::kQuantum], r[LooperEngine::kQuantum];
+            EngineDisplay first, second;
+            for(int k = 0; k < 129; ++k) {
+                engine.Render(silence, silence, l, r);
+                if(k + 1 == 111)
+                    engine.Display(first);
+            }
+            engine.Display(second);
+            const double audio = (second.rendered - first.rendered) * LooperEngine::kQuantum / LooperEngine::kSampleRate;
+            int ended = 0;
+            for(std::uint32_t i = 0; i < first.grain_count; ++i) {
+                const GrainDot& g = first.grains[i];
+                CHECK(g.id != 0);
+                bool there = false;
+                for(std::uint32_t k = 0; k < second.grain_count; ++k)
+                    there = there || second.grains[k].id == g.id;
+                ended += !there && g.phase_rate > 0 && (1.0 - g.phase) / g.phase_rate <= audio ? 1 : 0;
+            }
+            auto engine_map = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
+            engine_map->ShowAt(first, nullptr, t);
+            engine_map->ShowAt(second, nullptr, t + ms(24));
+            CHECK(ended > 0 && engine_map->Afterglows(t + ms(24)) == static_cast<std::size_t>(ended));
+            std::printf("engine displays after 111 and 129 quanta: %d grains ended between them, each glows\n", ended);
+        }
+        // MS-R56 (0.2.5): START at 100 % of a file of five frames: the core clamps the loop
+        // to start at frame 4, the thumb stands there too.
+        {
+            auto view = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(8, 54, 872, 396), layout::kBezelEdge);
+            EngineDisplay g = d;
+            g.frames = 5;
+            g.loop_start = 4;
+            g.loop_length = 1;
+            g.playhead = 4;
+            g.grain_count = 0;
+            view->ShowAt(g, nullptr, t);
+            view->SetStart(1.0);
+            CHECK(std::abs(view->StartX() - view->FrameX(4)) < 1e-9);
+        }
         // START (0.2.4): the thumb stands on the left loop bracket, at the start, the middle
         // and near the end of the file.
         for(const double start : {0.0, 0.5, 0.98}) {
@@ -1867,7 +1948,7 @@ void TestWindow022() {
     std::printf("window 0.2.2 design: the nebula drifts with the signed tempo, eased, at rest when frozen or "
                 "stopped, not turned by a loop's turn; ended grains glow on for %.1f s, a new file clears "
                 "them; header group, LATCH/KEYS, the triangle's lane; control and marker colours apart\n",
-                MapView::kTrail);
+                kTrailDefaultMs / 1000.0);
 }
 
 // The GUI presets (0.2.0): the bitmaps the window asks for are in the plug-in's
@@ -1897,8 +1978,8 @@ void TestGuiPresets() {
         }
     }
     CHECK(checked == 96); // 0.2.4: all four presets, 12 images each (4 shared), 1x and 2x
-    CHECK(SkinImageFileName(GuiPreset::kPhotoPlate, SkinImageId::kChassis, 2) == "messier_plate_chassis@2x.png");
-    CHECK(SkinImageFileName(GuiPreset::kCopper, SkinImageId::kNebulaA, 1) == "messier_nebula_a@1x.png");
+    CHECK(SkinImageFileName(GuiPreset::kGold, SkinImageId::kChassis, 2) == "messier_gold_chassis@2x.png");
+    CHECK(SkinImageFileName(GuiPreset::kPlum, SkinImageId::kNebulaA, 1) == "messier_nebula_a@1x.png");
     for(std::int32_t p = 0; p < kGuiPresetCount; ++p) // 0.2.4: all delivered
         CHECK(PresetInfo(static_cast<GuiPreset>(p)).delivered && ShownPreset(static_cast<GuiPreset>(p)) == static_cast<GuiPreset>(p));
     CHECK(ShownPreset(static_cast<GuiPreset>(9)) == GuiPreset::kSlate);
@@ -1911,7 +1992,8 @@ void TestGuiPresets() {
     IPtr<Controller> controller = owned(new Controller());
     CHECK(controller->initialize(app) == kResultOk);
     auto load = [&](std::int32_t version, double zoom, std::int8_t keys, std::int32_t transpose, const std::int32_t* preset,
-                    std::int8_t details = -1) {
+                    std::int8_t details = -1, const std::array<std::int32_t, kGuiPresetCount>* accents = nullptr,
+                    std::int32_t trail_ms = -1) {
         MemoryStream stream;
         int32 written = 0;
         stream.write(&version, 4, &written);
@@ -1922,29 +2004,54 @@ void TestGuiPresets() {
             stream.write(const_cast<std::int32_t*>(preset), 4, &written);
         if(details >= 0)
             stream.write(&details, 1, &written);
+        if(accents)
+            for(std::int32_t hue : *accents)
+                stream.write(&hue, 4, &written);
+        if(trail_ms >= 0)
+            stream.write(&trail_ms, 4, &written);
         stream.seek(0, IBStream::kIBSeekSet, nullptr);
         return controller->setState(&stream);
     };
-    const std::int32_t copper = 2, unknown = 7;
-    CHECK(load(2, 1.25, 0, 12, &copper) == kResultOk);
-    CHECK(controller->WindowSettings().preset == GuiPreset::kCopper && controller->WindowSettings().zoom == 1.25);
+    const std::int32_t plum = 2, unknown = 7;
+    CHECK(load(2, 1.25, 0, 12, &plum) == kResultOk);
+    CHECK(controller->WindowSettings().preset == GuiPreset::kPlum && controller->WindowSettings().zoom == 1.25);
     MemoryStream own;
     CHECK(controller->getState(&own) == kResultOk);
     int64 length = 0;
     own.seek(0, IBStream::kIBSeekEnd, &length);
-    CHECK(length == 22); // version 3 (0.2.4): DETAILS as one byte at the end
+    CHECK(length == 42); // version 5 appends trail milliseconds to the version 4 state
     CHECK(!controller->WindowSettings().details); // a song of 0.2.3: DETAILS closed
-    CHECK(load(3, 1.0, 1, 0, &copper, 1) == kResultOk && controller->WindowSettings().details);
+    CHECK(load(3, 1.0, 1, 0, &plum, 1) == kResultOk && controller->WindowSettings().details);
     CHECK(load(1, 1.0, 1, -12, nullptr) == kResultOk); // a song of 0.1.x
     CHECK(controller->WindowSettings().preset == GuiPreset::kSlate && controller->WindowSettings().keyboard);
     CHECK(load(2, 1.0, 1, 0, &unknown) == kResultFalse);
     CHECK(load(2, 1.0, 1, 0, nullptr) == kResultFalse); // version 2 without its preset
-    CHECK(load(3, 1.0, 1, 0, &copper) == kResultFalse); // version 3 without DETAILS
-    CHECK(load(4, 1.0, 1, 0, &copper, 0) == kResultFalse);
+    CHECK(load(3, 1.0, 1, 0, &plum) == kResultFalse); // version 3 without DETAILS
+    CHECK(load(4, 1.0, 1, 0, &plum, 0) == kResultFalse);
     CHECK(controller->WindowSettings().preset == GuiPreset::kSlate);
+    const std::array<std::int32_t, kGuiPresetCount> accents{0, kPresetAccent, 120, kAccentMaxHue};
+    CHECK(load(4, 1.0, 1, 0, &plum, 0, &accents) == kResultOk);
+    CHECK(controller->WindowSettings().accents == accents && controller->WindowSettings().trail_ms == kTrailDefaultMs);
+    auto invalid = accents;
+    invalid.back() = kAccentMaxHue + 1;
+    CHECK(load(4, 1.0, 1, 0, &plum, 1, &invalid) == kResultFalse);
+    CHECK(controller->WindowSettings().accents == accents && !controller->WindowSettings().details);
+    CHECK(load(5, 1.0, 1, 0, &plum, 1, &accents) == kResultFalse);
+    CHECK(load(5, 1.0, 1, 0, &plum, 1, &accents, kTrailMaxMs + 1) == kResultFalse);
+    CHECK(!controller->WindowSettings().details && controller->WindowSettings().trail_ms == kTrailDefaultMs);
+    CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents, kTrailMinMs) == kResultFalse);
+    CHECK(load(5, 1.0, 1, 0, &plum, 1, &accents, 720) == kResultOk);
+    MemoryStream with_trail;
+    CHECK(controller->getState(&with_trail) == kResultOk);
+    CHECK(load(3, 1.0, 1, 0, &plum, 0) == kResultOk);
+    CHECK(controller->WindowSettings().Accent() == kPresetAccent);
+    CHECK(controller->WindowSettings().trail_ms == kTrailDefaultMs);
+    with_trail.seek(0, IBStream::kIBSeekSet, nullptr);
+    CHECK(controller->setState(&with_trail) == kResultOk && controller->WindowSettings().accents == accents);
+    CHECK(controller->WindowSettings().trail_ms == 720);
     CHECK(controller->terminate() == kResultOk);
     std::printf("gui presets: the bitmaps of all four presets in the resources at the brief's sizes; the "
-                "preset and DETAILS saved with the window (state 3), states 1 and 2 read\n");
+                "preset, DETAILS, accent hues and trail time saved with the window; states 1 to 4 read\n");
 }
 
 void TestProjectBackpressure() {
