@@ -387,8 +387,9 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     setIdleRate(static_cast<int32>(kDisplayInterval.count()));
     LayOut(rect.getWidth(), rect.getHeight());
     Resize();
-    if(callbacks_.poll)
-        callbacks_.poll();
+    // MS-R48: the first request goes the delayed way too, after the SDK has finished
+    // opening the window; a reply may make the host close it.
+    AnimateLater();
     return true;
 }
 

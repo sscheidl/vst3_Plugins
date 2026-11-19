@@ -3,9 +3,8 @@
 Dies ist ein Code-Review des eigenen Audio-Plugins des Nutzers (VST3, Granular-Looper).
 Du liest Quelltext, baust und lässt Tests laufen; sonst nichts.
 
-Zu 0.2.2 hast du keinen Bericht geschrieben. Dein Prüfprogramm
-`.work/messier-review/checks/review_checks.cpp` (`Review022`) lief aber durch und zeigte
-fünf Fehler im Fenster. 0.2.3 behebt sie und setzt Punkt 13 des Designauftrags um
+Dein Bericht zu 0.2.2 ([CODEX_REVIEW_0.2.2.md](CODEX_REVIEW_0.2.2.md)) gab keine Freigabe:
+MS-R48 (P2) und MS-R49 bis MS-R52 (P3). 0.2.3 behebt alle fünf und setzt Punkt 13 des Designauftrags um
 (Beugungsstrahlen der Grains, Färbung nach PITCH). Der Klang ist unverändert. Einzelheiten
 stehen im [Build-Bericht 0.2.3](BUILD_REPORT_0.2.3.md) (Englisch).
 
@@ -19,7 +18,8 @@ stehen im [Build-Bericht 0.2.3](BUILD_REPORT_0.2.3.md) (Englisch).
 
 ## Prüfpunkte
 
-1. **Deine fünf Punkte zu 0.2.2:** behoben, teilweise oder offen? Lass dein Prüfprogramm
+1. **MS-R48 bis MS-R52:** behoben, teilweise oder offen? MS-R48: `Editor::OpenUnchecked`
+   ruft jetzt `AnimateLater` statt direkt `poll`. Lass dein Prüfprogramm
    gegen 0.2.3 laufen; wo eine Prüfung jetzt anders ausgehen muss, sag, ob das neue
    Verhalten stimmt.
    * Nachleuchten: `MapView::ShowAt` mit `kSameGrainSlack`.
@@ -43,7 +43,7 @@ stehen im [Build-Bericht 0.2.3](BUILD_REPORT_0.2.3.md) (Englisch).
 ## Ergebnis
 
 * Urteil: FREIGABE oder KEINE FREIGABE für den DAW-Test.
-* Nachprüfung der fünf Punkte als Tabelle.
-* Neue Befunde ab **MS-R48**, jeweils mit Schwere P0 bis P3, Beleg (Datei:Zeile),
+* Nachprüfung von MS-R48 bis MS-R52 als Tabelle.
+* Neue Befunde ab **MS-R53**, jeweils mit Schwere P0 bis P3, Beleg (Datei:Zeile),
   Auslösung, bewiesen oder vermutet, minimaler Korrektur.
 * Schreib die Ergebnisdatei früh an und ergänze sie, damit bei einem Abbruch etwas bleibt.

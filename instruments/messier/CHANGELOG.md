@@ -4,7 +4,9 @@
 
 Window only; the sound is unchanged. Details in `docs/BUILD_REPORT_0.2.3.md`.
 
-* Codex' probe checks of 0.2.2 (it wrote no report): an ended grain keeps its glow
+* MS-R48 (P2, Codex' review of 0.2.2): the window's first display request no longer runs
+  while the SDK is still opening the window.
+* MS-R49 to MS-R52 (Codex' probe checks and review of 0.2.2): an ended grain keeps its glow
   although a running grain has the same pan, speed and window rate; a late waveform
   overview no longer restarts the playhead's prediction and the drift; without new
   displays the nebula's drift comes to rest after 0.5 s; the nebula's tiles no longer

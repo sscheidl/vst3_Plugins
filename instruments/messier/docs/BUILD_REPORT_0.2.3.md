@@ -7,10 +7,10 @@ engine, the processor and the sound are unchanged.
 
 ### Codex' probe checks of 0.2.2
 
-Codex wrote no `CODEX_REVIEW_0.2.2.md`. It built 0.2.2 in `.work/messier-review/`, ran
-ctest (6/6) and ran `make_metal_bitmaps.py` twice: the hashes are the same in both runs
-and match `resource/gui`. Its probe program (`checks/review_checks.cpp`, `Review022`)
-passed every check, so each of these points is proven:
+Codex' review of 0.2.2 (`CODEX_REVIEW_0.2.2.md`, KEINE FREIGABE) came in late. Before
+that, its probe program (`checks/review_checks.cpp`, `Review022`) had already shown the
+five points below; in the review they are MS-R49 to MS-R52. Its bitmap runs gave the same
+hashes as `resource/gui`. The review's only other finding is MS-R48 (P2), see below.
 
 | Point | Defect in 0.2.2 | Fix in 0.2.3 |
 | --- | --- | --- |
@@ -19,6 +19,12 @@ passed every check, so each of these points is proven:
 | 3 | Without new displays, the drift kept moving at full speed. | `AdvanceDrift` heads for 0 when no display came for `kDriftStaleAfter` (0.5 s). |
 | 4 | The nebula's tile period swelled with the cloud, so after a long drift a tile jumped (about 95 units at an offset of 10000). | The tile period no longer swells. Each nebula's place is kept as a share of its period (`drift_a_`, `drift_b_`, wrapped to [0, 1)), so neither the swell nor the old 1e6 wrap can make a jump. |
 | 5 | `ReadDisplayBytes` accepted a grain window rate near 0; the grain's end lay beyond the clock's range (no crash proven). | The reader refuses a window rate between 0 and 1e-3 (the core's longest grain is 8 s, a rate of 0.125). `ShowAt` compares in seconds before it makes a time point. |
+
+### MS-R48 (P2): the first display request while the window opens
+
+`Editor::OpenUnchecked` asked the processor directly, before the SDK had finished opening
+the window; a reply may make the host close it. The first request now goes the delayed
+way as well (`AnimateLater`), which checks the editor and the window serial first.
 
 ### Brief point 13: diffraction rays and PITCH tint
 
