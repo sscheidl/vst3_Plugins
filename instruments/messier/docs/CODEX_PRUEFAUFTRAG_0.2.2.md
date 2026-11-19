@@ -11,11 +11,11 @@ Klang ist unverändert.
 
 * Repository `vst3_Plugins`, Branch `messier-gui`, Worktree `.work/messier-gui/wt` im
   Haupt-Checkout `D:\Eigene Dateien\Eigene Dokumente\Playground\vst3_Plugins`.
-* 0.2.2 auf `69aa73b` (0.2.1, gepusht). Ist 0.2.2 bei deiner Prüfung committet, prüfe
-  diesen Commit und nenne ihn; sonst den Arbeitsstand
-  (`git -C .work/messier-gui/wt diff 69aa73b`, dazu die neuen Dateien
-  `instruments/messier/tests/preview_window.cpp` und
-  `instruments/messier/tools/make_metal_bitmaps.py`).
+* 0.2.2 ist Commit `34a5a70` (lokal, nicht gepusht) auf `69aa73b` (0.2.1, gepusht). Der
+  Unterschied: `git -C .work/messier-gui/wt diff 69aa73b 34a5a70`, darin auch die neuen
+  Dateien `instruments/messier/tests/preview_window.cpp` und
+  `instruments/messier/tools/make_metal_bitmaps.py`. Ein späterer Commit, der nur diesen
+  Prüfauftrag ändert, gehört nicht zur Prüfung.
 * Der Designauftrag liegt im Haupt-Checkout unter
   `out/messier-gui-entwurf-2026-11-19/CLAUDE_AUFTRAG_MESSIER_GUI.md`, mit dem Entwurfsbild
   daneben. Der Text gilt vor dem Bild.
