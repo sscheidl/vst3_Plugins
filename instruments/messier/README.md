@@ -9,12 +9,12 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 0.2.3, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 0.2.4, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.2.3:** builds, passes Steinberg's validator, tested automatically (bit for
+**Status 0.2.4:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
@@ -39,7 +39,9 @@ together with the user's first look at it ([report](docs/BUILD_REPORT_0.2.1.md))
 of 0.2.1 found four more ([check](docs/CODEX_REVIEW_0.2.1.md)); 0.2.2 fixes them and brings the
 user's design round for Slate ([report](docs/BUILD_REPORT_0.2.2.md)); 0.2.3 fixes what Codex'
 probe checks of 0.2.2 showed and adds the grains' rays and PITCH tint
-([report](docs/BUILD_REPORT_0.2.3.md)). The user
+([report](docs/BUILD_REPORT_0.2.3.md)). Codex released 0.2.3 for the DAW test
+([check](docs/CODEX_REVIEW_0.2.3.md)); 0.2.4 fixes its two findings and brings the GUI
+standard with all four presets ([report](docs/BUILD_REPORT_0.2.4.md)). The user
 has tried 0.1.7, 0.1.8 and 0.2.0 in Studio One
 (operation and sound). The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
@@ -60,18 +62,19 @@ bright heads carry four fine rays, and PITCH tints halo, rays and tails (rose do
 blue-violet up, warm at 0). Between the
 engine's displays playhead and grains move on at the speeds the engine reports (since
 0.2.2). The orange triangle above the plate, in a lane of its own, marks the playhead. While Freeze holds the playhead, it is dashed and carries a
-snowflake; a click on the snowflake ends Freeze. Below lie SPRAY, seven knobs and Volume
-(since 0.2.2 SPRAY heads the upper row), under them LATCH and KEYS, five small knobs for the
-secondary functions, FREEZE and RESET (RESET: every knob and START to its default, Freeze
-off, playback back to START); KEYS shows a keyboard with the octave keys "- OCT" and
-"OCT +". Since 0.2.2 the controls are blue-violet (knob arcs, values, the START rail, the
-WINDOW curve, keys that are on), the position markers orange (loop brackets, triangle);
-the knob caps and the thumb are light satin metal, interim bitmaps drawn by
-`tools/make_metal_bitmaps.py`.
-Surfaces are bitmaps at 1x and 2x (in the bundle's `Contents/Resources`), everything
-that carries information is drawn by the plug-in. Four GUI presets are planned (Slate,
-Silver, Copper, Photo plate); only Slate's bitmaps are delivered, the menu shows the
-others disabled until theirs come.
+snowflake; a click on the snowflake ends Freeze.
+
+Since 0.2.4 the window follows the GUI standard of 2026-11-19, one layout for all four
+GUI presets (Slate in graphite, the default; Silver; Copper; Photo plate): the header
+holds the brand, LOAD and the file, KEYS, STOP and the size and preset menus. The
+primary knobs stand in three groups (SPRAY, SPEED, LOOP SIZE; DENSITY, PITCH, OVERLAP,
+WINDOW; BLEND, VOLUME) with FREEZE and RESET beside them (RESET: every knob and START to
+its default, Freeze off, playback back to START). DETAILS opens a row with the five
+secondary knobs (closed for a new instance; saved with the project). KEYS shows the
+keyboard row: LATCH, "- OCT", the keys, "OCT +". The START thumb stands on the left
+loop bracket. Surfaces are bitmaps at 1x and 2x (in the bundle's `Contents/Resources`,
+delivered 2026-11-19); everything that carries information is drawn by the plug-in.
+`tools/make_metal_bitmaps.py` made the interim Slate bitmaps of 0.2.2.
 
 Only the file source so far. Live recording, overdub, circular recording, the dry
 blend of the input, input gain and grain FM follow in 0.3.0 (planned for 0.2.0 before the

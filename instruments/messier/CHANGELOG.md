@@ -1,5 +1,27 @@
 # Changes
 
+## 0.2.4 (2026-11-19)
+
+Window only; the sound, the parameters and the processor's state are unchanged. Details
+in `docs/BUILD_REPORT_0.2.4.md`.
+
+* The GUI standard of 2026-11-19 (the accepted graphite design): one layout for all four
+  GUI presets. A compact header (brand, LOAD and the file, KEYS, STOP, size, preset),
+  the primary knobs in three groups with FREEZE and RESET beside them, DETAILS for the
+  five secondary knobs (closed for a new instance), LATCH and the octave keys in the
+  keyboard row. The window is 880 x 560, 84 more with the keyboard, 96 more with DETAILS.
+* All four presets delivered (72 bitmaps at 1x and 2x, their colour tables); Slate is the
+  graphite standard and stays the default.
+* The controller's state is version 3: DETAILS as one byte at the end; versions 1 and 2
+  are still read (DETAILS closed).
+* START: the thumb and the loop brackets come from one mapping, so the thumb stands on the
+  left bracket.
+* MS-R53: ended grains are found on the audio's own time (the rendered quanta between
+  two displays); each grain of the new display continues at most one of the display
+  before.
+* MS-R54: a grain predicted to have ended fades out on the wall clock, also when no
+  display comes.
+
 ## 0.2.3 (2026-11-19)
 
 Window only; the sound is unchanged. Details in `docs/BUILD_REPORT_0.2.3.md`.

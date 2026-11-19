@@ -41,9 +41,10 @@ class WindowShapeView;
 // for the file status). About 33 times a second.
 constexpr std::chrono::milliseconds kDisplayInterval{30};
 
-// Window size at zoom 1 on a display without scaling (0.2.0, the window study): header,
-// file line, the measuring plate with waveform and START slider, the two rows of knobs,
-// and below them the keyboard when it is shown (gui_layout.h).
+// Window size at zoom 1 on a display without scaling (0.2.4, the GUI standard): header,
+// the measuring plate with waveform and START slider, the primary knobs, the DETAILS bar,
+// the secondary knobs while DETAILS is open and the keyboard when it is shown
+// (gui_layout.h).
 constexpr double kEditorWidth = layout::kWidth;
 constexpr double kEditorTopHeight = layout::kTopHeight;
 constexpr double kKeyboardSectionHeight = layout::kKeyboardSection;
@@ -56,8 +57,8 @@ inline double ClampEditorZoom(double zoom) {
                                   : kMinEditorZoom; // NaN becomes the minimum
 }
 
-inline double EditorBaseHeight(bool keyboard) {
-    return kEditorTopHeight + (keyboard ? kKeyboardSectionHeight : 0.0);
+inline double EditorBaseHeight(bool keyboard, bool details) {
+    return layout::TopHeight(details) + (keyboard ? kKeyboardSectionHeight : 0.0);
 }
 
 struct EditorSize {
@@ -66,15 +67,15 @@ struct EditorSize {
 };
 
 // Window size in pixels. `total` is the user's zoom times the display scale.
-inline EditorSize EditorSizeFor(double total, bool keyboard) {
+inline EditorSize EditorSizeFor(double total, bool keyboard, bool details) {
     return {static_cast<int>(std::lround(kEditorWidth * total)),
-            static_cast<int>(std::lround(EditorBaseHeight(keyboard) * total))};
+            static_cast<int>(std::lround(EditorBaseHeight(keyboard, details) * total))};
 }
 
 // The zoom a window of this size stands for: the largest that fits into it.
-inline double EditorZoomForSize(int width, int height, double scale, bool keyboard) {
+inline double EditorZoomForSize(int width, int height, double scale, bool keyboard, bool details) {
     return ClampEditorZoom(
-        std::min(width / kEditorWidth, height / EditorBaseHeight(keyboard)) / scale);
+        std::min(width / kEditorWidth, height / EditorBaseHeight(keyboard, details)) / scale);
 }
 
 // The size the host may use when the user drags the window from `current`
@@ -84,15 +85,15 @@ inline double EditorZoomForSize(int width, int height, double scale, bool keyboa
 // under the mouse. A corner drag (`corner`) takes the allowed size nearest to
 // the asked one, which depends on the mouse position alone.
 inline EditorSize ConstrainEditorSize(EditorSize asked, EditorSize current, double scale,
-                                      bool keyboard, bool corner) {
+                                      bool keyboard, bool details, bool corner) {
     const double width = kEditorWidth;
-    const double height = EditorBaseHeight(keyboard);
+    const double height = EditorBaseHeight(keyboard, details);
     double total = asked.width / width;
     if(corner)
         total = (asked.width * width + asked.height * height) / (width * width + height * height);
     else if(asked.width == current.width && asked.height != current.height)
         total = asked.height / height;
-    return EditorSizeFor(scale * ClampEditorZoom(total / scale), keyboard);
+    return EditorSizeFor(scale * ClampEditorZoom(total / scale), keyboard, details);
 }
 
 // Tells edge drags from corner drags across the requests of one drag: once a
@@ -103,14 +104,14 @@ class DragConstraint {
     // A pause this long between two requests starts a new drag.
     static constexpr auto kNewDragPause = std::chrono::milliseconds(250);
 
-    EditorSize Apply(EditorSize asked, EditorSize current, double scale, bool keyboard,
+    EditorSize Apply(EditorSize asked, EditorSize current, double scale, bool keyboard, bool details,
                      Clock::time_point now) {
         if(now - last_ > kNewDragPause)
             corner_ = false;
         last_ = now;
         if(asked.width != current.width && asked.height != current.height)
             corner_ = true;
-        return ConstrainEditorSize(asked, current, scale, keyboard, corner_);
+        return ConstrainEditorSize(asked, current, scale, keyboard, details, corner_);
     }
 
   private:
@@ -124,6 +125,7 @@ struct EditorSettings {
     bool keyboard = true;
     int transpose = kKeyboardDefaultTranspose; // of the keyboard, in semitones
     GuiPreset preset = GuiPreset::kSlate;       // since 0.2.0
+    bool details = false;                       // DETAILS open (0.2.4; closed for a new instance)
 };
 
 // The sizes the window's size menu offers (0.2.0), as zoom.
@@ -190,6 +192,8 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // Shows or hides the keyboard, as the KEYS button does. If the host
     // refuses the new window size, nothing changes.
     void SetKeyboardVisible(bool show);
+    // DETAILS open or closed (0.2.4): the window grows or shrinks by the secondary knobs.
+    void SetDetailsVisible(bool show);
     void SetLatch(bool on);
     void SetStop(bool on);
     // For tests: the screen keyboard while the window is open, else nullptr.
@@ -327,6 +331,7 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     std::array<Knob, kKnobCount> knobs_{};
     KeyboardView* keyboard_view_ = nullptr; // owned by the frame, like the views below
     ToggleButton* keyboard_button_ = nullptr;
+    ToggleButton* details_button_ = nullptr;
     ToggleButton* octave_down_ = nullptr;
     ToggleButton* octave_up_ = nullptr;
     ToggleButton* freeze_button_ = nullptr;

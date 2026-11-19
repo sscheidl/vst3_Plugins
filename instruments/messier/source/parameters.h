@@ -277,7 +277,7 @@ constexpr std::int32_t kMaxPathBytes = 32768;
 // as one byte (1 for shown), its transposition in semitones as int32.
 // Version 2 (0.2.0): the same with the GUI preset as int32 (GuiPreset); version 1 is
 // still read, with Slate.
-constexpr std::int32_t kControllerStateVersion = 2;
+constexpr std::int32_t kControllerStateVersion = 3; // 3 since 0.2.4: DETAILS open
 
 // Messages between the two halves of the plug-in.
 // Controller -> processor: a key of the screen keyboard. Velocity 1..127 is a

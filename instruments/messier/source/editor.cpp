@@ -54,11 +54,10 @@ struct KnobSpec {
     bool bipolar;
 };
 
-// The columns of the window study, version 3: START is the slider under the plate. Since
-// 0.2.2 (the user's design round) SPRAY, its secondary, is a large knob at the head of the
-// upper row, with LATCH and KEYS under it. The other secondaries stand under their pot;
-// the places of the secondaries of Speed and Blend, which act on the audio input, stay
-// empty until 0.3.0.
+// The columns of the GUI standard (0.2.4): START is the slider under the plate; the
+// primary knobs in three groups (SPRAY, the secondary of Start, at the head since 0.2.2);
+// the other secondaries under DETAILS, in columns of their own. The secondaries of Speed
+// and Blend, which act on the audio input, come with 0.3.0.
 constexpr KnobSpec kKnobs[Editor::kKnobCount] = {
     {kParamSpeed, "SPEED", 1, false, true},
     {kParamSize, "LOOP SIZE", 2, false, false},
@@ -69,11 +68,11 @@ constexpr KnobSpec kKnobs[Editor::kKnobCount] = {
     {kParamBlend, "BLEND", 7, false, false},
     {kParamVolume, "VOLUME", 8, false, false},
     {kParamSpray, "SPRAY", 0, false, false},
-    {kParamPanRandom, "PAN RND", 2, true, false},
-    {kParamDisplacement, "DISPLACE", 3, true, false},
-    {kParamPitchRandom, "PITCH RND", 4, true, false},
-    {kParamSizeRandom, "SIZE RND", 5, true, false},
-    {kParamMask, "MASK", 6, true, false},
+    {kParamPanRandom, "PAN RND", 0, true, false},
+    {kParamDisplacement, "DISPLACE", 1, true, false},
+    {kParamPitchRandom, "PITCH RND", 2, true, false},
+    {kParamSizeRandom, "SIZE RND", 3, true, false},
+    {kParamMask, "MASK", 4, true, false},
 };
 
 CRect Box(double left, double top, double right, double bottom) {
@@ -105,6 +104,7 @@ Editor::Editor(EditController* controller, const EditorSettings& settings,
 : VSTGUIEditor(controller), callbacks_(std::move(callbacks)), alive_(std::make_shared<bool>(true)) {
     settings_.zoom = ClampEditorZoom(settings.zoom);
     settings_.keyboard = settings.keyboard;
+    settings_.details = settings.details;
     settings_.transpose = ClampKeyboardTranspose(settings.transpose);
     settings_.preset = IsGuiPreset(static_cast<std::int32_t>(settings.preset)) ? settings.preset : GuiPreset::kSlate;
     setRect(ScaledSize());
@@ -130,6 +130,7 @@ void Editor::ForgetViews() {
     knobs_ = {};
     keyboard_view_ = nullptr;
     keyboard_button_ = nullptr;
+    details_button_ = nullptr;
     octave_down_ = nullptr;
     octave_up_ = nullptr;
     freeze_button_ = nullptr;
@@ -178,7 +179,7 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
 }
 
 bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
-    frame = new CFrame(CRect(0, 0, kWidth, EditorBaseHeight(settings_.keyboard)), this);
+    frame = new CFrame(CRect(0, 0, kWidth, EditorBaseHeight(settings_.keyboard, settings_.details)), this);
     frame->setBackgroundColor(kBlackCColor);
     frame->enableTooltips(true);
     applied_zoom_ = 1.0;
@@ -189,9 +190,12 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     const SkinColours& colours = skin.Colours();
 
     // The background first: chassis, rules, the fixed texts.
-    panel_ = Add(new PanelView(CRect(0, 0, kWidth, EditorBaseHeight(settings_.keyboard))));
+    panel_ = Add(new PanelView(CRect(0, 0, kWidth, EditorBaseHeight(settings_.keyboard, settings_.details))));
 
-    // The header: STOP and the size and preset menus, as one group (0.2.2).
+    // The header: KEYS, STOP and the size and preset menus, as one group (0.2.4).
+    keyboard_button_ = Add(new ToggleButton(Box(L::kKeysLeft, L::kButtonTop, L::kKeysRight, L::kButtonTop + L::kButtonHeight),
+                                            "KEYS", settings_.keyboard, [this](bool on) { SetKeyboardVisible(on); }));
+    keyboard_button_->setTooltipText("Keys: shows or hides the keyboard");
     {
         const bool stopped = controller && IsOn(controller->getParamNormalized(kParamStop));
         stop_button_ = Add(new ToggleButton(Box(L::kStopLeft, L::kButtonTop, L::kStopRight, L::kButtonTop + L::kButtonHeight),
@@ -212,12 +216,12 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
                                       false, [this](bool) { ChooseFile(); }, ToggleButton::Style::Action));
     load->setTooltipText("Load a WAV file: 16 or 24 bit PCM or 32 bit float, mono or stereo");
     load->SetSkin(skin_);
-    file_name_ = Add(MakeLabel(Box(L::kFileLeft, L::kFileNameTop, L::kFileRight, L::kFileNameBottom), "",
+    file_name_ = Add(MakeLabel(Box(L::kFileLeft, L::kFileNameTop, L::kCatalogueLeft, L::kFileNameBottom), "",
                                skin.Italic(19), colours.text, kLeftText));
     file_info_ = Add(MakeLabel(Box(L::kFileLeft, L::kFileNameBottom, L::kFileRight, L::kFileInfoBottom), "",
                                skin.Mono(11), colours.dim, kLeftText));
-    catalogue_ = Add(MakeLabel(Box(L::kFileRight, 52, kWidth - 24, 76), "", skin.Caps(15), colours.value,
-                               kRightText));
+    catalogue_ = Add(MakeLabel(Box(L::kCatalogueLeft, L::kFileNameTop, L::kFileRight, L::kFileNameBottom), "",
+                               skin.Caps(15), colours.value, kRightText));
     catalogue_->setTooltipText("Catalogue number: the how-manyth file this instance has loaded");
     ApplyFileTexts();
 
@@ -287,8 +291,12 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     }
 
     // The keyboard section: the octave keys and the keys.
-    keyboard_view_ = Add(new KeyboardView(Box(L::kKeyboardLeft, L::kPianoTop, L::kKeyboardLeft + L::kKeyboardWidth,
-                                              L::kPianoTop + L::kPianoHeight),
+    // The keyboard section: LATCH, the octave keys and the keys, in one row; LayOut()
+    // puts them below DETAILS.
+    const CCoord section = L::TopHeight(settings_.details);
+    keyboard_view_ = Add(new KeyboardView(Box(L::kKeyboardLeft, section + L::kPianoTop,
+                                              L::kKeyboardLeft + L::kKeyboardWidth,
+                                              section + L::kPianoTop + L::kPianoHeight),
                                           [this](int note) {
                                               if(callbacks_.strike)
                                                   callbacks_.strike(note);
@@ -300,17 +308,15 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     keyboard_view_->SetTranspose(settings_.transpose);
     keyboard_view_->SetLatch(latch_);
     keyboard_view_->setVisible(settings_.keyboard);
-    // The octave keys (0.2.2): as large as LATCH, KEYS, FREEZE and RESET, labelled.
-    const CCoord keys_right = L::kKeyboardLeft + L::kKeyboardWidth;
-    const CCoord down_left = L::kKeyboardLeft - L::kOctaveGap - L::kButtonWidth;
-    octave_down_ = Add(new ToggleButton(Box(down_left, L::kKeyButtonTop, down_left + L::kButtonWidth,
-                                            L::kKeyButtonTop + L::kButtonHeight),
+    // The octave keys (0.2.2): as large as LATCH, FREEZE and RESET, labelled.
+    const CCoord key_top = section + L::kKeyButtonTop;
+    octave_down_ = Add(new ToggleButton(Box(L::kOctaveDownLeft, key_top, L::kOctaveDownLeft + L::kButtonWidth,
+                                            key_top + L::kButtonHeight),
                                         "\xE2\x88\x92 OCT", false,
                                         [this](bool) { SetKeyboardTranspose(settings_.transpose - 12); },
                                         ToggleButton::Style::Action));
-    octave_up_ = Add(new ToggleButton(Box(keys_right + L::kOctaveGap, L::kKeyButtonTop,
-                                          keys_right + L::kOctaveGap + L::kButtonWidth,
-                                          L::kKeyButtonTop + L::kButtonHeight),
+    octave_up_ = Add(new ToggleButton(Box(L::kOctaveUpLeft, key_top, L::kOctaveUpLeft + L::kButtonWidth,
+                                          key_top + L::kButtonHeight),
                                       "OCT +", false,
                                       [this](bool) { SetKeyboardTranspose(settings_.transpose + 12); },
                                       ToggleButton::Style::Action));
@@ -324,7 +330,7 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     const CFontRef small_value_font = skin.Mono(11.5);
     for(std::size_t i = 0; i < knobs_.size(); ++i) {
         const KnobSpec& spec = kKnobs[i];
-        const CCoord left = L::ColumnLeft(spec.column);
+        const CCoord left = spec.small ? L::SmallColumnLeft(spec.column) : L::ColumnLeft(spec.column);
         const CCoord right = left + L::kColumnWidth;
         const CCoord size = spec.small ? L::kSmallKnobSize : L::kKnobSize;
         const CCoord top = spec.small ? L::kSmallKnobTop : L::kKnobTop;
@@ -332,7 +338,7 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
         const CCoord value_top = spec.small ? L::kSmallValueTop : L::kValueTop;
         const CCoord knob_left = left + (L::kColumnWidth - size) / 2;
 
-        panel_->AddLabel(Box(left, name_top, right, name_top + (spec.small ? 14 : 16)), spec.name,
+        panel_->AddLabel(Box(left - 4, name_top, right + 4, name_top + (spec.small ? 14 : 16)), spec.name,
                          spec.small ? PanelView::LabelKind::kSmallKnob : PanelView::LabelKind::kKnob);
         auto* knob = Add(new MetalKnob(Box(knob_left, top, knob_left + size, top + size), this,
                                        static_cast<int32_t>(spec.id), spec.small, spec.bipolar));
@@ -348,20 +354,22 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
         knob->setValue(static_cast<float>(normalized));
         ShowValue(knobs_[i], normalized);
     }
-    // LATCH and KEYS under SPRAY (0.2.2), as FREEZE and RESET stand under Volume. LATCH
-    // stays in its place while the keyboard is hidden, dimmed and without the mouse.
-    const CCoord first = L::ColumnLeft(0) + (L::kColumnWidth - L::kButtonWidth) / 2;
-    latch_button_ = Add(new ToggleButton(Box(first, L::kLatchTop, first + L::kButtonWidth,
-                                             L::kLatchTop + L::kButtonHeight),
+    // LATCH at the head of the keyboard row (0.2.4); it goes with the keyboard.
+    latch_button_ = Add(new ToggleButton(Box(L::kLatchLeft, key_top, L::kLatchLeft + L::kButtonWidth,
+                                             key_top + L::kButtonHeight),
                                          "LATCH", latch_, [this](bool on) { SetLatch(on); }));
     latch_button_->setTooltipText("Latch: a struck key stays held; click it again, another key or LATCH to let go");
-    keyboard_button_ = Add(new ToggleButton(Box(first, L::kKeysTop, first + L::kButtonWidth,
-                                                L::kKeysTop + L::kButtonHeight),
-                                            "KEYS", settings_.keyboard, [this](bool on) { SetKeyboardVisible(on); }));
-    keyboard_button_->setTooltipText("Keys: shows or hides the keyboard");
+    // DETAILS (0.2.4): opens and closes the row of the secondary knobs; their values and
+    // automation stay as they are.
+    details_button_ = Add(new ToggleButton(Box(L::kDetailsLeft, L::kDetailsBarTop, L::kDetailsRight,
+                                               L::kDetailsBarTop + L::kDetailsBarHeight),
+                                           "DETAILS", settings_.details, [this](bool on) { SetDetailsVisible(on); },
+                                           ToggleButton::Style::Toggle));
+    details_button_->SetFlat(true);
+    details_button_->setTooltipText("Details: the secondary knobs (pan, displacement, pitch and size random, mask)");
 
-    // Freeze and Reset under Volume.
-    const CCoord column = L::ColumnLeft(8) + (L::kColumnWidth - L::kButtonWidth) / 2;
+    // Freeze and Reset beside Volume.
+    const CCoord column = L::kButtonColumnLeft;
     const bool frozen = controller && IsOn(controller->getParamNormalized(kParamFreeze));
     freeze_button_ = Add(new ToggleButton(Box(column, L::kFreezeTop, column + L::kButtonWidth,
                                               L::kFreezeTop + L::kButtonHeight),
@@ -488,7 +496,7 @@ void Editor::AnimateLater() noexcept {
 }
 
 ViewRect Editor::ScaledSize() const {
-    const EditorSize size = EditorSizeFor(scale_ * settings_.zoom, settings_.keyboard);
+    const EditorSize size = EditorSizeFor(scale_ * settings_.zoom, settings_.keyboard, settings_.details);
     return ViewRect(0, 0, size.width, size.height);
 }
 
@@ -500,32 +508,47 @@ double Editor::DisplayZoom(int32 width, int32 height) const {
     // below the 50 % a user can choose, so nothing is cut off. Above 200 %
     // the content stops growing and background fills the rest.
     const double fitting =
-        std::min(width / kEditorWidth, height / EditorBaseHeight(settings_.keyboard));
+        std::min(width / kEditorWidth, height / EditorBaseHeight(settings_.keyboard, settings_.details));
     return std::min(fitting, scale_ * kMaxEditorZoom);
 }
 
 void Editor::LayOut(int32 width, int32 height) {
     if(!frame)
         return;
-    const CCoord bottom = EditorBaseHeight(settings_.keyboard);
+    const CCoord bottom = EditorBaseHeight(settings_.keyboard, settings_.details);
     if(panel_) {
         panel_->setViewSize(CRect(0, 0, kWidth, bottom));
-        panel_->SetKeyboard(settings_.keyboard);
+        panel_->setMouseableArea(panel_->getViewSize());
+        panel_->SetSections(settings_.keyboard, settings_.details);
     }
-    if(keyboard_view_)
-        keyboard_view_->setVisible(settings_.keyboard);
+    // 0.2.4: the secondary knobs only while DETAILS is open; the keyboard row below it.
+    for(Knob& knob : knobs_) {
+        if(!knob.knob || !kKnobs[static_cast<std::size_t>(&knob - knobs_.data())].small)
+            continue;
+        knob.knob->setVisible(settings_.details);
+        if(knob.value)
+            knob.value->setVisible(settings_.details);
+    }
+    if(details_button_)
+        details_button_->SetOn(settings_.details);
+    const CCoord section = L::TopHeight(settings_.details);
+    const auto place = [&](CView* view, CCoord left, CCoord top, CCoord width, CCoord height) {
+        if(!view)
+            return;
+        view->setViewSize(CRect(left, section + top, left + width, section + top + height));
+        view->setMouseableArea(view->getViewSize());
+        view->setVisible(settings_.keyboard);
+    };
+    place(keyboard_view_, L::kKeyboardLeft, L::kPianoTop, L::kKeyboardWidth, L::kPianoHeight);
+    place(latch_button_, L::kLatchLeft, L::kKeyButtonTop, L::kButtonWidth, L::kButtonHeight);
+    place(octave_down_, L::kOctaveDownLeft, L::kKeyButtonTop, L::kButtonWidth, L::kButtonHeight);
+    place(octave_up_, L::kOctaveUpLeft, L::kKeyButtonTop, L::kButtonWidth, L::kButtonHeight);
     if(keyboard_button_)
         keyboard_button_->SetOn(settings_.keyboard);
-    if(latch_button_) {
-        // 0.2.2: in its place without the keyboard, dimmed and without the mouse.
-        latch_button_->setMouseEnabled(settings_.keyboard);
-        latch_button_->invalid();
-    }
     for(ToggleButton* octave : {octave_down_, octave_up_}) {
         if(!octave)
             continue;
         const int limit = octave == octave_down_ ? -kKeyboardTransposeLimit : kKeyboardTransposeLimit;
-        octave->setVisible(settings_.keyboard);
         octave->setMouseEnabled(settings_.transpose != limit);
         octave->invalid();
     }
@@ -567,6 +590,21 @@ void Editor::SetKeyboardVisible(bool show) {
         settings_ = before;
         if(keyboard_button_)
             keyboard_button_->SetOn(before.keyboard);
+        return;
+    }
+    UserChanged();
+}
+
+void Editor::SetDetailsVisible(bool show) {
+    if(show == settings_.details)
+        return;
+    const EditorSettings before = settings_;
+    settings_.details = show;
+    if(frame && !Resize()) {
+        // The host keeps the window as it is, so DETAILS stays as it was.
+        settings_ = before;
+        if(details_button_)
+            details_button_->SetOn(before.details);
         return;
     }
     UserChanged();
@@ -729,8 +767,9 @@ void Editor::GripDrag(double dx, double dy) {
     // the aspect ratio and the zoom limits kept (ConstrainEditorSize).
     const EditorSize asked{static_cast<int>(std::lround(grip_start_.width + dx)),
                            static_cast<int>(std::lround(grip_start_.height + dy))};
-    const EditorSize allowed = ConstrainEditorSize(asked, grip_start_, scale_, settings_.keyboard, true);
-    const double zoom = EditorZoomForSize(allowed.width, allowed.height, scale_, settings_.keyboard);
+    const EditorSize allowed =
+        ConstrainEditorSize(asked, grip_start_, scale_, settings_.keyboard, settings_.details, true);
+    const double zoom = EditorZoomForSize(allowed.width, allowed.height, scale_, settings_.keyboard, settings_.details);
     if(zoom == settings_.zoom)
         return;
     const EditorSettings before = settings_;
@@ -781,7 +820,7 @@ tresult Editor::CheckSizeUnchecked(ViewRect* size) {
         return kInvalidArgument;
     const EditorSize allowed =
         drag_.Apply({size->getWidth(), size->getHeight()}, {rect.getWidth(), rect.getHeight()},
-                    scale_, settings_.keyboard, DragConstraint::Clock::now());
+                    scale_, settings_.keyboard, settings_.details, DragConstraint::Clock::now());
     size->right = size->left + allowed.width;
     size->bottom = size->top + allowed.height;
     return kResultTrue;
@@ -802,7 +841,7 @@ tresult Editor::OnSizeUnchecked(ViewRect* newSize) {
     if(width != current.getWidth() || height != current.getHeight()) {
         // The user resized the window, or the host chose a size. The zoom to
         // remember stays within the limits; the display may go below them.
-        const double zoom = EditorZoomForSize(width, height, scale_, settings_.keyboard);
+        const double zoom = EditorZoomForSize(width, height, scale_, settings_.keyboard, settings_.details);
         if(zoom != settings_.zoom) {
             settings_.zoom = zoom;
             UserChanged();
@@ -831,10 +870,11 @@ void Editor::ApplySettings(const EditorSettings& settings) {
             });
     }
     if(zoom == settings_.zoom && settings.keyboard == settings_.keyboard
-       && transpose == settings_.transpose)
+       && settings.details == settings_.details && transpose == settings_.transpose)
         return;
     settings_.zoom = zoom;
     settings_.keyboard = settings.keyboard;
+    settings_.details = settings.details;
     settings_.transpose = transpose;
     if(keyboard_view_)
         keyboard_view_->SetTranspose(transpose);

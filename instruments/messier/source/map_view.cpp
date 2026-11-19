@@ -39,9 +39,9 @@ constexpr double kMaxAhead = 0.15;
 // The same display for longer than this (a large host buffer is shorter): the engine
 // rests, nothing moves on.
 constexpr double kRestAfter = 0.1;
-// 0.2.3: an ended grain still in the next display was made at most this long before its
-// end (a display's age when it arrives, a large host buffer included).
-constexpr double kSameGrainSlack = 0.25;
+// 0.2.4 (MS-R53): how far, in seconds of its window, a grain of the next display may be
+// from where the display before puts it and still be the same grain.
+constexpr double kSameGrainSlack = 0.003;
 // 0.2.3: without any new display for this long (the host stopped processing, the
 // displays stopped coming) the nebula's drift comes to rest as at STOP.
 constexpr double kDriftStaleAfter = 0.5;
@@ -101,35 +101,59 @@ void MapView::ShowAt(const EngineDisplay& display, std::shared_ptr<const WaveOve
     if(display.sequence != display_.sequence || display.frames != display_.frames) {
         ended_count_ = 0;
     } else if(!resting_) {
-        for(std::uint32_t i = 0; i < std::min(display_.grain_count, EngineDisplay::kMaxGrains); ++i) {
+        // MS-R53 (0.2.4): on the audio's own time, the quanta rendered between the two
+        // displays, not the time between their arrivals. Each grain of the display before
+        // is moved on by that time; one still inside its window must be in the new display
+        // and takes the grain there that is nearest to where it should be; only then the
+        // ended ones look for one left over (made just before its end).
+        const std::uint32_t quanta = display.rendered - display_.rendered; // wraps as the count does
+        const double audio = quanta * (LooperEngine::kQuantum / LooperEngine::kSampleRate);
+        const std::uint32_t old_count = std::min(display_.grain_count, EngineDisplay::kMaxGrains);
+        const std::uint32_t new_count = std::min(display.grain_count, EngineDisplay::kMaxGrains);
+        std::array<bool, EngineDisplay::kMaxGrains> taken{};
+        const auto take = [&](const GrainDot& g, double expected) {
+            // The same grain: its pan, speed and window rate are its own for its whole life,
+            // its window where it should be by now (a little slack for the input's FM).
+            const double slack = 0.01 + g.phase_rate * kSameGrainSlack;
+            int best = -1;
+            double best_miss = slack;
+            for(std::uint32_t k = 0; k < new_count; ++k) {
+                const GrainDot& h = display.grains[k];
+                if(taken[k] || h.pan != g.pan || h.speed != g.speed || h.phase_rate != g.phase_rate)
+                    continue;
+                const double miss = std::abs(h.phase - expected);
+                if(miss <= best_miss) {
+                    best = static_cast<int>(k);
+                    best_miss = miss;
+                }
+            }
+            if(best >= 0)
+                taken[static_cast<std::size_t>(best)] = true;
+            return best >= 0;
+        };
+        const bool usable = quanta > 0 && audio < 10.0;
+        if(usable)
+            for(std::uint32_t i = 0; i < old_count; ++i) {
+                const GrainDot& g = display_.grains[i];
+                const double expected = g.phase + g.phase_rate * audio;
+                if(g.phase_rate > 0 && g.phase < 1 && expected < 1)
+                    take(g, expected);
+            }
+        for(std::uint32_t i = 0; usable && i < old_count; ++i) {
             const GrainDot& g = display_.grains[i];
             if(!(g.phase_rate > 0) || !(g.phase < 1))
                 continue;
-            const double left = (1.0 - g.phase) / g.phase_rate; // seconds still to sound
-            const double since = Seconds(now - shown_at_);
-            // 0.2.3: compared in seconds before the time point is made, so that a grain
-            // far from its end never meets a cast beyond the clock's range.
-            if(!(left <= since) || since - left >= kTrail)
+            const double left = (1.0 - g.phase) / g.phase_rate; // audio seconds it still sounded
+            // Compared in seconds before a time point is made (MS-R52).
+            if(!(left <= audio) || audio - left >= kTrail)
                 continue; // sounds on in the new display, or its glow is gone
-            const Clock::time_point at =
-                shown_at_ + std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(left));
-            // The display may have been made just before the grain ended: then it is still
-            // in it, with its pan, speed and window rate (its own for its whole life) and
-            // further on in its window, by about the time since. 0.2.3: a grain with the
-            // same three values but elsewhere in its window is another one; this one ended.
-            bool sounds = false;
-            for(std::uint32_t k = 0; k < std::min(display.grain_count, EngineDisplay::kMaxGrains); ++k) {
-                const GrainDot& h = display.grains[k];
-                sounds = sounds
-                         || (h.pan == g.pan && h.speed == g.speed && h.phase_rate == g.phase_rate
-                             && h.phase >= g.phase && h.phase >= g.phase + g.phase_rate * (since - kSameGrainSlack));
-            }
-            if(sounds)
-                continue;
+            if(take(g, g.phase + g.phase_rate * audio))
+                continue; // the new display was made just before its end
             Ended ended;
             ended.dot = g;
             ended.dot.position = static_cast<float>(Wrap(g.position + g.speed * left, 0.0, display_.frames));
-            ended.at = at;
+            // It ended `audio - left` seconds before the new display.
+            ended.at = now - std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(audio - left));
             ended.life = 1.0 / g.phase_rate;
             Keep(ended);
         }
@@ -216,6 +240,19 @@ double MapView::HeadAt(Clock::time_point now) const {
     // MS-R46: inside the loop of the display the playhead belongs to, not the loop that
     // START and SIZE in the window will make.
     return Wrap(d.playhead + d.head_speed * Ahead(now), d.loop_start, d.loop_length);
+}
+
+double MapView::EndedFor(std::uint32_t index, Clock::time_point now) const {
+    if(index >= std::min(display_.grain_count, EngineDisplay::kMaxGrains))
+        return -1.0;
+    const GrainDot& g = display_.grains[index];
+    if(!(g.phase_rate > 0))
+        return -1.0;
+    // MS-R54 (0.2.4): on the wall clock, not stopped where the prediction of places stops
+    // (kMaxAhead): a grain predicted to have ended fades out even if no display comes.
+    const double wall = resting_ ? 0.0 : std::max(0.0, Seconds(now - shown_at_));
+    const double left = (1.0 - g.phase) / g.phase_rate;
+    return wall >= left ? wall - left : -1.0;
 }
 
 MapView::Loop MapView::ShownLoop(Clock::time_point now) const {
@@ -415,7 +452,7 @@ void MapView::DrawUnchecked(CDrawContext* context) {
     const double frames = file ? d.frames : 1.0;
     const double rate = wave_ && wave_->sequence == d.sequence ? wave_->rate : 0;
     const double seconds = file && rate > 0 ? frames / rate : 0.0;
-    auto x_of = [&](double frame) { return left + width * frame / frames; };
+    auto x_of = [&](double frame) { return all.left + FrameX(frame); }; // as START (0.2.4)
     const Loop loop = ShownLoop(now);
     const double loop_start = loop.start, loop_length = loop.length;
 
@@ -587,12 +624,12 @@ void MapView::DrawUnchecked(CDrawContext* context) {
                 const double life = g.phase_rate > 0 ? 1.0 / g.phase_rate : 0.0;
                 const CCoord y = y_of(g.pan);
                 const double speed = GrainSpeed(i) * frame_width;
-                if(phase >= 1.0) {
+                const double since = EndedFor(i, now);
+                if(since >= 0) {
                     // Over by now, and not yet among the ended (that comes with the next
                     // display): only its glow, from where it ended.
                     if(life <= 0)
                         continue;
-                    const double since = (phase - 1.0) * life;
                     const double at = Wrap(g.position + g.speed * (1.0 - g.phase) * life, 0.0, frames);
                     DrawTrail(context, x_of(at), y, speed, since, since + life, 1.4, alpha * 0.75);
                     continue;
@@ -707,7 +744,7 @@ void MapView::DrawUnchecked(CDrawContext* context) {
         context->setFrameColor(c.rule_light);
         context->setLineWidth(1);
         context->drawLine(CPoint(left, groove_top + 4.5), CPoint(right, groove_top + 4.5));
-        const CCoord thumb_x = left + start_ * width;
+        const CCoord thumb_x = all.left + StartX();
         context->setFillColor(WithAlpha(c.control, 0.95));
         context->drawRect(CRect(left, groove_top + 0.5, thumb_x, groove_top + 3.5), kDrawFilled);
         context->setFrameColor(WithAlpha(c.text, 0.5));
@@ -827,6 +864,15 @@ void MapView::DrawDropHighlight(CDrawContext* context) {
     context->setLineStyle(kLineSolid);
     const std::string text = usable ? std::string("Drop WAV to load") : "Can't load: " + drop_reason_;
     DrawTracked(context, text, area, kCenterText, 0.5, skin_->Italic(18), colour);
+}
+
+double MapView::StartX() const {
+    return inset_ + (getViewSize().getWidth() - 2 * inset_) * start_;
+}
+
+double MapView::FrameX(double frame) const {
+    const double frames = display_.frames;
+    return frames > 0 ? inset_ + (getViewSize().getWidth() - 2 * inset_) * frame / frames : inset_;
 }
 
 double MapView::Share(double x) const {

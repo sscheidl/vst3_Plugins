@@ -218,6 +218,20 @@ The new window (0.2.0, Slate; judge the look as well as what it shows):
 - [ ] Stopping the host's transport (displays stop coming): the nebula comes to rest.
 - [ ] Watched for a few minutes while playing: the nebulae never jump.
 
+0.2.4 (the GUI standard):
+
+- [ ] Switch between Slate, Silver, Copper and Photo plate: only material and colours
+      change, every control stays where it is. On Photo plate waveform, playhead and
+      grains read well on the light glass.
+- [ ] DETAILS: closed in a new instance; opening it grows the window by the row of the
+      five secondary knobs, closing shrinks it; their values and automation stay. A
+      saved project opens with DETAILS as it was.
+- [ ] KEYS in the header shows and hides the keyboard row (LATCH, - OCT, keys, OCT +);
+      the octave keys dimmed at their limits.
+- [ ] START at the start, in the middle and near the end: the thumb stands exactly on
+      the left loop bracket.
+- [ ] Projects of 0.2.3 open with their preset, size, keyboard and transposition.
+
 ## 7. Listening
 
 - [ ] Against the Daisy kit with Nebulae on Daisy 0.2.2, if at hand, same file, same

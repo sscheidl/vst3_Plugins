@@ -113,6 +113,13 @@ class MapView : public VSTGUI::CView {
     // (MS-R45, MS-R46), nothing moved while frozen or resting.
     double HeadAt(Clock::time_point now) const;
     double GrainAt(std::uint32_t index, Clock::time_point now) const;
+    // How long ago a grain of the display ended at `now`, on the wall clock (MS-R54); its
+    // glow is gone kTrail after that. Negative while it still sounds.
+    double EndedFor(std::uint32_t index, Clock::time_point now) const;
+    // Where the START thumb and a frame of the file stand across the view (0.2.4: the same
+    // mapping, so the thumb stands on the left loop bracket).
+    double StartX() const;
+    double FrameX(double frame) const;
     // The loop as drawn at `now`, in frames.
     struct Loop {
         double start = 0, length = 1;

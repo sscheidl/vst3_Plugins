@@ -256,7 +256,7 @@ tresult PLUGIN_API Controller::getState(IBStream* state) {
     IBStreamer stream(state, kLittleEndian);
     if(!stream.writeInt32(kControllerStateVersion) || !stream.writeDouble(editor_.zoom)
        || !stream.writeInt8(editor_.keyboard ? 1 : 0) || !stream.writeInt32(editor_.transpose)
-       || !stream.writeInt32(static_cast<int32>(editor_.preset)))
+       || !stream.writeInt32(static_cast<int32>(editor_.preset)) || !stream.writeInt8(editor_.details ? 1 : 0))
         return kResultFalse;
     return kResultOk;
 }
@@ -270,17 +270,19 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
     int8 keyboard = 1;
     int32 transpose = kKeyboardDefaultTranspose;
     int32 preset = static_cast<int32>(GuiPreset::kSlate); // version 1 (before 0.2.0)
-    if(!stream.readInt32(version) || (version != 1 && version != kControllerStateVersion)
+    int8 details = 0;                                     // versions 1 and 2 (before 0.2.4)
+    if(!stream.readInt32(version) || version < 1 || version > kControllerStateVersion
        || !stream.readDouble(zoom) || !stream.readInt8(keyboard) || !stream.readInt32(transpose)
-       || (version >= 2 && !stream.readInt32(preset)))
+       || (version >= 2 && !stream.readInt32(preset)) || (version >= 3 && !stream.readInt8(details)))
         return kResultFalse;
-    if(!std::isfinite(zoom) || (keyboard != 0 && keyboard != 1) || transpose % 12 != 0
+    if(!std::isfinite(zoom) || (keyboard != 0 && keyboard != 1) || (details != 0 && details != 1) || transpose % 12 != 0
        || transpose < -kKeyboardTransposeLimit || transpose > kKeyboardTransposeLimit || !IsGuiPreset(preset))
         return kResultFalse;
     editor_.zoom = ClampEditorZoom(zoom);
     editor_.keyboard = keyboard != 0;
     editor_.transpose = transpose;
     editor_.preset = static_cast<GuiPreset>(preset);
+    editor_.details = details != 0;
     // The settings are taken; an open window shows them when it can.
     ForEachEditor([&](Editor& editor) { editor.ApplySettings(editor_); });
     return kResultOk;

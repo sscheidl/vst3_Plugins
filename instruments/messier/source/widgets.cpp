@@ -331,6 +331,11 @@ void ToggleButton::SetValueInk(bool on) {
     invalid();
 }
 
+void ToggleButton::SetFlat(bool flat) {
+    flat_ = flat;
+    invalid();
+}
+
 void ToggleButton::SetIcon(Icon icon) {
     icon_ = icon;
     invalid();
@@ -356,6 +361,22 @@ void ToggleButton::DrawUnchecked(CDrawContext* context) {
         return;
     }
     const SkinColours& c = skin_->Colours();
+    if(flat_) {
+        // DETAILS (0.2.4): the word and a chevron on the panel, lit while open.
+        const CColor ink = on_ ? c.value : c.text;
+        const CFontRef font = skin_->Sans(12);
+        const CCoord word = TrackedWidth(context, title_, 1.8, font);
+        const CCoord left = std::round(area.left + (area.getWidth() - word - 16) / 2);
+        DrawTracked(context, title_, CRect(left, area.top, left + word + 2, area.bottom), kLeftText, 1.8, font, ink);
+        const CCoord x = left + word + 10, y = std::round(area.top + area.getHeight() / 2);
+        context->setFrameColor(ink);
+        context->setLineWidth(1.4);
+        const CCoord dir = on_ ? -1.0 : 1.0; // down: it opens; up: it closes
+        context->drawLine(CPoint(x - 4, y - 2 * dir), CPoint(x, y + 2 * dir));
+        context->drawLine(CPoint(x, y + 2 * dir), CPoint(x + 4, y - 2 * dir));
+        setDirty(false);
+        return;
+    }
     const SkinImage& face = skin_->Image(down ? SkinImageId::kButtonDown : SkinImageId::kButton);
     if(face) {
         DrawNinePart(context, face, area, 8);

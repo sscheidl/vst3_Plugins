@@ -142,6 +142,8 @@ struct Case {
     bool latch, stop, freeze;
     double pitch = 0;   // octaves (0.2.3: the grains' tint)
     bool dense = false; // many grains
+    GuiPreset preset = GuiPreset::kSlate; // 0.2.4
+    bool details = false;                 // 0.2.4: DETAILS open
 };
 
 } // namespace
@@ -175,10 +177,15 @@ int main(int argc, char** argv) {
 
     const auto wave = MakeWave();
     const Case cases[] = {
-        {"keys_lowest", true, -kKeyboardTransposeLimit, true, false, false, -3.0},
-        {"keys_highest_stop", true, kKeyboardTransposeLimit, false, true, false, 0.0},
-        {"nokeys_freeze", false, kKeyboardDefaultTranspose, true, false, true, 2.0},
-        {"dense_pitch_down", true, kKeyboardDefaultTranspose, false, false, false, -1.5, true},
+        {"slate_keys_lowest", true, -kKeyboardTransposeLimit, true, false, false, -3.0},
+        {"slate_details_highest_stop", true, kKeyboardTransposeLimit, false, true, false, 0.0, false,
+         GuiPreset::kSlate, true},
+        {"slate_nokeys_freeze", false, kKeyboardDefaultTranspose, true, false, true, 2.0},
+        {"slate_dense_pitch_down", true, kKeyboardDefaultTranspose, false, false, false, -1.5, true},
+        {"silver_details", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kSilver, true},
+        {"copper_details", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kCopper, true},
+        {"plate_details", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kPhotoPlate,
+         true},
     };
     for(const Case& c : cases) {
         controller->setParamNormalized(kParamStop, c.stop ? 1.0 : 0.0);
@@ -187,6 +194,8 @@ int main(int argc, char** argv) {
         EditorSettings settings;
         settings.keyboard = c.keyboard;
         settings.transpose = c.transpose;
+        settings.preset = c.preset;
+        settings.details = c.details;
         IPtr<Editor> editor(new Editor(controller, settings, EditorCallbacks{}), false);
         editor->ShowDisplay(MakeDisplay(c.freeze, c.dense), wave);
         FileStatus status;

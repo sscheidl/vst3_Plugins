@@ -104,6 +104,8 @@ class ToggleButton : public VSTGUI::CView {
     // The text always in the controls' light colour (0.2.2: the octave keys); dimmed
     // while disabled.
     void SetValueInk(bool on);
+    // No face (0.2.4, DETAILS): the text and a chevron, down while closed, up while open.
+    void SetFlat(bool flat);
     void draw(VSTGUI::CDrawContext* context) override;
     void DrawUnchecked(VSTGUI::CDrawContext* context);
     void onMouseDownEvent(VSTGUI::MouseDownEvent& event) override;
@@ -114,6 +116,7 @@ class ToggleButton : public VSTGUI::CView {
     Style style_;
     Icon icon_ = Icon::kNone;
     bool value_ink_ = false;
+    bool flat_ = false;
     std::function<void(bool)> toggled_;
     std::shared_ptr<const Skin> skin_;
     VSTGUI::SharedPointer<VSTGUI::CFontDesc> font_;

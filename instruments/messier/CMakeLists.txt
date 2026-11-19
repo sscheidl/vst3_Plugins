@@ -10,7 +10,7 @@
 #
 # Its own version; moduleinfo.json takes it from here. Keep it equal to
 # FULL_VERSION_STR in source/version.h and to components.json.
-project(Messier VERSION 0.2.3 LANGUAGES CXX)
+project(Messier VERSION 0.2.4 LANGUAGES CXX)
 
 # The SDK compiles everything with /fp:fast. The DSP, the adapter and their tests
 # use /fp:precise: the bit-exact comparison with the reference needs IEEE semantics.
@@ -115,12 +115,14 @@ set_target_properties(Messier PROPERTIES FOLDER "Messier")
 
 # The window's bitmaps (0.2.0): surfaces and materials of the GUI presets at 1x and 2x,
 # painted by Codex/GPT after docs/GRAFIKAUFTRAG_GUI.md, into the bundle's
-# Contents/Resources. Only Slate is delivered so far; gui_skin.cpp knows the names.
-set(MESSIER_GUI_IMAGES
-    messier_slate_chassis messier_slate_bezel messier_slate_plate messier_nebula_a
-    messier_nebula_b messier_slate_knob_l messier_slate_knob_s messier_slate_thumb
-    messier_slate_button messier_slate_button_down messier_keys_white
-    messier_keys_black)
+# Contents/Resources; gui_skin.cpp knows the names.
+# 0.2.4: eight per GUI preset and four shared, each at 1x and 2x.
+set(MESSIER_GUI_IMAGES messier_nebula_a messier_nebula_b messier_keys_white messier_keys_black)
+foreach(preset IN ITEMS slate silver copper plate)
+    foreach(stem IN ITEMS chassis bezel plate knob_l knob_s thumb button button_down)
+        list(APPEND MESSIER_GUI_IMAGES messier_${preset}_${stem})
+    endforeach()
+endforeach()
 set(MESSIER_GUI_BITMAPS "")
 foreach(image IN LISTS MESSIER_GUI_IMAGES)
     list(APPEND MESSIER_GUI_BITMAPS

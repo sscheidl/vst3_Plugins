@@ -1302,9 +1302,9 @@ void TestResizeGrip() {
     grip->DragTo(1000, 1000);
     CHECK(moved.size() == 2 && !grip->Dragging());
     // A corner drag of 40 by 25 pixels from 100 %: a size of the window's aspect ratio.
-    const EditorSize start = EditorSizeFor(1.0, true);
+    const EditorSize start = EditorSizeFor(1.0, true, false);
     const EditorSize asked{start.width + 40, start.height + 25};
-    const EditorSize allowed = ConstrainEditorSize(asked, start, 1.0, true, true);
+    const EditorSize allowed = ConstrainEditorSize(asked, start, 1.0, true, false, true);
     CHECK(allowed.width > start.width && allowed.height > start.height);
     CHECK(std::fabs(static_cast<double>(allowed.width) / allowed.height
                     - static_cast<double>(start.width) / start.height) < 0.01);
@@ -1410,26 +1410,30 @@ void TestViewLayout() {
     CHECK(white == kKeyboardWhiteKeys && black == 10);
     CHECK(ClampKeyboardTranspose(-36) == -24 && ClampKeyboardTranspose(13) == 12);
     const auto same = [](EditorSize a, EditorSize b) { return a.width == b.width && a.height == b.height; };
-    CHECK(same(EditorSizeFor(1.0, false), {880, 640}) && same(EditorSizeFor(1.0, true), {880, 724}));
+    // 0.2.4: 560 high, 84 more with the keyboard, 96 more with DETAILS open.
+    CHECK(same(EditorSizeFor(1.0, false, false), {880, 560}) && same(EditorSizeFor(1.0, true, false), {880, 644})
+          && same(EditorSizeFor(1.0, true, true), {880, 740}));
     using Clock = DragConstraint::Clock;
     Clock::time_point now{};
     DragConstraint drag;
     now += std::chrono::milliseconds(10);
-    CHECK(same(drag.Apply({1320, 640}, {880, 640}, 1.0, false, now), {1320, 960}));
+    CHECK(same(drag.Apply({1320, 560}, {880, 560}, 1.0, false, false, now), {1320, 840}));
     for(const bool keyboard : {false, true})
-        for(int w = 200; w <= 1600; w += 7)
-            for(int h = 80; h <= 900; h += 31) {
-                const EditorSize size = ConstrainEditorSize({w, h}, EditorSizeFor(1.0, keyboard), 1.0, keyboard, true);
-                CHECK(std::abs(size.height - size.width * EditorBaseHeight(keyboard) / kEditorWidth) < 1.0);
-                CHECK(size.width >= 440 && size.width <= 1760);
-            }
+        for(const bool details : {false, true})
+            for(int w = 200; w <= 1600; w += 7)
+                for(int h = 80; h <= 900; h += 31) {
+                    const EditorSize size =
+                        ConstrainEditorSize({w, h}, EditorSizeFor(1.0, keyboard, details), 1.0, keyboard, details, true);
+                    CHECK(std::abs(size.height - size.width * EditorBaseHeight(keyboard, details) / kEditorWidth) < 1.0);
+                    CHECK(size.width >= 440 && size.width <= 1760);
+                }
     for(const bool keyboard : {false, true})
         for(const double scale : {1.0, 1.5, 2.0})
             for(const double zoom : {0.5, 1.0, 1.3, 2.0}) {
-                const EditorSize size = EditorSizeFor(scale * zoom, keyboard);
-                CHECK(std::fabs(EditorZoomForSize(size.width, size.height, scale, keyboard) - zoom) < 0.005);
+                const EditorSize size = EditorSizeFor(scale * zoom, keyboard, true);
+                CHECK(std::fabs(EditorZoomForSize(size.width, size.height, scale, keyboard, true) - zoom) < 0.005);
             }
-    std::printf("layout: 25 keys where they are drawn; window 880 x 640 (724 with keys), aspect "
+    std::printf("layout: 25 keys where they are drawn; window 880 x 560 (+84 keys, +96 DETAILS), aspect "
                 "ratio and zoom limits kept\n");
 }
 
@@ -1601,7 +1605,7 @@ void TestWindow021() {
         CHECK(presets->isMultipleCheckStyle() && presets->getNbEntries() == 4);
         CHECK(presets->getEntry(0)->isChecked() && presets->getEntry(0)->isEnabled());
         for(int32 i = 1; i < 4; ++i)
-            CHECK(!presets->getEntry(i)->isChecked() && !presets->getEntry(i)->isEnabled());
+            CHECK(!presets->getEntry(i)->isChecked() && presets->getEntry(i)->isEnabled()); // 0.2.4: all delivered
         CHECK(!PopUpMenu(nullptr, sizes, VSTGUI::CPoint(), {})); // nothing to show it in
     }
     VSTGUI::exit();
@@ -1774,9 +1778,10 @@ void TestWindow022() {
         t += std::chrono::seconds(1);
         map->ShowAt(d, nullptr, t);
         CHECK(map->Afterglows(t) == 0);
-        // The next display: the first grain has ended, the second is still in it.
+        // The next display, 30 ms later with 23 quanta (30.7 ms of audio; 0.2.4, MS-R53: the
+        // audio's own time): the first grain has ended, the second is still in it.
         EngineDisplay next = d;
-        next.rendered = 2;
+        next.rendered = d.rendered + 23;
         next.grain_count = 1;
         next.grains[0] = d.grains[1];
         next.grains[0].phase = 0.56f;
@@ -1791,12 +1796,47 @@ void TestWindow022() {
         a.grains[1] = {8000.0f, 0.2f, 0.2f, 48000.0f, 10.0f};
         twin->ShowAt(a, nullptr, t);
         EngineDisplay b = a;
-        b.rendered = 2;
+        b.rendered = a.rendered + 23;
         b.grain_count = 1;
         b.grains[0] = a.grains[1];
         b.grains[0].phase = 0.5f;
         twin->ShowAt(b, nullptr, t + ms(30));
         CHECK(twin->Afterglows(t + ms(30)) == 1);
+        // MS-R53 (0.2.4, Codex' case): close phases, 0.90 and 0.85, and a late reply with only
+        // 10 quanta (13.3 ms of audio) after 30 ms. The second sounds on near 0.983; the first
+        // has ended and glows.
+        auto close = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
+        EngineDisplay c = d;
+        c.grains[0] = {1000.0f, 0.2f, 0.90f, 48000.0f, 10.0f};
+        c.grains[1] = {8000.0f, 0.2f, 0.85f, 48000.0f, 10.0f};
+        close->ShowAt(c, nullptr, t);
+        EngineDisplay e = c;
+        e.rendered = c.rendered + 10;
+        e.grain_count = 1;
+        e.grains[0] = c.grains[1];
+        e.grains[0].phase = static_cast<float>(0.85 + 10.0 * 10 * 64 / 48000.0);
+        close->ShowAt(e, nullptr, t + ms(30));
+        CHECK(close->Afterglows(t + ms(30)) == 1);
+        // MS-R54 (0.2.4): about 100 ms left and no display after it; the predicted end fades
+        // on the wall clock and is gone kTrail after it.
+        auto alone = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
+        EngineDisplay f = d;
+        f.grain_count = 1;
+        f.grains[0] = {1000.0f, 0.2f, 0.8f, 48000.0f, 2.0f};
+        alone->ShowAt(f, nullptr, t);
+        CHECK(alone->EndedFor(0, t + ms(50)) < 0);
+        CHECK(std::abs(alone->EndedFor(0, t + ms(350)) - 0.25) < 1e-6);
+        CHECK(alone->EndedFor(0, t + ms(450)) >= MapView::kTrail);
+        // START (0.2.4): the thumb stands on the left loop bracket, at the start, the middle
+        // and near the end of the file.
+        for(const double start : {0.0, 0.5, 0.98}) {
+            auto view = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(8, 54, 872, 396), layout::kBezelEdge);
+            EngineDisplay g = d;
+            g.loop_start = start * g.frames;
+            view->ShowAt(g, nullptr, t);
+            view->SetStart(start);
+            CHECK(std::abs(view->StartX() - view->FrameX(view->ShownLoop(t + std::chrono::seconds(1)).start)) < 1e-9);
+        }
         // Another file: the glow is gone at once.
         EngineDisplay other = next;
         other.sequence = 2;
@@ -1809,13 +1849,18 @@ void TestWindow022() {
     // from the plate, whose bottom (and the window's size) stays.
     CHECK(layout::kStopRight + layout::kHeaderGap == layout::kSizeLeft
           && layout::kSizeRight + layout::kHeaderGap == layout::kPresetLeft);
-    CHECK(layout::kLatchTop == layout::kFreezeTop && layout::kKeysTop == layout::kResetTop);
+    // 0.2.4: KEYS in the header group; LATCH, the octave keys and the keyboard one row
+    // inside the margins; FREEZE and RESET beside the third group.
+    CHECK(layout::kKeysRight + layout::kHeaderGap == layout::kStopLeft);
+    CHECK(layout::kLatchLeft >= layout::kMargin && layout::kOctaveUpLeft + layout::kButtonWidth <= layout::kWidth - layout::kMargin);
+    CHECK(layout::ColumnLeft(8) + layout::kColumnWidth < layout::kButtonColumnLeft
+          && layout::kButtonColumnLeft + layout::kButtonWidth <= layout::kWidth - 16);
     CHECK(layout::kAxisBottom < layout::kMarkerTop && layout::kMarkerBottom <= layout::kPlateTop - layout::kBezelEdge);
-    CHECK(layout::kPlateTop + layout::kPlateHeight == 274 && layout::kTopHeight == 640);
+    CHECK(layout::kPlateTop + layout::kPlateHeight == 274 && layout::kTopHeight == 560);
     // Slate: blue-violet controls, orange markers, kept apart.
     const SkinColours& slate = PresetInfo(GuiPreset::kSlate).colours;
-    CHECK(slate.control == VSTGUI::CColor(157, 172, 235) && slate.value == VSTGUI::CColor(190, 200, 255));
-    CHECK(slate.marker == VSTGUI::CColor(227, 115, 61));
+    CHECK(slate.control == VSTGUI::CColor(165, 159, 242) && slate.value == VSTGUI::CColor(200, 197, 254));
+    CHECK(slate.marker == VSTGUI::CColor(255, 170, 88)); // 0.2.4: the delivered tables
     // 0.2.3: PITCH tints the grains only away from 0 octaves.
     CHECK(MapView::PitchTint(slate.tail, 0.0) == slate.tail && MapView::PitchTint(slate.tail, -3.0) != slate.tail
           && MapView::PitchTint(slate.tail, 2.0).blue > slate.tail.blue);
@@ -1832,11 +1877,12 @@ void TestWindow022() {
 // preset number not known is refused.
 void TestGuiPresets() {
     int checked = 0;
+    for(std::int32_t p = 0; p < kGuiPresetCount; ++p)
     for(std::size_t i = 0; i < kSkinImageCount; ++i) {
         const auto id = static_cast<SkinImageId>(i);
         for(int scale : {1, 2}) {
             const std::filesystem::path file =
-                std::filesystem::path(MESSIER_GUI_DIR) / SkinImageFileName(GuiPreset::kSlate, id, scale);
+                std::filesystem::path(MESSIER_GUI_DIR) / SkinImageFileName(static_cast<GuiPreset>(p), id, scale);
             std::ifstream in(file, std::ios::binary);
             unsigned char head[24] = {};
             in.read(reinterpret_cast<char*>(head), sizeof head);
@@ -1850,10 +1896,11 @@ void TestGuiPresets() {
             ++checked;
         }
     }
-    CHECK(checked == 24); // 12 images (no screw since 0.2.2), 1x and 2x
+    CHECK(checked == 96); // 0.2.4: all four presets, 12 images each (4 shared), 1x and 2x
     CHECK(SkinImageFileName(GuiPreset::kPhotoPlate, SkinImageId::kChassis, 2) == "messier_plate_chassis@2x.png");
     CHECK(SkinImageFileName(GuiPreset::kCopper, SkinImageId::kNebulaA, 1) == "messier_nebula_a@1x.png");
-    CHECK(PresetInfo(GuiPreset::kSlate).delivered && ShownPreset(GuiPreset::kSilver) == GuiPreset::kSlate);
+    for(std::int32_t p = 0; p < kGuiPresetCount; ++p) // 0.2.4: all delivered
+        CHECK(PresetInfo(static_cast<GuiPreset>(p)).delivered && ShownPreset(static_cast<GuiPreset>(p)) == static_cast<GuiPreset>(p));
     CHECK(ShownPreset(static_cast<GuiPreset>(9)) == GuiPreset::kSlate);
     // The seconds axis: labels at least 64 units apart on the 840 of the plate.
     CHECK(layout::AxisStep(8.0, 840) == 1 && layout::AxisStep(0.5, 840) == 0.05 && layout::AxisStep(600, 840) == 60);
@@ -1863,7 +1910,8 @@ void TestGuiPresets() {
     IPtr<HostApplication> app = owned(new HostApplication());
     IPtr<Controller> controller = owned(new Controller());
     CHECK(controller->initialize(app) == kResultOk);
-    auto load = [&](std::int32_t version, double zoom, std::int8_t keys, std::int32_t transpose, const std::int32_t* preset) {
+    auto load = [&](std::int32_t version, double zoom, std::int8_t keys, std::int32_t transpose, const std::int32_t* preset,
+                    std::int8_t details = -1) {
         MemoryStream stream;
         int32 written = 0;
         stream.write(&version, 4, &written);
@@ -1872,6 +1920,8 @@ void TestGuiPresets() {
         stream.write(&transpose, 4, &written);
         if(preset)
             stream.write(const_cast<std::int32_t*>(preset), 4, &written);
+        if(details >= 0)
+            stream.write(&details, 1, &written);
         stream.seek(0, IBStream::kIBSeekSet, nullptr);
         return controller->setState(&stream);
     };
@@ -1882,16 +1932,19 @@ void TestGuiPresets() {
     CHECK(controller->getState(&own) == kResultOk);
     int64 length = 0;
     own.seek(0, IBStream::kIBSeekEnd, &length);
-    CHECK(length == 21);
+    CHECK(length == 22); // version 3 (0.2.4): DETAILS as one byte at the end
+    CHECK(!controller->WindowSettings().details); // a song of 0.2.3: DETAILS closed
+    CHECK(load(3, 1.0, 1, 0, &copper, 1) == kResultOk && controller->WindowSettings().details);
     CHECK(load(1, 1.0, 1, -12, nullptr) == kResultOk); // a song of 0.1.x
     CHECK(controller->WindowSettings().preset == GuiPreset::kSlate && controller->WindowSettings().keyboard);
     CHECK(load(2, 1.0, 1, 0, &unknown) == kResultFalse);
     CHECK(load(2, 1.0, 1, 0, nullptr) == kResultFalse); // version 2 without its preset
-    CHECK(load(3, 1.0, 1, 0, &copper) == kResultFalse);
+    CHECK(load(3, 1.0, 1, 0, &copper) == kResultFalse); // version 3 without DETAILS
+    CHECK(load(4, 1.0, 1, 0, &copper, 0) == kResultFalse);
     CHECK(controller->WindowSettings().preset == GuiPreset::kSlate);
     CHECK(controller->terminate() == kResultOk);
-    std::printf("gui presets: 26 Slate bitmaps in the resources at the brief's sizes; presets not "
-                "delivered show as Slate; the preset saved with the window (state 2), state 1 read as Slate\n");
+    std::printf("gui presets: the bitmaps of all four presets in the resources at the brief's sizes; the "
+                "preset and DETAILS saved with the window (state 3), states 1 and 2 read\n");
 }
 
 void TestProjectBackpressure() {

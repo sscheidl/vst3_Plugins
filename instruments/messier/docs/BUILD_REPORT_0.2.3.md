@@ -45,7 +45,7 @@ way as well (`AnimateLater`), which checks the editor and the window serial firs
 * `source/editor.cpp`: PITCH to the map.
 * `tests/test_plugin.cpp`: the drift test keeps displays coming; new checks for points 1,
   2, 3 and 5, and for the tint at 0.
-* `tests/preview_window.cpp`: PITCH per case (-3, 0, +2) and a case with 24 grains.
+* `tests/preview_window.cpp`: PITCH per case (-3, 0, +2) and a case with 20 grains (the most a display carries).
 * Version 0.2.3 in `CMakeLists.txt`, `components.json` and `source/version.h`. CHANGELOG,
   README and `DAW_TEST_0.1.0.md` (section 0.2.3) are updated.
 
@@ -63,7 +63,7 @@ ASan was not run this time; the changes are drawing code and checks on plain val
 The firmware comparison is part of `messier.plugin` and stays bit-exact.
 
 Previews: `preview_messier_window` gives 12 pictures in `out/messier-0.2.3/preview/`,
-including PITCH -3, 0 and +2 and a case with 24 grains. I looked at them: the rays and
+including PITCH -3, 0 and +2 and a case with 20 grains (the most a display carries). I looked at them: the rays and
 the tint show (rose at -3, warm at 0, blue-violet at +2) and the dense case stays calm.
 
 ## Open

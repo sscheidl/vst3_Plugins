@@ -1,8 +1,9 @@
-// Where things are in the window (0.2.0), in window units at 100 %: the window study,
-// version 3, with the user's decisions of 2026-11-18 (STOP in the header, 15 keys at the
-// key bitmap's size) and the design round of 2026-11-19 (0.2.2: SPRAY in the upper row,
-// LATCH and KEYS under it, the octave keys as large as those, a lane of its own for the
-// position triangle, no screws). Free of VSTGUI types, so the tests can check it.
+// Where things are in the window, in window units at 100 %. Since 0.2.4 the GUI standard
+// of 2026-11-19 (the graphite template): one layout for all GUI presets. A compact header
+// (brand, LOAD and the file, KEYS, STOP, size and preset), the plate view with START under
+// it on the same x axis, the primary knobs in three groups with FREEZE and RESET beside
+// them, the secondary knobs under DETAILS (closed for a new instance) and the keyboard
+// section with LATCH and the octave keys. Free of VSTGUI types, so the tests can check it.
 #pragma once
 
 #include <cmath>
@@ -12,65 +13,86 @@
 namespace messier::layout {
 
 constexpr double kWidth = 880;
-constexpr double kTopHeight = 640;       // without the keyboard
-constexpr double kKeyboardSection = 84;  // the chassis bitmap holds it below
+constexpr double kTopHeight = 560;       // without DETAILS and the keyboard
+constexpr double kDetailsSection = 96;   // the secondary knobs, while DETAILS is open
+constexpr double kKeyboardSection = 84;  // below everything else
 constexpr double kMargin = 20;
 
-// The header.
-constexpr double kHeaderRule = 44;
-constexpr double kButtonTop = 12, kButtonHeight = 26;
-// STOP and the two symbol keys as one group, 6 units apart (0.2.2).
+// The height above the keyboard section.
+constexpr double TopHeight(bool details) {
+    return kTopHeight + (details ? kDetailsSection : 0.0);
+}
+
+// The header: brand, LOAD and the file on the left; KEYS, STOP, size and preset on the
+// right, as one group 6 units apart.
+constexpr double kHeaderRule = 52;
+constexpr double kButtonTop = 13, kButtonHeight = 26;
 constexpr double kHeaderGap = 6;
-constexpr double kPresetLeft = 822, kPresetRight = 852;
+constexpr double kPresetRight = 864, kPresetLeft = kPresetRight - 30;
 constexpr double kSizeRight = kPresetLeft - kHeaderGap, kSizeLeft = kSizeRight - 30;
-constexpr double kStopRight = kSizeLeft - kHeaderGap, kStopLeft = kStopRight - 60;
-constexpr double kVersionRight = kStopLeft - 14;
+constexpr double kStopRight = kSizeLeft - kHeaderGap, kStopLeft = kStopRight - 68;
+constexpr double kKeysRight = kStopLeft - kHeaderGap, kKeysLeft = kKeysRight - 68;
+constexpr double kBrandLeft = 22, kBrandStroke = 190; // the accent stroke after MESSIER
+constexpr double kLoadLeft = 204, kLoadTop = kButtonTop, kLoadRight = 274, kLoadBottom = kButtonTop + kButtonHeight;
+constexpr double kFileLeft = 288, kFileRight = 636, kCatalogueLeft = 548;
+constexpr double kFileNameTop = 6, kFileNameBottom = 28, kFileInfoBottom = 44;
 
-// The file line.
-constexpr double kLoadLeft = 22, kLoadTop = 52, kLoadRight = 108, kLoadBottom = 80;
-constexpr double kFileLeft = 138, kFileRight = 760;
-constexpr double kFileNameTop = 48, kFileNameBottom = 70, kFileInfoBottom = 86;
-
-// The plate view: the time axis, the plate in its bezel (since 0.2.1 with the waveform on
-// the glass, the user's trial), the START slider and its row. Its x axis (the file) runs
-// from kTimeLeft to kTimeRight.
-constexpr double kMapLeft = 8, kMapTop = 84, kMapRight = 872, kMapBottom = 426;
+// The plate view: the time axis, the plate in its bezel (with the waveform on the glass),
+// the START slider and its row. Its x axis (the file) runs from kTimeLeft to kTimeRight,
+// for the plate and START alike (0.2.4: the thumb stands on the left loop bracket).
+constexpr double kMapLeft = 8, kMapTop = 54, kMapRight = 872, kMapBottom = kMapTop + 342;
 constexpr double kTimeLeft = 20, kTimeRight = 860;
 constexpr double kBezelEdge = 12;
 // Inside the plate view, from its top: the axis labels, their ticks, the lane of the
-// position triangle (0.2.2, taken from the plate's height so the window keeps its size),
-// the bezel and the glass.
+// position triangle, the bezel and the glass.
 constexpr double kAxisBottom = 20;   // the axis labels above, then the ticks
 constexpr double kMarkerTop = 21, kMarkerBottom = 30; // the position triangle's lane
 constexpr double kPlateTop = 42;     // the glass: its bitmap (186 high) stretched to 232
-constexpr double kPlateHeight = 232; // 0.2.0: 186, with the waveform below it; 0.2.1: 242
+constexpr double kPlateHeight = 232;
 constexpr double kSliderTop = 290, kSliderHeight = 30;
 constexpr double kRowTop = 322, kRowHeight = 18;
 
-// The knobs: nine columns, two rows, engraved rules between.
-constexpr int kColumns = 9;
-constexpr double kColumnWidth = (kWidth - 2 * kMargin) / kColumns;
-constexpr double kRuleAboveKnobs = 428;
-constexpr double kNameTop = 434, kKnobTop = 450, kKnobSize = 72, kValueTop = 522;
-constexpr double kRuleBetweenRows = 546;
-constexpr double kSmallNameTop = 552, kSmallKnobTop = 566, kSmallKnobSize = 48, kSmallValueTop = 614;
-constexpr double kColumnRuleX = kMargin + 8 * kColumnWidth - 2; // beside Volume, FREEZE, RESET
-// The keys of the lower row, all of one size: LATCH and KEYS in the first column (0.2.2),
-// FREEZE and RESET in the last; the octave keys beside the keyboard have that size too.
-constexpr double kButtonWidth = 82;
-constexpr double kFreezeTop = 556, kResetTop = 594;
-constexpr double kLatchTop = kFreezeTop, kKeysTop = kResetTop;
-
+// The primary knobs: nine columns in three groups (SPRAY SPEED LOOP SIZE, DENSITY PITCH
+// OVERLAP WINDOW, BLEND VOLUME), FREEZE and RESET beside the last.
+constexpr double kColumnWidth = 82;
+constexpr double kGroupGap = 14; // the rule between two groups stands in its middle
+constexpr double kFirstColumn = 16;
+constexpr double kRuleAboveKnobs = 402;
+constexpr double kNameTop = 410, kKnobTop = 428, kKnobSize = 72, kValueTop = 502;
+constexpr int GroupOf(int column) {
+    return column < 3 ? 0 : column < 7 ? 1 : 2;
+}
 constexpr double ColumnLeft(int column) {
-    return kMargin + column * kColumnWidth;
+    return kFirstColumn + column * kColumnWidth + GroupOf(column) * kGroupGap;
+}
+constexpr double kGroupRule1 = ColumnLeft(3) - kGroupGap / 2;
+constexpr double kGroupRule2 = ColumnLeft(7) - kGroupGap / 2;
+// All keys of the window but the header's share one size.
+constexpr double kButtonWidth = 74;
+constexpr double kButtonColumnLeft = ColumnLeft(8) + kColumnWidth + 8;
+constexpr double kFreezeTop = kKnobTop + 4, kResetTop = kKnobTop + 42;
+
+// DETAILS: the bar with its switch, and below it, while open, the five secondary knobs.
+constexpr double kDetailsBarTop = 528, kDetailsBarHeight = 24;
+constexpr double kDetailsLeft = 380, kDetailsRight = 500;
+constexpr double kSmallNameTop = kTopHeight + 8, kSmallKnobTop = kTopHeight + 24, kSmallKnobSize = 48,
+                 kSmallValueTop = kTopHeight + 76;
+constexpr int kSmallColumns = 5;
+constexpr double SmallColumnLeft(int column) {
+    return (kWidth - kSmallColumns * kColumnWidth) / 2 + column * kColumnWidth;
 }
 
-// The keyboard section: the octave keys, 15 white keys of 36 units.
-constexpr double kKeyboardRule = kTopHeight + 2;
-constexpr double kPianoTop = kTopHeight + 10, kPianoHeight = 66;
+// The keyboard section, from its top (TopHeight): LATCH, the octave keys and 15 white keys
+// of 36 units, centred as one row.
+constexpr double kKeyboardRule = 2;
+constexpr double kPianoTop = 10, kPianoHeight = 66;
 constexpr double kKeyboardWidth = 15 * 36;
-constexpr double kKeyboardLeft = (kWidth - kKeyboardWidth) / 2;
-constexpr double kOctaveGap = 10; // between an octave key and the keyboard
+constexpr double kOctaveGap = 10; // between the keys of the row
+constexpr double kRowWidth = 3 * kButtonWidth + 3 * kOctaveGap + kKeyboardWidth;
+constexpr double kLatchLeft = (kWidth - kRowWidth) / 2;
+constexpr double kOctaveDownLeft = kLatchLeft + kButtonWidth + kOctaveGap;
+constexpr double kKeyboardLeft = kOctaveDownLeft + kButtonWidth + kOctaveGap;
+constexpr double kOctaveUpLeft = kKeyboardLeft + kKeyboardWidth + kOctaveGap;
 constexpr double kKeyButtonTop = kPianoTop + (kPianoHeight - kButtonHeight) / 2;
 
 constexpr double kGripSize = 18;
