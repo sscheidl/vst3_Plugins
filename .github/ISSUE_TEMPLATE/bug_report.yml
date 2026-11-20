@@ -1,0 +1,101 @@
+name: Bug report
+description: Something in one of the plug-ins does not work, sounds wrong or crashes.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for chasing bugs! These plug-ins are a free, non-profit project, written
+        largely with AI coding tools (Claude Code, Codex) and tested by hand. Every
+        report helps. The more exactly we can reproduce it, the faster it gets fixed.
+
+  - type: input
+    id: plugin
+    attributes:
+      label: Plug-in and version
+      description: As shown in the plug-in window or your host's plug-in list.
+      placeholder: "Messier 1.0 beta 1"
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Host (DAW) and version
+      placeholder: "Studio One 7.1.2"
+    validations:
+      required: true
+
+  - type: input
+    id: system
+    attributes:
+      label: Operating system
+      placeholder: "Windows 11 24H2, x64"
+    validations:
+      required: true
+
+  - type: input
+    id: audio
+    attributes:
+      label: Sample rate and buffer size
+      placeholder: "48 kHz, 256 samples"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you saw or heard. For a crash, say whether the host closed or froze.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: false
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: From opening the host to the problem, as short as possible.
+      placeholder: |
+        1. Insert the plug-in on an instrument track
+        2. Load a WAV file (24-bit, 44.1 kHz, stereo)
+        3. Turn PITCH fully left while FREEZE is on
+        4. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often?
+      options:
+        - Every time
+        - Sometimes
+        - Once so far
+    validations:
+      required: true
+
+  - type: textarea
+    id: material
+    attributes:
+      label: Files, screenshots, recordings
+      description: |
+        If you can, attach a small project file, the audio file you loaded (or its format:
+        bit depth, sample rate, channels, length), a screenshot or a short recording.
+        For crashes, the host's crash log helps a lot.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before sending
+      options:
+        - label: I looked through the open issues and did not find this bug there.
+          required: false
