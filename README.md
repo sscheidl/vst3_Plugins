@@ -14,6 +14,7 @@ prove and records what was learned.
 | Project | Kind | Status |
 | --- | --- | --- |
 | [Toy Piano Classic](instruments/toy-piano-classic/) | Instrument | 0.3.2: builds, validated, tested and code-reviewed; 0.1.0 loads in Studio One, not yet listened to |
+| [Toy Piano Generative](instruments/toy-piano-generative/) | Instrument | 0.1.0: the Toy Piano engine played by a generative step sequencer that follows the host's transport; keys and MIDI notes transpose the sequence. Builds, validated and tested automatically; not loaded in a DAW, not listened to; Codex's review open |
 | [Mendelejew](instruments/elements/) | Instrument | 0.1.4: true 48 kHz Elements DSP; octave keyboard controls, Damping reversed as in Kekulé, snowflake Freeze and future-function navigation; high-note investigation without DSP changes; reviewed by Claude, Codex's check of the Damping change open. Earlier build played in the user's DAW |
 | [Kekulé](instruments/torus-classic/) | Instrument | 0.3.1: builds, validated and tested automatically; 4, 8 or 16 voices, octave keys, no Plug-in Nap; released by Codex, not tried in a DAW yet; 0.1.0 loads and plays in Studio One |
 

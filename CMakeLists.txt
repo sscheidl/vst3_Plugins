@@ -78,5 +78,7 @@ add_subdirectory("${SDK_ROOT}/public.sdk/samples/vst-hosting/editorhost"
 # Plug-ins
 # ---------------------------------------------------------------------------
 add_subdirectory(instruments/toy-piano-classic)
+# Uses the engine target of Toy Piano Classic, so it comes after it.
+add_subdirectory(instruments/toy-piano-generative)
 add_subdirectory(instruments/torus-classic)
 add_subdirectory(instruments/elements)

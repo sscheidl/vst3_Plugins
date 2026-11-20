@@ -4,7 +4,9 @@ Stand: 2026-11-14. Das erste Testobjekt, Toy Piano Classic 0.3.2, ist gebaut
 und automatisch geprüft. In Studio One lädt es, die Regler reagieren. Angehört
 wurde es noch nicht; Waveform und Live stehen aus. Dazugekommen sind Torus
 Classic und, als dritter Port, Mendelejew (Projekt Elements); ihr Stand steht in den
-Abschnitten unten.
+Abschnitten unten. Seit 2026-11-16 gibt es als viertes Plugin Toy Piano
+Generative: kein Port, sondern ein generativer Sequencer vor dem Klangkern des
+ersten.
 
 ## Entscheidungen
 
@@ -59,6 +61,68 @@ Bei der Umsetzung selbst festgelegt, weil die Vorgaben es offen ließen:
 | Klaviatur: Notenweg | VST3-Nachricht vom Controller an den Processor, dort über die lock-free Queue der Firmware in den Audio-Thread | Der vorgesehene VST3-Weg zwischen den beiden Hälften; die Queue ist unverändert aus der Firmware übernommen |
 | Klaviatur: Vorgabe | Eingeblendet; der Zustand wird mit dem Projekt gespeichert | Projekte aus 0.2.0 öffnen mit Klaviatur |
 | Oberton an der Abschaltgrenze (Review R07) | Seit 0.3.2 im Plugin linear ausgeblendet zwischen 0,20 und 0,25 der Abtastrate; Firmware vorerst unverändert | Billigste Lösung: keine Rechenlast pro Sample. Vom Nutzer so entschieden (2026-11-14). Noten 123–126 (48 kHz) klingen dadurch anders als in der Firmware |
+
+### Toy Piano Generative
+
+Viertes Plugin, Auftrag vom 2026-11-15, gebaut am 2026-11-16: der Klangkern
+von Toy Piano Classic, gespielt von einem generativen Schritt-Sequencer.
+Version 0.1.0 ist gebaut, vom validator geprüft und automatisch getestet. In
+einer DAW geladen, angesehen oder angehört ist sie nicht; die Prüfung durch
+Codex steht aus
+([Prüfauftrag](../instruments/toy-piano-generative/docs/CODEX_PRUEFAUFTRAG_0.1.0.md),
+[DAW-Prüfliste](../instruments/toy-piano-generative/docs/DAW_TEST_0.1.0.md)).
+
+Der Sequencer ist ein statistischer Nachbau nach einer Verhaltensspezifikation
+des Nutzers, die nicht in diesem Repository liegt: gleiche Regeln und
+Wahrscheinlichkeiten, eigener Zufallsgenerator, kein fremder Code. Die Regeln
+stehen in eigenen Worten im
+[README des Plugins](../instruments/toy-piano-generative/README.md).
+
+Vom Nutzer entschieden (2026-11-15 und 2026-11-16):
+
+| Thema | Entscheidung |
+| --- | --- |
+| Form | Neues Instrument `toy-piano-generative` mit eigenen Klassen-IDs; Toy Piano Classic bleibt unverändert |
+| Nachbau | Statistisch, nicht 1:1: „Der statistische Ansatz passt für mich" |
+| Stimmung | In der Vorgabe exakt; stufenlos bis zum ganzzahligen Hertz darunter |
+| Startmuster | Pausen statt eines tiefen Tons |
+| Fenster | Wie Toy Piano Classic, dazu eine Reihe für den Sequencer; keine Schrittanzeige |
+| Transponieren | Schon in 0.1.0. Ein Schalter: an setzt eine Taste Tonika und Oktave der Sequenz, aus spielt sie eine Note. MIDI-Noten ebenso. Wirkt sofort |
+| Schwarze Tasten | Alle zwölf Tonika, obwohl die Spezifikation nur die sieben Stammtöne kennt |
+| Oktavknöpfe | Verschieben den sichtbaren Tastenbereich und transponieren die Sequenz um dieselbe Oktave |
+| Gemeinsamer Code | Oktavknöpfe aus Mendelejew nachgebaut, nichts nach `common/`; der Sequencer-Kern bleibt im Plugin-Verzeichnis |
+| Vier unklare Stellen der Spezifikation | Lesarten des Bauenden als Annahmen übernommen, im README unter „Choices and deviations" 1 bis 4; noch gegen das Original zu prüfen |
+
+Bei der Umsetzung selbst festgelegt, weil der Auftrag es offen ließ:
+
+| Thema | Festlegung | Begründung |
+| --- | --- | --- |
+| Klangkern | Das Plugin linkt das Target `toy_piano_core` aus Toy Piano Classic, statt die vier Firmware-Dateien ein zweites Mal abzulegen | Zwei Kopien derselben unveränderten Dateien müssten gemeinsam gepflegt werden; Classic ändert sich dadurch nicht |
+| Hülle | Kopie aus Toy Piano Classic 0.3.2 im eigenen Namensraum | Wie bei Kekulé und Mendelejew: Verschieben nach `common/` hätte ein geprüftes Plugin geändert |
+| Sequencer-Kern | Reines C++20 ohne SDK, ohne Allokation, eigenes Target `generative_sequencer` | Auf dem Host einzeln testbar und später auf Daisy übernehmbar |
+| Tonlage | Sequencer-Note + 24 Halbtöne; Noten über 127 eine Oktave tiefer | Vorgabe (Tonika A, Oktave 2) liegt dann bei A3 bis G5, um die Tasten des Toy Piano. Der Nutzer hatte keine Vorgabe; eine Konstante (`kSequencerTranspose`) |
+| Transport | Schritte nur bei laufendem Host-Transport und RUN an, auf den Sechzehnteln der Songposition, samplegenau. Jeder Start beginnt bei Schritt 1; Muster und Zufallsgenerator laufen weiter. Sprünge (Loop) starten nicht neu | Ein Sequencer ohne eigene Uhr soll dem Projekt folgen; ein Neustart je Durchlauf wäre bei Schleifen ungewollt |
+| Ohne Tempo oder Position | 130 BPM (Vorgabe der Spezifikation); Zählung ab Start | Der validator und einfache Hosts melden beides nicht |
+| Takt über Blockgrenzen | Jede Sechzehntel genau einmal: eine knapp verpasste kommt noch, eine schon gespielte nicht erneut | Bei Tempowechseln stimmt die Hochrechnung des letzten Blocks nicht mit der neuen Position überein |
+| Zufall | Je Instanz ein eigener Startwert aus Zufallsquelle und Uhr, beim Erzeugen der Instanz. Zustand des Generators im Projekt | Zwei Instanzen sollen nicht dasselbe spielen. Anders als bei Kekulé und Mendelejew, wo der Zufall Teil des Klangs ist und jedes Rendern gleich sein soll |
+| Folge für Exporte | Mit Mutation über 0 klingen zwei Durchläufe verschieden | Das Muster läuft weiter, es spult nicht mit dem Song zurück. Im README unter „Limits" |
+| Zustand | Klangwerte, Sequencer-Einstellungen, die 16 Schritte, Zufallszustand; nicht die Position. Werte außerhalb der Bereiche werden abgelehnt, nicht geklemmt | Ein geladenes Projekt startet ohnehin bei Schritt 1; ein beschädigter Zustand soll nie teilweise wirken |
+| Übergabe zwischen den Threads | Der Sequencer gehört dem Audio-Thread. Er veröffentlicht seinen Zustand über eine Sequenzsperre aus atomaren Worten; `setState` hinterlegt einen Zustand, den der Audio-Thread am nächsten Blockanfang übernimmt; eine Anfragenummer sagt `getState`, welcher von beiden gilt | Keine Sperre im Audio-Thread, und `getState` direkt nach `setState` liefert das Geladene, auch wenn kein Audio läuft |
+| Laden zieht kein Muster | Der Skalenparameter zieht nur neu, wenn sich die Skala ändert | Sonst wäre das gespeicherte Muster nach jedem Laden verloren |
+| Sequencer-Einstellungen | Wirken am Blockanfang, hörbar ab dem nächsten Schritt | Wie die übrigen Parameter; Schritte liegen mindestens 15 ms auseinander |
+| MIDI-Transposition | Im Processor, am Sample der Note; neue Werte von Tonic und Octave gehen über die Ausgangs-Parameteränderungen an den Host | Nur so wirkt die Note taktgenau; ob der Host die Werte anzeigt, entscheidet er |
+| Tasten der Bildschirm-Klaviatur | Ändern Tonic und Octave als gewöhnliche Parameter-Edits über den Controller | Der vorgesehene VST3-Weg; der Host kann sie aufnehmen |
+| Oktavknöpfe an den Grenzen | Klaviatur (C1 bis C7) und Oktave (0 bis 5) halten getrennt an | Eine Taste kann die Oktave ohnehin unabhängig vom sichtbaren Bereich setzen |
+| Stimmung | Je Stimme ein Faktor, beim Anschlag aus der klingenden Note berechnet, vor Master Pitch; gilt für alle Noten | Kleine Ergänzung im vorhandenen Weg der Tonhöhe; bei 0 % ist der Faktor exakt 1 und der bitgenaue Vergleich mit dem Kern gilt weiter |
+| Anschlag der Sequencer-Noten | Velocity 100 | Wie die Tasten der Firmware und die Bildschirm-Klaviatur |
+| Skala ohne Namen | Anzeige „Odd" | Die Spezifikation nennt für die vierte Liste keinen Namen |
+| Gleitkomma-Modell | `/fp:precise` für Kern, Hülle und Tests | Zustandsprüfung und Kennlinie verlassen sich auf NaN-Vergleiche |
+| Regler-Edits | Ein Ziehen meldet dem Host Anfang und Ende (`beginEdit`, `endEdit`) | Für die Schalter nötig; für die Regler mit eingebaut. Toy Piano Classic tut das nicht, siehe „Offen" |
+| Tests | Statistik mit festen Startwerten und Schranke von fünf Standardabweichungen; Schritte bitgenau gegen den Kern; keine neuen Fenstertests außer den Oktavknöpfen | Der Nutzer prüft Optik, GUI und DAW selbst |
+
+Nicht in 0.1.0: Parameter-Locks, Gate-, Hüllkurven- und Glide-Regeln, zweiter
+Oszillator, LFO-Wege, Sync-Impulse, Schrittanzeige, Feinstimmung, die
+„Age"-Idee, der Bau für Daisy.
 
 ### Kekulé (Projektname Torus Classic)
 
@@ -217,6 +281,13 @@ wichtigste Unbekannte ist die MIDI-Steuerung: VST3 reicht Controller nicht roh
 durch. Das Plugin meldet dem Host, welcher Controller zu welchem Parameter
 gehört; ob Pitch Bend und die drei CCs ankommen, entscheidet der Host. Das
 lässt sich nur in Studio One, Waveform und Live selbst feststellen.
+
+### Toy Piano Classic: Regler ohne `beginEdit`/`endEdit`
+
+Beim Bau von Toy Piano Generative aufgefallen, dort behoben, in Classic nicht
+angefasst: Die Regler melden dem Host Wertänderungen, aber weder Anfang noch
+Ende eines Edits. Manche Hosts brauchen beides, um Automation aufzunehmen. Ob
+es in Studio One stört, ist nicht geprüft.
 
 ### CI (Schritt 7)
 
