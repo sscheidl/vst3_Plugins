@@ -16,6 +16,7 @@
 #include "gui_layout.h"
 #include "gui_skin.h"
 #include "map_view.h"
+#include "message_text.h"
 #include "parameters.h"
 #include "plugin_ids.h"
 #include "processor.h"
@@ -166,12 +167,15 @@ class EmptyDroppingAttributes : public U::Implements<U::Directly<IAttributeList>
             ++dropped;
             return kResultFalse;
         }
+        if(refused && id && std::strcmp(id, refused) == 0) // 0.2.8, MS-R58: a text the host does not take
+            return kResultFalse;
         return inner_->setBinary(id, data, size);
     }
     tresult PLUGIN_API getBinary(AttrID id, const void*& data, uint32& size) override {
         return inner_->getBinary(id, data, size);
     }
     static inline int dropped = 0;
+    static inline const char* refused = nullptr;
 
   private:
     IPtr<IAttributeList> inner_ = HostAttributeList::make();
@@ -769,11 +773,65 @@ void TestHostWithoutEmptyTexts() {
     CHECK(controller->File().path == other && controller->File().request_state == RequestState::kFailed
           && controller->File().request == missing && !controller->File().detail.empty());
     CHECK(EmptyDroppingAttributes::dropped == 0); // no empty text is sent any more
+    // MS-R58: a text the host does not take (here the format line) means no status at
+    // all, not one that reads as if the text were empty.
+    EmptyDroppingAttributes::refused = kAttrInfo;
+    CHECK(controller->LoadFile(g_path));
+    CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
+    CHECK(controller->RequestFileStatus());
+    CHECK(controller->File().path == other && controller->File().info == "48 kHz stereo, 16 bit, 0:03.0");
+    EmptyDroppingAttributes::refused = nullptr;
+    CHECK(controller->RequestFileStatus());
+    CHECK(controller->File().path == g_path && controller->File().request_state == RequestState::kNone);
     CHECK(processor_point->disconnect(controller_point) == kResultOk);
     CHECK(controller_point->disconnect(processor_point) == kResultOk);
     CHECK(controller->terminate() == kResultOk);
     std::printf("a host without empty binary attributes: the first status, two loads and a failed "
                 "one reach the controller\n");
+}
+
+// 0.2.8, MS-R58, MS-R59: a status the controller takes names the texts its states need
+// and carries a serial in the 32-bit range. One that lost its path, with an unknown
+// state, or with a serial out of range is refused, and a later regular one is taken.
+void TestStatusChecks() {
+    IPtr<HostApplication> app = owned(new HostApplication());
+    PluginHost host({});
+    IPtr<Controller> controller = owned(new Controller());
+    CHECK(controller->initialize(app) == kResultOk);
+    auto* processor_point = static_cast<IConnectionPoint*>(host.processor.get());
+    auto* controller_point = static_cast<IConnectionPoint*>(controller.get());
+    CHECK(processor_point->connect(controller_point) == kResultOk);
+    CHECK(controller_point->connect(processor_point) == kResultOk);
+    auto status = [&](int64 code, int64 serial, const std::string& path, const std::string& request) {
+        IPtr<IMessage> message = owned(new HostMessage());
+        message->setMessageID(kStatusMessageId);
+        IAttributeList* a = message->getAttributes();
+        SetText(a, kAttrPath, path);
+        SetText(a, kAttrInfo, path.empty() ? std::string() : std::string("48 kHz"));
+        SetText(a, kAttrRequest, request);
+        a->setInt(kAttrState, code);
+        a->setInt(kAttrSerial, serial);
+        a->setInt(kAttrUserLoads, 0);
+        a->setInt(kAttrProcessor, 77);
+        a->setInt(kAttrGeneration, controller->Generation());
+        return controller->notify(message);
+    };
+    const int64 ready = static_cast<int>(SoundState::kReady), loading = static_cast<int>(RequestState::kLoading) << 4;
+    CHECK(status(ready, 1000, "", "") == kInvalidArgument);                        // ready without its file
+    CHECK(status(loading, 1000, "", "") == kInvalidArgument);                      // loading without the file asked for
+    CHECK(status(static_cast<int>(SoundState::kNone), 1000, g_path, "") == kInvalidArgument); // none with a file
+    CHECK(status(6, 1000, g_path, "") == kInvalidArgument);                        // no such sound state
+    CHECK(status(3 << 4, 1000, "", g_path) == kInvalidArgument);                   // no such request state
+    CHECK(status(ready, -1, g_path, "") == kInvalidArgument);                      // serial below the range
+    CHECK(status(ready, 0x100000000ll, g_path, "") == kInvalidArgument);           // and above
+    CHECK(controller->File().path != g_path || controller->File().serial < 1000);
+    CHECK(status(ready | loading, 1000, g_path, g_path) == kResultOk);
+    CHECK(controller->File().path == g_path && controller->File().serial == 1000);
+    CHECK(processor_point->disconnect(controller_point) == kResultOk);
+    CHECK(controller_point->disconnect(processor_point) == kResultOk);
+    CHECK(controller->terminate() == kResultOk);
+    std::printf("status checks: a status without the path its state needs, with an unknown state or a serial "
+                "out of range is refused; a regular one after it is taken\n");
 }
 
 void TestLoadWhilePlaying() {
@@ -2080,6 +2138,35 @@ void TestCustomSkin() {
     copy("messier_silver_knob_s@1x.png", shared / "messier_gold_knob_s@1x.png"); // the user's wins
     std::ofstream(user / "messier_gold_colours.txt", std::ios::binary) << "glass = #102030\n";
     std::ofstream(shared / "messier_gold_colours.txt", std::ios::binary) << "glass = #FFFFFF\nmarker = #010203\n";
+    // 0.2.8, MS-R60: a PNG is checked by its IHDR before any decoding. The real thumb
+    // with an IHDR length of 12, a header declaring 100000 x 100000 pixels, and the real
+    // bezel padded past 32 MiB: none reaches the decoder.
+    auto read_all = [](const fs::path& file) {
+        std::ifstream in(file, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), {});
+    };
+    {
+        std::string thumb = read_all(gui / "messier_gold_thumb@1x.png");
+        std::uint32_t w = 0, h = 0;
+        CHECK(SkinPngSize(thumb, w, h) && w == 16 && h == 28);
+        thumb[11] = 12;
+        CHECK(!SkinPngSize(thumb, w, h));
+        std::ofstream(user / "messier_gold_thumb@1x.png", std::ios::binary) << thumb;
+        std::string huge = read_all(gui / "messier_gold_button@1x.png");
+        for(int at : {16, 20}) {
+            huge[at] = 0;
+            huge[at + 1] = 1;
+            huge[at + 2] = static_cast<char>(0x86);
+            huge[at + 3] = static_cast<char>(0xA0); // 100000
+        }
+        CHECK(SkinPngSize(huge, w, h) && w == 100000 && h == 100000);
+        std::ofstream(user / "messier_gold_button@1x.png", std::ios::binary) << huge;
+        std::string padded = read_all(gui / "messier_gold_bezel@1x.png");
+        padded.resize(kMaxSkinFileBytes + 1, '\0');
+        CHECK(SkinPngSize(padded, w, h) && w == 64 && h == 64);
+        std::ofstream(user / "messier_gold_bezel@1x.png", std::ios::binary) << padded;
+        CHECK(!SkinPngSize("not a PNG", w, h) && !SkinPngSize(std::string(), w, h));
+    }
     const IPlatformFactory& factory = getPlatformFactory();
     auto png = [&](CBitmap* bitmap) {
         return bitmap && bitmap->getPlatformBitmap()
@@ -2106,8 +2193,26 @@ void TestCustomSkin() {
     CHECK(plain.Overrides() == 0 && complete(plain) && plain.Colours().glass == gold.glass);
     const Skin built_in(GuiPreset::kGold, {});
     CHECK(png(plain.Image(SkinImageId::kChassis).x1) == png(built_in.Image(SkinImageId::kChassis).x1));
+    const int decoded_before = SkinFilesDecoded();
     const Skin custom(GuiPreset::kGold, {user, none, shared});
     CHECK(custom.Overrides() == 2 + 3 && complete(custom)); // two bitmaps, three colour values
+    CHECK(SkinFilesDecoded() - decoded_before == 2); // only the two that are taken were decoded
+    for(const SkinImageId id : {SkinImageId::kThumb, SkinImageId::kButton, SkinImageId::kBezel})
+        CHECK(png(custom.Image(id).x1) == png(built_in.Image(id).x1));
+    // MS-R61: a colour table of more than 64 KiB is refused whole; one of exactly 64 KiB
+    // is read.
+    {
+        const fs::path big = g_dir / "skin big";
+        fs::create_directories(big);
+        std::string table = "marker = #040506\n";
+        table.resize(kMaxSkinTableBytes, ';');
+        std::ofstream(big / "messier_gold_colours.txt", std::ios::binary) << table;
+        const Skin exact(GuiPreset::kGold, {big});
+        CHECK(exact.Overrides() == 1 && exact.Colours().marker == CColor(4, 5, 6));
+        std::ofstream(big / "messier_gold_colours.txt", std::ios::binary) << table << ';';
+        const Skin larger(GuiPreset::kGold, {big});
+        CHECK(larger.Overrides() == 0 && larger.Colours().marker == gold.marker);
+    }
     CHECK(custom.Colours().glass == CColor(16, 32, 48) && custom.Colours().marker == CColor(1, 2, 3));
     const PNGBitmapBuffer plum_small = file_png("messier_plum_knob_s@1x.png");
     CHECK(!plum_small.empty() && png(custom.Image(SkinImageId::kKnobSmall).x1) == plum_small);
@@ -2245,6 +2350,12 @@ void TestGuiPresets() {
     CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents, kWaveMinPercent - 1) == kResultFalse);
     CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents, kPresetWave) == kResultFalse);
     CHECK(load(8, 1.0, 1, 0, &plum, 1, &accents, kWaveDefaultPercent) == kResultFalse);
+    // MS-R62: a zoom out of range refuses the whole state, as every other field does.
+    CHECK(load(6, 2.5, 1, 0, &plum, 1, &accents, 100) == kResultFalse);
+    CHECK(load(6, 0.25, 1, 0, &plum, 1, &accents, 100) == kResultFalse);
+    CHECK(controller->WindowSettings().WavePercent() == 200 && controller->WindowSettings().zoom == 1.0);
+    CHECK(load(6, 2.0, 1, 0, &plum, 1, &accents, 100) == kResultOk && controller->WindowSettings().zoom == 2.0);
+    CHECK(load(6, 0.5, 1, 0, &plum, 1, &accents, 100) == kResultOk && controller->WindowSettings().zoom == 0.5);
     CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents, 100) == kResultOk);
     CHECK(controller->WindowSettings().WavePercent() == 100);
     own.seek(0, IBStream::kIBSeekSet, nullptr);
@@ -3373,6 +3484,7 @@ int main() {
     TestExportStart();
     TestMessagesAndKeyboard();
     TestHostWithoutEmptyTexts();
+    TestStatusChecks();
     TestLoadWhilePlaying();
     TestProjectBackpressure();
     TestResetButtonThroughHost();

@@ -89,6 +89,18 @@ struct FileStatus {
 
     // The two states in one number, for the message to the controller.
     int Code() const { return static_cast<int>(sound) | static_cast<int>(request_state) << 4; }
+    // A code that names a known sound and request state (MS-R58).
+    static constexpr bool IsCode(long long code) {
+        return code >= 0 && code < 256 && (code & 15) <= static_cast<int>(SoundState::kReadError)
+               && (code >> 4) <= static_cast<int>(RequestState::kFailed);
+    }
+    // The texts the states need (MS-R58): a sound other than none names its file, and a
+    // request that is running or failed names the file asked for. A status received
+    // without them lost a text on the way and is not taken.
+    bool HasItsTexts() const {
+        return (sound == SoundState::kNone) == path.empty()
+               && (request_state == RequestState::kNone || !request.empty());
+    }
     void SetCode(int code) {
         sound = static_cast<SoundState>(code & 15);
         request_state = static_cast<RequestState>((code >> 4) & 15);

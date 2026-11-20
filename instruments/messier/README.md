@@ -9,12 +9,12 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 0.2.7, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 0.2.8, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.2.7:** builds, passes Steinberg's validator, tested automatically (bit for
+**Status 0.2.8:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
@@ -46,7 +46,9 @@ as well ([check](docs/CODEX_REVIEW_0.2.4.md)); 0.2.5 fixes its three findings, b
 TRAIL and the presets Plum and Gold ([report](docs/BUILD_REPORT_0.2.5.md)); 0.2.6 follows
 the user's look at it: HUE turns only the hue, TRAIL is fixed and WAVE takes its place
 ([report](docs/BUILD_REPORT_0.2.6.md)); 0.2.7 makes the file name follow every load in
-Studio One and sets it upright ([report](docs/BUILD_REPORT_0.2.7.md)). The user
+Studio One and sets it upright ([report](docs/BUILD_REPORT_0.2.7.md)); 0.2.8 fixes the
+five findings of Codex' short review of 0.2.7, MS-R58 to MS-R62
+([review](docs/CODEX_REVIEW_0.2.7.md), [report](docs/BUILD_REPORT_0.2.8.md)). The user
 has tried 0.1.7, 0.1.8 and 0.2.0 in Studio One
 (operation and sound). The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
@@ -218,7 +220,9 @@ It looks in two places, and for each file the first one that has it wins:
 
 The built-in skin fills every gap. A bitmap is taken only at exactly the size below,
 for `@2x` at exactly twice that. A missing, unreadable, empty, broken or wrongly sized file
-gives the next folder's file, and in the end the built-in one. Each image falls back on
+gives the next folder's file, and in the end the built-in one. A PNG is at most 32 MiB
+and is checked by its header (signature and IHDR size) before it is decoded; a colour table is
+at most 64 KiB (since 0.2.8). Each image falls back on
 its own, so no window opens empty. In the palette menu, **Reload skin folders** reads both
 folders again without reopening the window. **Open skin folder** creates
 `Documents\Messier-Skin` if needed and opens it, with `Messier skin files.txt` listing every

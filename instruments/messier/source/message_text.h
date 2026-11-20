@@ -13,9 +13,13 @@ namespace messier {
 // controller then refused every file status with an empty detail, and the window kept the
 // file name it had from the project.
 
-inline void SetText(Steinberg::Vst::IAttributeList* attributes, const char* id, const std::string& text) {
-    if(attributes && !text.empty())
-        attributes->setBinary(id, text.data(), static_cast<Steinberg::uint32>(text.size()));
+// False if a text that is not empty could not be stored (MS-R58): the sender then sends
+// nothing rather than a message that reads as if the text were empty.
+inline bool SetText(Steinberg::Vst::IAttributeList* attributes, const char* id, const std::string& text) {
+    if(!attributes)
+        return false;
+    return text.empty()
+           || attributes->setBinary(id, text.data(), static_cast<Steinberg::uint32>(text.size())) == Steinberg::kResultOk;
 }
 
 // A text that must be there and not be empty, such as the path of a load.

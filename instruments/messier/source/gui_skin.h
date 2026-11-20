@@ -19,6 +19,7 @@
 #include "vstgui/lib/vstguifwd.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -126,6 +127,14 @@ void UseSkinFolders(std::vector<std::filesystem::path> folders);
 // What a custom skin may hold, as text for a file in the folder: every bitmap's name and
 // pixel size, every colour's name (made from the built-in skin, so it never goes stale).
 std::string SkinFolderGuide();
+// Limits of the files read from a skin folder (MS-R60, MS-R61): a larger one is refused.
+constexpr std::size_t kMaxSkinFileBytes = std::size_t{32} << 20;
+constexpr std::size_t kMaxSkinTableBytes = std::size_t{64} << 10;
+// The pixel size a PNG's first chunk declares: false unless `bytes` start with the PNG
+// signature and an IHDR chunk of 13 bytes. Checked before any decoding (MS-R60).
+bool SkinPngSize(const std::string& bytes, std::uint32_t& width, std::uint32_t& height);
+// How many skin-folder files were handed to the image decoder so far (tests).
+int SkinFilesDecoded();
 // The palette menu's "Open skin folder": makes the user's folder if needed, puts the
 // guide in it ("Messier skin files.txt", once) and opens it in Explorer. False if any
 // step failed; never throws.

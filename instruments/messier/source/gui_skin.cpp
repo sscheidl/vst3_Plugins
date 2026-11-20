@@ -8,9 +8,11 @@
 #include "vstgui/lib/platform/platformfactory.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <sstream>
 #include <utility>
@@ -346,57 +348,83 @@ bool ParseHex(const std::string& text, CColor& colour) {
     return true;
 }
 
-// A custom skin's file, or none: missing, a folder, larger than any skin file needs, not
-// an image the platform reads. Never throws; the caller checks the size.
-constexpr std::uintmax_t kMaxSkinFileBytes = 32u << 20;
-PlatformBitmapPtr BitmapFromFile(const std::filesystem::path& file) noexcept {
+// At most `limit` bytes of a file, read from the open stream in steps; false if the file
+// is larger, unreadable or not a regular file. A file that grows or is replaced after
+// it was opened cannot bring more (MS-R60, MS-R61). Never throws.
+bool ReadLimited(const std::filesystem::path& file, std::size_t limit, std::string& bytes) noexcept {
     try {
         std::error_code error;
         if(file.empty() || !std::filesystem::is_regular_file(file, error))
-            return nullptr;
-        const std::uintmax_t bytes = std::filesystem::file_size(file, error);
-        if(error || bytes == 0 || bytes > kMaxSkinFileBytes)
-            return nullptr;
-        const std::u8string path = file.u8string();
-        return getPlatformFactory().createBitmapFromPath(reinterpret_cast<const char*>(path.c_str()));
-    } catch(...) {
-        return nullptr;
-    }
-}
-
-// The first of `folders` with a bitmap `name` of exactly `size` pixels.
-PlatformBitmapPtr BitmapFromFolders(const std::vector<std::filesystem::path>& folders, const std::string& name,
-                                    CPoint size) noexcept {
-    for(const std::filesystem::path& folder : folders) {
-        PlatformBitmapPtr file = BitmapFromFile(folder / name);
-        if(file && file->getSize() == size)
-            return file;
-    }
-    return nullptr;
-}
-
-// A colour table's text, or nothing (missing, unreadable, larger than a table can be).
-bool ReadSkinTable(const std::filesystem::path& file, std::string& text) noexcept {
-    try {
-        std::error_code error;
-        if(!std::filesystem::is_regular_file(file, error))
-            return false;
-        const std::uintmax_t bytes = std::filesystem::file_size(file, error);
-        if(error || bytes > 64u << 10)
             return false;
         std::ifstream in(file, std::ios::binary);
         if(!in)
             return false;
-        std::ostringstream read;
-        read << in.rdbuf();
-        text = read.str();
-        return true;
+        bytes.clear();
+        char step[65536];
+        while(in) {
+            in.read(step, sizeof step);
+            const auto got = static_cast<std::size_t>(in.gcount());
+            if(got > limit - bytes.size()) // one byte past the limit is enough to refuse
+                return false;
+            bytes.append(step, got);
+        }
+        return !in.bad();
     } catch(...) {
         return false;
     }
 }
 
+std::atomic<int> g_decoded{0};
+
+// The first of `folders` with a PNG `name` of exactly `size` pixels (MS-R60): at most
+// kMaxSkinFileBytes read, the signature and the IHDR chunk checked against `size`, and
+// only then exactly those bytes handed to the decoder, from memory. Anything else falls
+// through to the next folder.
+PlatformBitmapPtr BitmapFromFolders(const std::vector<std::filesystem::path>& folders, const std::string& name,
+                                    CPoint size) noexcept {
+    for(const std::filesystem::path& folder : folders) {
+        try {
+            std::string bytes;
+            std::uint32_t width = 0, height = 0;
+            if(!ReadLimited(folder / name, kMaxSkinFileBytes, bytes) || !SkinPngSize(bytes, width, height)
+               || width != static_cast<std::uint32_t>(size.x) || height != static_cast<std::uint32_t>(size.y))
+                continue;
+            ++g_decoded;
+            PlatformBitmapPtr bitmap =
+                getPlatformFactory().createBitmapFromMemory(bytes.data(), static_cast<uint32_t>(bytes.size()));
+            if(bitmap && bitmap->getSize() == size)
+                return bitmap;
+        } catch(...) {
+        }
+    }
+    return nullptr;
+}
+
+// A colour table's text, or nothing: missing, unreadable, larger than kMaxSkinTableBytes.
+bool ReadSkinTable(const std::filesystem::path& file, std::string& text) noexcept {
+    return ReadLimited(file, kMaxSkinTableBytes, text);
+}
+
 } // namespace
+
+bool SkinPngSize(const std::string& bytes, std::uint32_t& width, std::uint32_t& height) {
+    static constexpr unsigned char kSignature[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+    if(bytes.size() < 33 || std::memcmp(bytes.data(), kSignature, 8) != 0)
+        return false;
+    const auto be = [&](std::size_t at) {
+        const auto* b = reinterpret_cast<const unsigned char*>(bytes.data()) + at;
+        return (std::uint32_t(b[0]) << 24) | (std::uint32_t(b[1]) << 16) | (std::uint32_t(b[2]) << 8) | b[3];
+    };
+    if(be(8) != 13 || std::memcmp(bytes.data() + 12, "IHDR", 4) != 0)
+        return false;
+    width = be(16);
+    height = be(20);
+    return true;
+}
+
+int SkinFilesDecoded() {
+    return g_decoded.load();
+}
 
 std::filesystem::path UserSkinFolder() {
     try {

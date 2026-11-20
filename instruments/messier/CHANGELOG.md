@@ -1,5 +1,20 @@
 # Changes
 
+## 0.2.8 (2026-11-20)
+
+The five findings of Codex' short review of 0.2.7 (`docs/CODEX_REVIEW_0.2.7.md`); the
+sound is unchanged. Details in `docs/BUILD_REPORT_0.2.8.md`.
+
+* MS-R58: a file status is taken only with the texts its states need (a file for a
+  sound, the file asked for while loading or after a failure) and with a known state. The
+  processor sends no status when the host does not take one of its texts.
+* MS-R59: a status serial outside the 32-bit range is refused, not cut.
+* MS-R60: a skin PNG is read up to 32 MiB from the open file; its signature and IHDR size
+  are checked against the exact @1x/@2x size before the same bytes are decoded from memory.
+* MS-R61: a colour table is read up to 64 KiB from the open file; a larger one is refused.
+* MS-R62: a window state with a zoom outside 50 to 200 % is refused whole, like any other
+  field out of range (the zoom was clamped before).
+
 ## 0.2.7 (2026-11-19)
 
 Window and messages; the sound and the processor's state are unchanged. Details in

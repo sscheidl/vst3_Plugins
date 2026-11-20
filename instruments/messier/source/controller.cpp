@@ -271,7 +271,9 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
        || !stream.readDouble(zoom) || !stream.readInt8(keyboard) || !stream.readInt32(transpose)
        || (version >= 2 && !stream.readInt32(preset)) || (version >= 3 && !stream.readInt8(details)))
         return kResultFalse;
-    if(!std::isfinite(zoom) || (keyboard != 0 && keyboard != 1) || (details != 0 && details != 1) || transpose % 12 != 0
+    // Every field in its range, or the whole state is refused (MS-R62: the zoom too, which
+    // was clamped before).
+    if(!std::isfinite(zoom) || zoom < kMinEditorZoom || zoom > kMaxEditorZoom || (keyboard != 0 && keyboard != 1) || (details != 0 && details != 1) || transpose % 12 != 0
        || transpose < -kKeyboardTransposeLimit || transpose > kKeyboardTransposeLimit || !IsGuiPreset(preset))
         return kResultFalse;
     if(version >= 4)
@@ -288,7 +290,7 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
         if(!uses_preset && (settings.wave_percent < kWaveMinPercent || settings.wave_percent > kWaveMaxPercent))
             return kResultFalse;
     }
-    settings.zoom = ClampEditorZoom(zoom);
+    settings.zoom = zoom;
     settings.keyboard = keyboard != 0;
     settings.transpose = transpose;
     settings.preset = static_cast<GuiPreset>(preset);
@@ -459,7 +461,12 @@ tresult PLUGIN_API Controller::notify(IMessage* message) {
            || attributes->getInt(kAttrSerial, serial) != kResultOk
            || attributes->getInt(kAttrUserLoads, user_loads) != kResultOk
            || attributes->getInt(kAttrProcessor, processor) != kResultOk || processor == 0
-           || user_loads < 0 || user_loads > 0xFFFFFFFFll)
+           || user_loads < 0 || user_loads > 0xFFFFFFFFll
+           || serial < 0 || serial > 0xFFFFFFFFll // MS-R59: not cut to 32 bits
+           || !FileStatus::IsCode(code))
+            return kInvalidArgument;
+        status.SetCode(static_cast<int>(code));
+        if(!status.HasItsTexts()) // MS-R58: a text lost on the way
             return kInvalidArgument;
         // MS-R20, MS-R21: only a status of the current connection, and not one older
         // than the newest taken (the loader's serial grows with every change).
@@ -469,7 +476,6 @@ tresult PLUGIN_API Controller::notify(IMessage* message) {
         if(generation != generation_ || static_cast<std::uint32_t>(serial) < last_status_serial_)
             return kResultFalse;
         last_status_serial_ = static_cast<std::uint32_t>(serial);
-        status.SetCode(static_cast<int>(code));
         status.serial = static_cast<std::uint32_t>(serial);
         status.user_loads = static_cast<std::uint32_t>(user_loads);
         // MS-R04, MS-R09: files from the window became the sound. The project's saved

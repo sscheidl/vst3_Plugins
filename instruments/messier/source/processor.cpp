@@ -701,10 +701,10 @@ void Processor::SendFileStatusUnchecked(int64 generation) {
     const FileStatus status = loader_.Status();
     message->setMessageID(kStatusMessageId);
     IAttributeList* attributes = message->getAttributes();
-    SetText(attributes, kAttrPath, status.path);
-    SetText(attributes, kAttrInfo, status.info);
-    SetText(attributes, kAttrRequest, status.request);
-    SetText(attributes, kAttrDetail, status.detail);
+    // MS-R58: a text the host did not take means no status; the window asks again.
+    if(!SetText(attributes, kAttrPath, status.path) || !SetText(attributes, kAttrInfo, status.info)
+       || !SetText(attributes, kAttrRequest, status.request) || !SetText(attributes, kAttrDetail, status.detail))
+        return;
     attributes->setInt(kAttrState, status.Code());
     attributes->setInt(kAttrSerial, status.serial);
     attributes->setInt(kAttrUserLoads, status.user_loads);
