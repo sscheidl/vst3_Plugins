@@ -92,4 +92,5 @@ Five reviews of about 11,000 lines; between about 184,000 and 309,000 tokens eac
 
 The user chose "as recommended" (2026-11-20). 0.2.9 fixes every finding listed under "Fix";
 C7 only in part (see [BUILD_REPORT_0.2.9.md](BUILD_REPORT_0.2.9.md)). B2 and D3 are left
-and documented; D2 waits for the user.
+and documented. D2 stays as it is: the user accepted it on 2026-11-20, since the original
+module behaves the same.

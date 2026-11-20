@@ -115,8 +115,10 @@ class LooperEngine {
 
     // The firmware engine from scratch, as after power-on, with `file` (may be null
     // for none) installed at once, without the swap fade, and the settings applied:
-    // smoothed controls start at their values. Files the engine held before are
-    // released (TakeReleased). Does not allocate or lock.
+    // the pots start at their values; the secondary controls glide up from 0 over about
+    // 60 ms, as in the module after power-on (D2 of the Fable audit, accepted by the user
+    // 2026-11-20). Files the engine held before are released (TakeReleased). Does not
+    // allocate or lock.
     void Reset(const FileData* file, const EngineSettings& settings);
 
     // Targets; the core smooths the pots over 20 ms (Window over 100 ms) per quantum.

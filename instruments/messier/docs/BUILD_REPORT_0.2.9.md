@@ -69,7 +69,8 @@ Firmware comparison: 0 of 960,000 samples differ, 0 allocations in process. Logs
 ## Open
 
 * The user's DAW test, section 0.2.9 of `DAW_TEST_0.1.0.md`; C1 matters most.
-* D2: seed the secondaries at a restart (a core patch) or keep the firmware's behaviour.
+* D2: decided after the build. The user keeps the firmware's behaviour (2026-11-20), as
+  the original module behaves the same; the comment in `engine/looper_engine.h` now says so.
 * Codex next week: the audit list and these fixes, together with the open
   [CODEX_PRUEFAUFTRAG_0.2.8.md](CODEX_PRUEFAUFTRAG_0.2.8.md) and
   [CODEX_PRUEFAUFTRAG_0.2.7.md](CODEX_PRUEFAUFTRAG_0.2.7.md).
