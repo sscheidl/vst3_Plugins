@@ -301,8 +301,19 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
     settings.details = details != 0;
     editor_ = settings;
     // The settings are taken; an open window shows them when it can.
-    ForEachEditor([&](Editor& editor) { editor.ApplySettings(editor_); });
+    ShareSettings(settings, nullptr);
     return kResultOk;
+}
+
+void Controller::ShareSettings(const EditorSettings& settings, const Editor* except) noexcept {
+    if(sharing_settings_)
+        return; // GD.1 (0.2.10): a window answering the round; its settings are kept (editor_)
+    sharing_settings_ = true;
+    ForEachEditor([&](Editor& editor) {
+        if(&editor != except)
+            editor.ApplySettings(settings);
+    });
+    sharing_settings_ = false;
 }
 
 bool Controller::PlayNote(int note) {
@@ -552,10 +563,7 @@ Editor* Controller::MakeEditor() {
     auto self = std::make_shared<const Editor*>(nullptr);
     callbacks.changed = [this, self](const EditorSettings& settings) {
         editor_ = settings;
-        ForEachEditor([&](Editor& other) {
-            if(&other != *self)
-                other.ApplySettings(settings);
-        });
+        ShareSettings(settings, *self);
     };
     callbacks.current = [this] { return editor_; };
     callbacks.settled = [this] { setDirty(true); };

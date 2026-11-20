@@ -1,5 +1,20 @@
 # Changes
 
+## 0.2.10 (2026-11-20)
+
+The findings of the ChatGPT review of 0.2.9 that hold up (`docs/GPT_REVIEW_0.2.9.md`),
+each P3. The sound of a playing file is unchanged. Details in `docs/BUILD_REPORT_0.2.10.md`.
+
+* GC.2: a file loaded while STOP or Bypass rests the output starts from its first sample
+  when the sound goes on, as after a swap while playing. Its first quantum (64 samples,
+  with part of the fade-in) went into nothing before. Engine 0.1.8.
+* GD.1: window settings go round the open windows once. A window whose host corrects its
+  size keeps that size; the windows no longer resize each other without end.
+* GA.1: after a size or preset menu, the menu is taken out of its own window only, never
+  out of a window the host has already closed.
+* GA.2: the LOAD... dialog no longer writes into a window the host destroyed while the
+  dialog was open.
+
 ## 0.2.9 (2026-11-20)
 
 The findings of the first full audit (`docs/FABLE_AUDIT_0.2.8.md`, five Fable reviewers);

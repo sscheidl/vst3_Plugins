@@ -289,6 +289,16 @@ The new window (0.2.0, Slate; judge the look as well as what it shows):
 - [ ] Ctrl+click on HUE or WAVE: the preset's colour or WAVE value, as with a double-click (C6).
 - [ ] Hover over "No. n": its own tooltip (C11).
 
+0.2.10 (the ChatGPT review of 0.2.9):
+
+- [ ] Two windows of one instance (if the host allows): change the size in one, then
+      drag one window to a small screen or make it as large as the screen allows: both
+      windows settle, neither keeps jumping (GD.1).
+- [ ] STOP on, load another file, STOP off: the new file fades in from START, as when it
+      is loaded while playing (GC.2).
+- [ ] The size and preset menus: open one, close the plug-in window from the host while
+      it is open, then click elsewhere: no crash (GA.1).
+
 ## 7. Listening
 
 - [ ] Against the Daisy kit with Nebulae on Daisy 0.2.2, if at hand, same file, same

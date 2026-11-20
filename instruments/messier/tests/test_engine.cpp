@@ -464,6 +464,41 @@ void TestSwap() {
     CHECK(engine.CurrentFile() == nullptr && engine.TakeReleased() == file_c.get());
     CHECK(Peak(left, left.size() - kQ) == 0.0f && Peak(right, right.size() - kQ) == 0.0f);
     std::printf("swap: a second request replaces the waiting file; no file means silence\n");
+
+    // GC.2 of the GPT review (engine 0.1.8): a swap finished unheard (STOP) leaves the new
+    // file at its first quantum, sample for sample as a swap while playing starts it.
+    LooperEngine playing, resting;
+    auto run = [&](LooperEngine& one, int quanta, std::vector<float>* out) {
+        float l[kQ], r[kQ];
+        for(int q = 0; q < quanta; ++q) {
+            one.Render(silence, silence, l, r);
+            if(out) {
+                out->insert(out->end(), l, l + kQ);
+                out->insert(out->end(), r, r + kQ);
+            }
+        }
+    };
+    playing.Reset(file_a.get(), settings);
+    resting.Reset(file_a.get(), settings);
+    run(playing, 750, nullptr);
+    run(resting, 750, nullptr);
+    playing.SwapFile(file_b.get());
+    resting.SwapFile(file_b.get());
+    std::vector<float> heard, after_rest;
+    for(int q = 0; q < 20 && playing.Swapping(); ++q) {
+        std::vector<float> one;
+        run(playing, 1, &one);
+        if(!playing.Swapping())
+            heard = std::move(one); // the quantum the swap began: the new file's first
+    }
+    CHECK(!heard.empty());
+    run(playing, 99, &heard);
+    resting.FinishSwapSilently();
+    CHECK(!resting.Swapping() && resting.CurrentFile() == file_b.get());
+    run(resting, 100, &after_rest);
+    CHECK(after_rest == heard);
+    CHECK(Peak(after_rest) > 0.0f);
+    std::printf("swap: finished unheard, the new file starts as a swap while playing starts it\n");
 }
 
 void TestVolume() {

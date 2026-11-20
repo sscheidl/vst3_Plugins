@@ -9,12 +9,12 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 0.2.9, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 0.2.10, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.2.9:** builds, passes Steinberg's validator, tested automatically (bit for
+**Status 0.2.10:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
@@ -50,7 +50,9 @@ Studio One and sets it upright ([report](docs/BUILD_REPORT_0.2.7.md)); 0.2.8 fix
 five findings of Codex' short review of 0.2.7, MS-R58 to MS-R62
 ([review](docs/CODEX_REVIEW_0.2.7.md), [report](docs/BUILD_REPORT_0.2.8.md)); 0.2.9 fixes the
 findings of the first full audit, by five Fable reviewers while Codex was away
-([audit](docs/FABLE_AUDIT_0.2.8.md), [report](docs/BUILD_REPORT_0.2.9.md)). The user
+([audit](docs/FABLE_AUDIT_0.2.8.md), [report](docs/BUILD_REPORT_0.2.9.md)); 0.2.10 fixes
+the four findings of a ChatGPT review of 0.2.9 that held up
+([review](docs/GPT_REVIEW_0.2.9.md), [report](docs/BUILD_REPORT_0.2.10.md)). The user
 has tried 0.1.7, 0.1.8 and 0.2.0 in Studio One
 (operation and sound). The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.

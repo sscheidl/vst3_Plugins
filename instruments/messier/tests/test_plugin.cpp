@@ -1522,14 +1522,15 @@ void TestDialogStart() {
     bool open = false;
     int given_back = 0;
     auto back = [&] { ++given_back; };
+    auto alive = std::make_shared<bool>(true);
     // The system could not create the dialog: no answer.
     auto answered = std::make_shared<bool>(false);
-    CHECK(!StartDialog(open, answered, [] { return false; }, back));
+    CHECK(!StartDialog(open, alive, answered, [] { return false; }, back));
     CHECK(!open && given_back == 1);
     // A second attempt works: the dialog opens and is cancelled (Windows answers, then
     // returns false).
     answered = std::make_shared<bool>(false);
-    CHECK(StartDialog(open, answered, [&] {
+    CHECK(StartDialog(open, alive, answered, [&] {
         CHECK(open); // open while it runs
         *answered = true;
         open = false; // the answer's own reset
@@ -1538,7 +1539,7 @@ void TestDialogStart() {
     CHECK(!open && given_back == 1);
     // Started and still open (a platform that answers later): stays open.
     answered = std::make_shared<bool>(false);
-    CHECK(StartDialog(open, answered, [] { return true; }, back));
+    CHECK(StartDialog(open, alive, answered, [] { return true; }, back));
     CHECK(open && given_back == 1);
     open = false;
     // run() throws before an answer: reset, given back, the exception goes on to the
@@ -1546,11 +1547,27 @@ void TestDialogStart() {
     answered = std::make_shared<bool>(false);
     bool thrown = false;
     try {
-        StartDialog(open, answered, []() -> bool { throw std::bad_alloc(); }, back);
+        StartDialog(open, alive, answered, []() -> bool { throw std::bad_alloc(); }, back);
     } catch(const std::bad_alloc&) {
         thrown = true;
     }
     CHECK(thrown && !open && given_back == 2);
+    // GA.2 (0.2.10): the host destroyed the editor during the dialog's loop, then run()
+    // fails without an answer. `open` is the dead editor's: not written (it stays as the
+    // start left it), and the reference still goes back.
+    answered = std::make_shared<bool>(false);
+    thrown = false;
+    try {
+        StartDialog(open, alive, answered, [&]() -> bool { *alive = false; throw std::bad_alloc(); }, back);
+    } catch(const std::bad_alloc&) {
+        thrown = true;
+    }
+    CHECK(thrown && open && given_back == 3);
+    *alive = true;
+    open = false;
+    answered = std::make_shared<bool>(false);
+    CHECK(!StartDialog(open, alive, answered, [&] { *alive = false; return false; }, back));
+    CHECK(open && given_back == 4);
     std::printf("dialog start: a dialog that cannot open leaves LOAD... usable and gives its reference "
                 "back; an answered or open dialog is left alone\n");
 }

@@ -955,9 +955,14 @@ bool PopUpMenu(CFrame* frame, COptionMenu* menu, CPoint where, std::function<voi
     const SharedPointer<COptionMenu> hold(menu);
     auto answered = std::make_shared<bool>(false);
     auto take_out = [&] {
-        // A child of the frame, also if popup stopped half way through adding it.
-        if(!*answered && frame->isChild(menu, false))
-            Guarded([&] { frame->removeView(menu, false); });
+        // A child of the frame, also if popup stopped half way through adding it. Through
+        // the menu's own frame, never `frame`: the host may have closed the window during
+        // the menu's loop, and a frame that let the menu go leaves it without one (GA.1 of
+        // the GPT review, 0.2.10).
+        if(*answered)
+            return;
+        if(CFrame* owner = menu->getFrame(); owner && owner->isChild(menu, false))
+            Guarded([&] { owner->removeView(menu, false); });
     };
     bool shown = false;
     try {
@@ -1353,7 +1358,7 @@ void Editor::ChooseFile() {
     // is given back here (and only if run() took it).
     const auto references = selector->getNbReference();
     StartDialog(
-        dialog_open_, answered, [&] { return selector->run(std::move(answer)); },
+        dialog_open_, alive, answered, [&] { return selector->run(std::move(answer)); },
         [&] {
             if(selector->getNbReference() > references)
                 selector->forget();

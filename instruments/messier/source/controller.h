@@ -147,6 +147,12 @@ class Controller : public Steinberg::Vst::EditController, public Steinberg::Vst:
 
     std::vector<OpenEditor> editors_;
     EditorSettings editor_;
+    // While the window settings go to the open windows (GD.1 of the GPT review, 0.2.10):
+    // a window whose host corrects its size then reports its own settings, which are
+    // kept but not sent round again, so that two hosts with different limits cannot
+    // resize the windows in turn without end.
+    bool sharing_settings_ = false;
+    void ShareSettings(const EditorSettings& settings, const Editor* except) noexcept;
     FileStatus file_;
     // The processor of the last status taken, and (MS-R32) the count of files from the
     // window last seen of each of the most recent processors, so that a return to a

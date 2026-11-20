@@ -10,7 +10,7 @@
 #
 # Its own version; moduleinfo.json takes it from here. Keep it equal to
 # FULL_VERSION_STR in source/version.h and to components.json.
-project(Messier VERSION 0.2.9 LANGUAGES CXX)
+project(Messier VERSION 0.2.10 LANGUAGES CXX)
 
 # The SDK compiles everything with /fp:fast. The DSP, the adapter and their tests
 # use /fp:precise: the bit-exact comparison with the reference needs IEEE semantics.

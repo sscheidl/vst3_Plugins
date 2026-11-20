@@ -208,25 +208,36 @@ void LooperEngine::FinishSwapSilently() {
     float discard_left[kQuantum], discard_right[kQuantum];
     // The core fades over 256 samples (4 quanta) and acknowledges; the swap follows at
     // the start of the next quantum. The bound only guards against a core that never
-    // acknowledges.
-    for(int quantum = 0; swapping_ && quantum < 16; ++quantum)
+    // acknowledges. The swap itself is made here, without the quantum after it: that
+    // one is the new file's first, from START, and is heard when the sound goes on
+    // (GC.2 of the GPT review, engine 0.1.8; before, it went into nothing).
+    for(int quantum = 0; swapping_ && quantum < 16; ++quantum) {
+        if(impl_->bridge.ack.load(std::memory_order_acquire)) {
+            CompleteSwap();
+            return;
+        }
         Render(silence, silence, discard_left, discard_right);
+    }
+}
+
+void LooperEngine::CompleteSwap() {
+    // The core reads no file now: swap, publish, unmute. The engine takes the new
+    // generation at the start of the next quantum and fades in from START.
+    Impl& m = *impl_;
+    m.engine->SetFileBuffer(Buffer(next_));
+    Publish(m.bridge, next_);
+    m.bridge.gate.store(false, std::memory_order_release);
+    if(current_ != next_)
+        Release(current_);
+    current_ = next_;
+    next_ = nullptr;
+    swapping_ = false;
 }
 
 void LooperEngine::Render(const float* in_left, const float* in_right, float* left, float* right) {
     Impl& m = *impl_;
-    if(swapping_ && m.bridge.ack.load(std::memory_order_acquire)) {
-        // The core reads no file now: swap, publish, unmute. The engine takes the new
-        // generation at the start of this quantum and fades in from START.
-        m.engine->SetFileBuffer(Buffer(next_));
-        Publish(m.bridge, next_);
-        m.bridge.gate.store(false, std::memory_order_release);
-        if(current_ != next_)
-            Release(current_);
-        current_ = next_;
-        next_ = nullptr;
-        swapping_ = false;
-    }
+    if(swapping_ && m.bridge.ack.load(std::memory_order_acquire))
+        CompleteSwap();
     m.engine->Process(in_left, in_right, left, right, kQuantum);
     ++rendered_;
     m.TrackGrains(); // reads only (the sound is the core's alone)
