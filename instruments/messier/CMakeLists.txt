@@ -8,9 +8,10 @@
 #   messier_adapter   streaming: sample rate, 64-sample quanta, event time
 #   messier_shell     VST3 processor, controller, state, editor, file loader
 #
-# Its own version; moduleinfo.json takes it from here. Keep it equal to
-# FULL_VERSION_STR in source/version.h and to components.json.
-project(Messier VERSION 0.2.10 LANGUAGES CXX)
+# Its own version; moduleinfo.json takes it from here. Keep it equal to the numbers of
+# FULL_VERSION_STR in source/version.h and of components.json; CMake takes no
+# pre-release part (1.0.0-beta.1 is 1.0.0 here).
+project(Messier VERSION 1.0.0 LANGUAGES CXX)
 
 # The SDK compiles everything with /fp:fast. The DSP, the adapter and their tests
 # use /fp:precise: the bit-exact comparison with the reference needs IEEE semantics.

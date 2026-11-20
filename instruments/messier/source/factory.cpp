@@ -19,7 +19,7 @@ DEF_CLASS2(INLINE_UID_FROM_FUID(kProcessorUID),
            stringPluginName,
            0, // not kDistributable: the messages assume one process and one clock (A3, 0.2.9)
            Vst::PlugType::kInstrumentSampler,
-           FULL_VERSION_STR,
+           CLASS_VERSION_STR,
            kVstVersionString,
            CreateProcessorInstance)
 
@@ -29,7 +29,7 @@ DEF_CLASS2(INLINE_UID_FROM_FUID(kControllerUID),
            stringPluginName " Controller",
            0,
            "",
-           FULL_VERSION_STR,
+           CLASS_VERSION_STR,
            kVstVersionString,
            CreateControllerInstance)
 

@@ -63,7 +63,8 @@ foreach ($document in 'README.md', 'CHANGELOG.md', 'UPSTREAM.md', 'components.js
     'docs\CODEX_PRUEFAUFTRAG_0.2.7_KURZ.md', 'docs\CODEX_REVIEW_0.2.7.md', 'docs\BUILD_REPORT_0.2.8.md',
     'docs\CODEX_PRUEFAUFTRAG_0.2.8.md', 'docs\FABLE_AUDIT_0.2.8.md', 'docs\BUILD_REPORT_0.2.9.md',
     'docs\GPT_PRUEFAUFTRAG_0.2.9.md', 'docs\GPT_PRUEFAUFTRAG_0.2.9_B.md', 'docs\GPT_REVIEW_0.2.9.md',
-    'docs\BUILD_REPORT_0.2.10.md') {
+    'docs\BUILD_REPORT_0.2.10.md', 'docs\GPT_PRUEFAUFTRAG_0.2.10.md',
+    'docs\GPT_REVIEW_0.2.10.md', 'docs\RELEASE_NOTES_1.0.0-beta.1.md') {
     $source = Join-Path $plugin $document
     if (Test-Path $source) { Copy-Item $source (Join-Path $Target (Split-Path $document -Leaf)) -Force }
 }
@@ -115,9 +116,14 @@ $guide = @(
     'from Start; releasing all notes returns to the base pitch. Blend 0 % is the phase',
     'vocoder, 100 % the grains.',
     '',
+    'Release notes, known limitations and how to report bugs: RELEASE_NOTES_*.md (for a',
+    'release) and README.md. Written largely with Claude Code (Anthropic), reviewed with',
+    'Codex (OpenAI) and other AI reviewers, directed and tested by the author.',
+    '',
     'What to check: DAW_TEST_0.1.0.md. What was tested automatically and what is known:',
     'BUILD_REPORT_0.1.0.md. Origin and licenses: UPSTREAM.md, licenses/, BUILD_INFO.txt',
-    '(the phase vocoder is LGPL-2.1-or-later). SHA256SUMS.txt lists every file here.')
+    '(the phase vocoder is LGPL-2.1-or-later). SHA256SUMS.txt lists every file here.',
+    'Bugs: https://github.com/sscheidl/vst3_Plugins/issues/new?template=bug_report.yml')
 [IO.File]::WriteAllText((Join-Path $Target 'README.txt'), ($guide -join "`r`n") + "`r`n")
 
 # Hashes of the raw bytes of every file, the list itself excepted.

@@ -9,12 +9,49 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 0.2.10, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 1.0 beta 1 (`1.0.0-beta.1`), bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.2.10:** builds, passes Steinberg's validator, tested automatically (bit for
+## Beta 1
+
+Messier 1.0 beta 1 is a closed beta: free, non-profit, for testers. Its code is that of
+0.2.10; the beta adds the version and the release texts
+([release notes](docs/RELEASE_NOTES_1.0.0-beta.1.md)). It comes without warranty, as the
+MIT and LGPL licenses say ([License](#license)).
+
+**Made with AI.** AI coding was essential to this plug-in. It was written largely with
+Claude Code (Anthropic) and reviewed with Codex (OpenAI) and other AI reviewers (Claude
+and ChatGPT), directed and tested by the author. The reviews and their fixes are in
+[docs/](docs/).
+
+**Known limitations:**
+
+* Windows x64 only. So far tested in Studio One only.
+* High load at 192 kHz with very small host buffers: a block that contains a vocoder
+  step can take longer than the block itself (see [Timing and level](#timing-and-level)).
+* After a restart (activation, loading a project) the secondary controls glide up from 0
+  over about 60 ms, as on the original module.
+* Only the file source: live input, recording and the input controls are not there yet;
+  the sidechain input exists but is not read.
+* The project stores the WAV file's path, not the audio. A moved or missing file leaves
+  the project silent, with its path kept.
+* Files are kept as 16-bit PCM (24-bit and float files rounded, without dither), at most
+  256 MiB, about 23 minutes of stereo at 48 kHz. Files above 48 kHz are read without a
+  low-pass: content above 24 kHz folds back.
+* One pitch wheel for all MIDI channels.
+* In custom skin tables, `negative`, `wave`, `wave_outside` and `loop_edge` have no effect
+  yet.
+
+**Bug chasing welcome.** Please report what you find as a
+[GitHub issue](https://github.com/sscheidl/vst3_Plugins/issues/new?template=bug_report.yml) (the form asks for what is needed; earlier reports are at
+<https://github.com/sscheidl/vst3_Plugins/issues>). A good report names the
+host and its version, the sample rate and buffer size, the WAV file's format (bits,
+rate, mono or stereo, length), the steps that lead to the problem, and, if you can, the
+project file.
+
+**History:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
@@ -52,7 +89,9 @@ five findings of Codex' short review of 0.2.7, MS-R58 to MS-R62
 findings of the first full audit, by five Fable reviewers while Codex was away
 ([audit](docs/FABLE_AUDIT_0.2.8.md), [report](docs/BUILD_REPORT_0.2.9.md)); 0.2.10 fixes
 the four findings of a ChatGPT review of 0.2.9 that held up
-([review](docs/GPT_REVIEW_0.2.9.md), [report](docs/BUILD_REPORT_0.2.10.md)). The user
+([review](docs/GPT_REVIEW_0.2.9.md), [report](docs/BUILD_REPORT_0.2.10.md)); a final ChatGPT
+check of 0.2.10 found no P1 or P2 ([review](docs/GPT_REVIEW_0.2.10.md)), and 1.0 beta 1
+carries the code of 0.2.10. The user
 has tried 0.1.7, 0.1.8 and 0.2.0 in Studio One
 (operation and sound). The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
@@ -351,10 +390,20 @@ The texts are in [licenses/](licenses/): Qu-Bit MIT, De-Pattern MIT, Csound LGPL
 the Csound FGENS notice and Daisy-Seed's project MIT. This is the arrangement Daisy-Seed
 documents, taken over; it is not legal advice.
 
-Replacing the LGPL part: the bundle is built from the commit named in its
-`BUILD_INFO.txt`. Check that commit out, change `core/reference_dsp.*`, and build as
-below; `messier_core` is recompiled and linked into a new `Messier.vst3`. Nothing in the
-bundle prevents the replacement.
+Replacing the LGPL part: every release folder names, in its `BUILD_INFO.txt`, the commit of
+the public repository <https://github.com/sscheidl/vst3_Plugins> the bundle was built
+from. To rebuild it with a changed or replaced phase vocoder:
+
+1. Clone the repository and check that commit out.
+2. Fetch the SDK: `git submodule update --init external/vst3sdk`, then
+   `git -C external/vst3sdk submodule update --init --depth 1 base cmake pluginterfaces public.sdk vstgui4`.
+3. Change `core/reference_dsp.h` and `core/reference_dsp.cpp` as you like.
+4. Build as in [Build and test](#build-and-test). `messier_core` is recompiled and linked
+   into a new `Messier.vst3`, which replaces the old one.
+
+Nothing in the bundle prevents the replacement.
+
+VST is a registered trademark of Steinberg Media Technologies GmbH.
 
 ## Build and test
 

@@ -89,7 +89,9 @@ set(header_version "${CMAKE_MATCH_1}")
 if(NOT header_version STREQUAL product_version)
     fail("version.h says ${header_version}, components.json ${product_version}")
 endif()
-if(BUILD_VERSION AND NOT BUILD_VERSION STREQUAL product_version)
+# CMake takes no pre-release part: 1.0.0-beta.1 is 1.0.0 there.
+string(REGEX REPLACE "-.*$" "" product_numbers "${product_version}")
+if(BUILD_VERSION AND NOT BUILD_VERSION STREQUAL product_numbers)
     fail("CMakeLists.txt says ${BUILD_VERSION}, components.json ${product_version}")
 endif()
 foreach(pair "engine/looper_engine.h;kEngineVersion;messier.engine"

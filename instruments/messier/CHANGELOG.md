@@ -1,5 +1,16 @@
 # Changes
 
+## 1.0.0-beta.1 (2026-11-20), "1.0 beta 1"
+
+The closed, non-profit beta. The code equals 0.2.10; sound, state format and controls are
+unchanged. Release notes in `docs/RELEASE_NOTES_1.0.0-beta.1.md`. A final ChatGPT check
+of 0.2.10 found no P1 or P2 (`docs/GPT_REVIEW_0.2.10.md`).
+
+* Version 1.0.0-beta.1, shown as "1.0 beta 1" in the window. The class version the host
+  reads, and CMake's (moduleinfo.json), is 1.0.0: those fields take numbers only.
+* README: a Beta 1 section (made with AI, known limitations, how to report bugs) and the
+  steps to rebuild the bundle with a changed or replaced LGPL phase vocoder.
+
 ## 0.2.10 (2026-11-20)
 
 The findings of the ChatGPT review of 0.2.9 that hold up (`docs/GPT_REVIEW_0.2.9.md`),
