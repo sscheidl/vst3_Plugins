@@ -1,5 +1,33 @@
 # Changes
 
+## 0.2.9 (2026-11-20)
+
+The findings of the first full audit (`docs/FABLE_AUDIT_0.2.8.md`, five Fable reviewers);
+the sound of a playing file is unchanged. Details in `docs/BUILD_REPORT_0.2.9.md`.
+
+* C1, C2: LOAD's file dialog and the size and preset menus start after the click, from
+  the main queue. The host can close the window while they are open without a button
+  being on the call stack, and the window no longer keeps the mouse after them.
+* F1: a project refused for lack of memory is reported as a failed request for its file.
+  The 0.2.8 status check no longer refuses every status after it.
+* F2: a file loaded while STOP or Bypass rests the output is installed at once, unheard.
+  The window shows its waveform, and the old file is not heard fading out on resume.
+* F3: a change in one window reaches the other windows of the instance; a view the host
+  keeps while closed opens with the controller's settings.
+* E3: a failed window load no longer stays on the file line after a project load.
+* E5, C10: a key held by LATCH is let go when the keyboard is hidden. After a project load
+  or a new connection the keyboard shows no key held. A window opens unlatched.
+* C3: the menus no longer send the host an edit of a parameter that does not exist.
+* C5: a hidden knob loses the keyboard focus. C6: Ctrl+click on HUE or WAVE restores the
+  preset's value, as the double-click does.
+* C7: a custom PNG is decoded once in full before it is taken. C9: a colour table with a
+  byte-order mark keeps its first line. C8: `negative` is documented as without effect.
+* C11: the catalogue number shows its own tooltip.
+* F6: a file read from the window gives up when a newer request or project overtakes it,
+  or when the plug-in is removed; removing it no longer waits for the whole read.
+* A3: the processor is no longer declared distributable (the messages assume one process).
+* Engine 0.1.7: `LooperEngine::FinishSwapSilently`.
+
 ## 0.2.8 (2026-11-20)
 
 The five findings of Codex' short review of 0.2.7 (`docs/CODEX_REVIEW_0.2.7.md`); the

@@ -834,6 +834,50 @@ void TestStatusChecks() {
                 "out of range is refused; a regular one after it is taken\n");
 }
 
+// F6 of the Fable audit (0.2.9): a read asked to give up does so, at the first chunk
+// header or within the next MiB of audio, and a read that is not asked loads.
+void TestCancelledRead() {
+    int asked = 0;
+    const WavCancel always{[](const void*) { return true; }, nullptr};
+    CHECK(ReadWavFile(g_path, kMaxPcmBytes, always).error == WavError::kCancelled);
+    struct Later {
+        int* asked;
+        int after;
+    } const later{&asked, 3};
+    const WavCancel third{[](const void* context) {
+                              const auto& l = *static_cast<const Later*>(context);
+                              return ++*l.asked >= l.after;
+                          },
+                          &later};
+    const WavResult stopped = ReadWavFile(g_path, kMaxPcmBytes, third);
+    CHECK(stopped.error == WavError::kCancelled && !stopped.file && asked == 3);
+    CHECK(ReadWavFile(g_path, kMaxPcmBytes, WavCancel{}).error == WavError::kNone);
+    std::printf("cancelled read: a read asked to give up stops at the next chunk or MiB\n");
+}
+
+// F2 of the Fable audit (0.2.9): a file loaded while STOP rests the output is installed at
+// once, unheard; the display shows it, and nothing of the old file waits for the sound.
+void TestSwapWhileResting() {
+    const HostScore score = {{0, Ev::kParam, static_cast<int>(kParamStop), 1.0}};
+    PluginHost host({}, score);
+    CHECK(LoadState(*host.processor, MakeState(StartValues(), g_path)) == kResultOk);
+    host.Run(4800, 256);
+    const FileData* before = host.processor->Engine().CurrentFile();
+    CHECK(before && before->channels == 2);
+    host.processor->Loader().Request(g_path_mono);
+    CHECK(WaitFor([&] { return host.processor->Loader().Idle(); }));
+    const std::size_t heard = host.left.size();
+    host.Run(512, 256);
+    CHECK(!host.processor->Engine().Swapping());
+    CHECK(host.processor->Engine().CurrentFile() && host.processor->Engine().CurrentFile()->channels == 1);
+    EngineDisplay display;
+    host.processor->Engine().Display(display);
+    CHECK(display.frames == host.processor->Engine().CurrentFile()->frames && display.swapping == 0);
+    for(std::size_t i = heard; i < host.left.size(); ++i)
+        CHECK(host.left[i] == 0.0f && host.right[i] == 0.0f);
+    std::printf("swap while resting: a file loaded during STOP is installed at once, unheard\n");
+}
+
 void TestLoadWhilePlaying() {
     PluginHost host({});
     CHECK(LoadState(*host.processor, MakeState(StartValues(), g_path)) == kResultOk);
@@ -1603,6 +1647,22 @@ void TestViewLayout() {
 // keeping one value per parameter and position as the SDK's queue does
 // (ParameterValueQueue::addPoint replaces a point at the same offset). Counts
 // setDirty() calls.
+// Counts the edits that reach the host (0.2.9, C3).
+class CountingHandler : public U::Implements<U::Directly<IComponentHandler>> {
+  public:
+    tresult PLUGIN_API beginEdit(ParamID) override {
+        ++begins;
+        return kResultOk;
+    }
+    tresult PLUGIN_API performEdit(ParamID, ParamValue) override { return kResultOk; }
+    tresult PLUGIN_API endEdit(ParamID) override {
+        ++ends;
+        return kResultOk;
+    }
+    tresult PLUGIN_API restartComponent(int32) override { return kResultOk; }
+    int begins = 0, ends = 0;
+};
+
 class CoalescingHandler : public IComponentHandler, public IComponentHandler2 {
   public:
     tresult PLUGIN_API beginEdit(ParamID) override { return kResultOk; }
@@ -2213,6 +2273,21 @@ void TestCustomSkin() {
         const Skin larger(GuiPreset::kGold, {big});
         CHECK(larger.Overrides() == 0 && larger.Colours().marker == gold.marker);
     }
+    // C7 (0.2.9): a PNG with a valid header but its pixel data zeroed is decoded once in
+    // full and, failing, gives the built-in bitmap. (WIC decodes a cut-off or scrambled
+    // file without an error, partly; such a file draws as far as it decodes.)
+    {
+        const fs::path cut = g_dir / "skin cut";
+        fs::create_directories(cut);
+        std::string keys = read_all(gui / "messier_gold_chassis@1x.png");
+        for(std::size_t i = keys.size() / 4; i < keys.size() * 3 / 4; ++i)
+            keys[i] = 0;
+        std::ofstream(cut / "messier_gold_chassis@1x.png", std::ios::binary) << keys;
+        const int before = SkinFilesDecoded();
+        const Skin broken(GuiPreset::kGold, {cut});
+        CHECK(SkinFilesDecoded() - before == 1 && broken.Overrides() == 0);
+        CHECK(png(broken.Image(SkinImageId::kChassis).x1) == png(built_in.Image(SkinImageId::kChassis).x1));
+    }
     CHECK(custom.Colours().glass == CColor(16, 32, 48) && custom.Colours().marker == CColor(1, 2, 3));
     const PNGBitmapBuffer plum_small = file_png("messier_plum_knob_s@1x.png");
     CHECK(!plum_small.empty() && png(custom.Image(SkinImageId::kKnobSmall).x1) == plum_small);
@@ -2265,6 +2340,8 @@ void TestGuiPresets() {
         SkinColours some = PresetInfo(GuiPreset::kGold).colours;
         CHECK(ApplyColourTable("; a comment\nglass = #102030 ; dark\nnothing = #FFFFFF\nmarker = red\n", some) == 1);
         CHECK(some.glass == VSTGUI::CColor(16, 32, 48) && some.marker == PresetInfo(GuiPreset::kGold).colours.marker);
+        // C9 (0.2.9): a byte-order mark before the first line.
+        CHECK(ApplyColourTable("\xEF\xBB\xBFmarker = #010203\n", some) == 1 && some.marker == VSTGUI::CColor(1, 2, 3));
     }
     // 0.2.7: custom skins, the user's folder in Documents first; the guide names every
     // bitmap with its size and every colour.
@@ -2382,6 +2459,37 @@ void TestGuiPresets() {
         CHECK(editor->Settings().WavePercent() == 200);
         editor->SetGuiPreset(GuiPreset::kSlate);
         CHECK(editor->Settings().WavePercent() == 100);
+    }
+    // F3 of the Fable audit (0.2.9): a change in one window reaches the other window of
+    // the instance; a view kept while closed takes the controller's settings when asked.
+    {
+        IPtr<IPlugView> a = owned(controller->createView(ViewType::kEditor));
+        IPtr<IPlugView> b = owned(controller->createView(ViewType::kEditor));
+        auto* one = dynamic_cast<Editor*>(a.get());
+        auto* two = dynamic_cast<Editor*>(b.get());
+        CHECK(one && two);
+        controller->editorAttached(one);
+        controller->editorAttached(two);
+        one->SetGuiPreset(GuiPreset::kGold);
+        CHECK(controller->WindowSettings().preset == GuiPreset::kGold && two->Settings().preset == GuiPreset::kGold);
+        controller->editorRemoved(one);
+        controller->editorRemoved(two);
+        CHECK(load(6, 1.5, 0, 0, &plum, 1, &accents, 100) == kResultOk);
+        CHECK(two->Settings().preset == GuiPreset::kGold); // closed: not told
+        ViewRect size;
+        CHECK(two->getSize(&size) == kResultOk && two->Settings().preset == GuiPreset::kPlum
+              && two->Settings().zoom == 1.5 && !two->Settings().keyboard);
+        // C3 (0.2.9): the menus' controls (tag -1) do not reach the host as an edit.
+        CountingHandler handler;
+        CHECK(controller->setComponentHandler(&handler) == kResultOk);
+        auto* base = static_cast<VSTGUI::VSTGUIEditorInterface*>(one);
+        base->beginEdit(-1);
+        base->endEdit(-1);
+        CHECK(handler.begins == 0 && handler.ends == 0);
+        base->beginEdit(static_cast<int32_t>(kParamVolume));
+        base->endEdit(static_cast<int32_t>(kParamVolume));
+        CHECK(handler.begins == 1 && handler.ends == 1);
+        CHECK(controller->setComponentHandler(nullptr) == kResultOk);
     }
     CHECK(controller->terminate() == kResultOk);
     std::printf("gui presets: the bitmaps of all four presets in the resources at the brief's sizes; the "
@@ -3043,6 +3151,16 @@ void TestProjectWithoutMemory() {
     test_support::g_fail_size_to = 0;
     CHECK(test_support::g_failed_allocations > failed_before);
     CHECK(refused == kOutOfMemory);
+    // F1 of the Fable audit (0.2.9): the refusal is a failed request for the project's
+    // file, which the controller takes (no window load came before it).
+    {
+        const FileStatus refusal = host.processor->Loader().Status();
+        CHECK(refusal.request_state == RequestState::kFailed && refusal.request == g_path_mono
+              && refusal.HasItsTexts());
+        FileStatus nameless = refusal;
+        nameless.request.clear(); // no memory left even for the name
+        CHECK(nameless.HasItsTexts());
+    }
     host.Run(256, 64);
     CHECK(host.processor->Engine().CurrentFile()->frames == frames);
     CHECK(host.processor->Loader().SoundPath() == g_path);
@@ -3055,6 +3173,9 @@ void TestProjectWithoutMemory() {
     CHECK(LoadState(*host.processor, MakeState(DefaultValues(), g_path_mono)) == kResultOk);
     host.Run(256, 64);
     CHECK(host.processor->Loader().SoundPath() == g_path_mono);
+    // E3 (0.2.9): the failure reported before is no longer on the file line.
+    CHECK(host.processor->Loader().Status().request_state == RequestState::kNone
+          && host.processor->Loader().Status().detail.empty());
     std::printf("project without memory to decode its file: refused, the old project plays on "
                 "and is saved\n");
 #else
@@ -3485,6 +3606,8 @@ int main() {
     TestMessagesAndKeyboard();
     TestHostWithoutEmptyTexts();
     TestStatusChecks();
+    TestCancelledRead();
+    TestSwapWhileResting();
     TestLoadWhilePlaying();
     TestProjectBackpressure();
     TestResetButtonThroughHost();

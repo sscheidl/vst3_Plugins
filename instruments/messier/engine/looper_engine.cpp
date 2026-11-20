@@ -203,6 +203,16 @@ void LooperEngine::SwapFile(const FileData* file) {
     impl_->bridge.gate.store(true, std::memory_order_release);
 }
 
+void LooperEngine::FinishSwapSilently() {
+    float silence[kQuantum] = {};
+    float discard_left[kQuantum], discard_right[kQuantum];
+    // The core fades over 256 samples (4 quanta) and acknowledges; the swap follows at
+    // the start of the next quantum. The bound only guards against a core that never
+    // acknowledges.
+    for(int quantum = 0; swapping_ && quantum < 16; ++quantum)
+        Render(silence, silence, discard_left, discard_right);
+}
+
 void LooperEngine::Render(const float* in_left, const float* in_right, float* left, float* right) {
     Impl& m = *impl_;
     if(swapping_ && m.bridge.ack.load(std::memory_order_acquire)) {

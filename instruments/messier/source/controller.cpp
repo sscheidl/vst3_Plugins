@@ -104,6 +104,8 @@ tresult PLUGIN_API Controller::connect(IConnectionPoint* other) {
     // processor's first value is a change. Nothing is counted here.
     EditController::setParamNormalized(kParamSampleChanges, 0.0);
     ForgetDisplay();
+    // MS-R31: the processor let go of the keys of the old connection (E5, 0.2.9).
+    ForEachEditor([](Editor& editor) { editor.ForgetHeldKey(); });
     RequestFileStatus();
     return kResultOk;
 }
@@ -173,6 +175,8 @@ tresult PLUGIN_API Controller::setComponentState(IBStream* state) {
     file_.sound = file_.path.empty() ? SoundState::kNone : SoundState::kReady;
     file_.info.clear();
     ShowFile();
+    // The processor restarts without notes: no screen key is held any more (E5, 0.2.9).
+    ForEachEditor([](Editor& editor) { editor.ForgetHeldKey(); });
     RequestFileStatus();
     return kResultOk;
 }
@@ -543,7 +547,17 @@ IPlugView* PLUGIN_API Controller::createView(FIDString name) {
 
 Editor* Controller::MakeEditor() {
     EditorCallbacks callbacks;
-    callbacks.changed = [this](const EditorSettings& settings) { editor_ = settings; };
+    // F3 (0.2.9): a change in one window reaches the others of this instance; a closed
+    // view takes the settings when it opens again (callbacks.current).
+    auto self = std::make_shared<const Editor*>(nullptr);
+    callbacks.changed = [this, self](const EditorSettings& settings) {
+        editor_ = settings;
+        ForEachEditor([&](Editor& other) {
+            if(&other != *self)
+                other.ApplySettings(settings);
+        });
+    };
+    callbacks.current = [this] { return editor_; };
     callbacks.settled = [this] { setDirty(true); };
     callbacks.strike = [this](int note) { PlayNote(note); };
     callbacks.release = [this](int note) { ReleaseNote(note); };
@@ -567,6 +581,7 @@ Editor* Controller::MakeEditor() {
         RequestDisplay();
     };
     auto* editor = new Editor(this, editor_, std::move(callbacks));
+    *self = editor;
     editor->ShowFileStatus(file_); // never throws (MS-R15)
     editor->ShowDisplay(display_, ShownWave()); // never throws
     return editor;

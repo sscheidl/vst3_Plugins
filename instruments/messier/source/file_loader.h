@@ -95,11 +95,12 @@ struct FileStatus {
                && (code >> 4) <= static_cast<int>(RequestState::kFailed);
     }
     // The texts the states need (MS-R58): a sound other than none names its file, and a
-    // request that is running or failed names the file asked for. A status received
-    // without them lost a text on the way and is not taken.
+    // request that is running names the file asked for. A status received without them
+    // lost a text on the way and is not taken. A failed request may name none (0.2.9, F1
+    // of the Fable audit): a refused project or a request without memory for its path.
     bool HasItsTexts() const {
         return (sound == SoundState::kNone) == path.empty()
-               && (request_state == RequestState::kNone || !request.empty());
+               && (request_state != RequestState::kLoading || !request.empty());
     }
     void SetCode(int code) {
         sound = static_cast<SoundState>(code & 15);
@@ -171,6 +172,10 @@ class FileLoader {
     std::string wanted_;           // the request waiting for the worker
     bool has_wanted_ = false, busy_ = false, stop_ = false;
     std::uint64_t ticket_ = 0;     // of the newest request or project load
+    // The same two for the worker's read, without the lock (0.2.9, F6): a read that a newer
+    // request, a project or the end has overtaken gives up.
+    std::atomic<std::uint64_t> newest_ticket_{0};
+    std::atomic<bool> stopping_{false};
     std::uint64_t sequence_ = 0;   // numbers the finished files
     std::atomic<std::uint32_t> user_loads_{0};
     // An empty file, kept ready so that a project can fall silent even when no memory

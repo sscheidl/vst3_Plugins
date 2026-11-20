@@ -17,7 +17,7 @@ DEF_CLASS2(INLINE_UID_FROM_FUID(kProcessorUID),
            PClassInfo::kManyInstances,
            kVstAudioEffectClass,
            stringPluginName,
-           Vst::kDistributable,
+           0, // not kDistributable: the messages assume one process and one clock (A3, 0.2.9)
            Vst::PlugType::kInstrumentSampler,
            FULL_VERSION_STR,
            kVstVersionString,

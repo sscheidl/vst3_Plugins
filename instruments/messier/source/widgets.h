@@ -29,6 +29,9 @@ class KeyboardView : public VSTGUI::CView {
     void SetSkin(std::shared_ptr<const Skin> skin);
     // Lets go of the key that is held, if any: before the view goes away.
     void ReleaseHeld();
+    // Shows no key held, without a release: the processor has restarted without notes
+    // (E5 of the Fable audit, 0.2.9).
+    void ForgetHeld();
     // Latch (since 0.1.8, the user's wish): a struck key stays held after the mouse
     // is let go, so the pitch stays changed. Clicking another key moves the hold
     // there, clicking the held key again lets it go, and so does switching latch off.

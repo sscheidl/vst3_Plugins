@@ -96,6 +96,7 @@ const char* WavErrorText(WavError error) {
         case WavError::kTooLarge: return "too large";
         case WavError::kReadError: return "could not be read";
         case WavError::kOutOfMemory: return "out of memory";
+        case WavError::kCancelled: return "cancelled";
     }
     return "";
 }
@@ -109,7 +110,8 @@ WavResult OutOfMemory() noexcept {
     return Fail(WavError::kOutOfMemory, "while decoding");
 }
 
-WavResult DecodeUnchecked(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes, bool probe = false) {
+WavResult DecodeUnchecked(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes, bool probe = false,
+                          WavCancel cancel = {}) {
     RethrowStreamErrors rethrow(in);
     rethrow.Arm();
     std::uint8_t header[12];
@@ -124,6 +126,8 @@ WavResult DecodeUnchecked(std::istream& in, std::uint64_t size, std::uint64_t ma
     std::uint64_t data_offset = 0, data_bytes = 0;
     std::uint64_t position = 12;
     while(position + 8 <= size) {
+        if(cancel())
+            return Fail(WavError::kCancelled, "cancelled");
         std::uint8_t chunk[8];
         if(!ReadAt(in, position, chunk, sizeof(chunk)))
             return Fail(WavError::kReadError, "read error in the chunk list");
@@ -214,6 +218,8 @@ WavResult DecodeUnchecked(std::istream& in, std::uint64_t size, std::uint64_t ma
     in.clear();
     in.seekg(static_cast<std::streamoff>(data_offset));
     for(std::uint64_t left = frames; left > 0;) {
+        if(cancel())
+            return Fail(WavError::kCancelled, "cancelled");
         const std::size_t count = static_cast<std::size_t>(std::min<std::uint64_t>(left, piece_frames));
         const std::size_t bytes = count * block;
         in.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(bytes));
@@ -247,7 +253,8 @@ WavResult DecodeUnchecked(std::istream& in, std::uint64_t size, std::uint64_t ma
     return result;
 }
 
-WavResult ReadUnchecked(const std::string& utf8_path, std::uint64_t max_pcm_bytes, bool probe = false) {
+WavResult ReadUnchecked(const std::string& utf8_path, std::uint64_t max_pcm_bytes, bool probe = false,
+                        WavCancel cancel = {}) {
     if(utf8_path.empty())
         return Fail(WavError::kMissing, "no path");
     std::filesystem::path path;
@@ -281,14 +288,14 @@ WavResult ReadUnchecked(const std::string& utf8_path, std::uint64_t max_pcm_byte
     std::ifstream in(path, std::ios::binary);
     if(!in)
         return Fail(WavError::kReadError, "cannot open the file");
-    return DecodeUnchecked(in, static_cast<std::uint64_t>(size), max_pcm_bytes, probe);
+    return DecodeUnchecked(in, static_cast<std::uint64_t>(size), max_pcm_bytes, probe, cancel);
 }
 
 } // namespace
 
-WavResult DecodeWav(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes) noexcept {
+WavResult DecodeWav(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes, WavCancel cancel) noexcept {
     try {
-        return DecodeUnchecked(in, size, max_pcm_bytes);
+        return DecodeUnchecked(in, size, max_pcm_bytes, false, cancel);
     } catch(const std::bad_alloc&) {
         return OutOfMemory();
     } catch(...) {
@@ -306,9 +313,9 @@ WavResult ProbeWavFile(const std::string& utf8_path, std::uint64_t max_pcm_bytes
     }
 }
 
-WavResult ReadWavFile(const std::string& utf8_path, std::uint64_t max_pcm_bytes) noexcept {
+WavResult ReadWavFile(const std::string& utf8_path, std::uint64_t max_pcm_bytes, WavCancel cancel) noexcept {
     try {
-        return ReadUnchecked(utf8_path, max_pcm_bytes);
+        return ReadUnchecked(utf8_path, max_pcm_bytes, false, cancel);
     } catch(const std::bad_alloc&) {
         return OutOfMemory();
     } catch(...) {

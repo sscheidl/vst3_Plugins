@@ -270,6 +270,25 @@ The new window (0.2.0, Slate; judge the look as well as what it shows):
 - [ ] A new Plum instance: WAVE at 200 %; double-click on WAVE brings back the preset's
       default (Plum 200 %, the others 100 %). The palette menu reads Slate, Silver, Gold, Plum.
 
+0.2.9 (the Fable audit; most of it only a host shows):
+
+- [ ] LOAD..., the size menu and the preset menu still open and work. With a floating
+      plug-in window: open LOAD's dialog, close the plug-in window from the host (or remove
+      the track), then cancel the dialog: no crash (C1).
+- [ ] After choosing in a menu or the file dialog, the next click into the host acts at
+      once (C2).
+- [ ] STOP on, load another file: the plate shows its waveform at once; STOP off: the
+      new file starts from START, nothing of the old file is heard (F2).
+- [ ] Two windows of one instance (if the host allows): a preset chosen in one shows in
+      the other; the saved project has it (F3).
+- [ ] Load a broken file ("Could not load ..."), then a preset or project: the line shows
+      the project's file (E3).
+- [ ] LATCH a key, then KEYS off: the note ends. LATCH a key, then load a preset: no key
+      stays lit (E5, C10).
+- [ ] Open DETAILS, click a small knob, close DETAILS, press an arrow key: nothing changes (C5).
+- [ ] Ctrl+click on HUE or WAVE: the preset's colour or WAVE value, as with a double-click (C6).
+- [ ] Hover over "No. n": its own tooltip (C11).
+
 ## 7. Listening
 
 - [ ] Against the Daisy kit with Nebulae on Daisy 0.2.2, if at hand, same file, same

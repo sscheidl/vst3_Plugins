@@ -85,6 +85,14 @@ void KeyboardView::ReleaseHeld() {
     Release();
 }
 
+void KeyboardView::ForgetHeld() {
+    dragging_ = false;
+    if(pressed_ >= 0) {
+        pressed_ = -1;
+        invalid();
+    }
+}
+
 void KeyboardView::SetLatch(bool on) {
     latch_ = on;
     if(!on)
@@ -427,6 +435,9 @@ void ToggleButton::onMouseDownEvent(MouseDownEvent& event) {
     if(style_ != Style::Action)
         on_ = !on_;
     event.consumed = true;
+    // C2 (0.2.9): no button follows the mouse; without this the window would keep the
+    // mouse capture after a dialog or menu and swallow the next click elsewhere.
+    event.ignoreFollowUpMoveAndUpEvents(true);
     // MS-R37: what the button does (LOAD..., KEYS, LATCH, STOP, FREEZE, RESET, the
     // octave keys, the menus) runs inside the window's exception boundary. If it could
     // not be done, the button shows its old state again.

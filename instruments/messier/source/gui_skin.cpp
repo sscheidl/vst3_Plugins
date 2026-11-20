@@ -392,7 +392,9 @@ PlatformBitmapPtr BitmapFromFolders(const std::vector<std::filesystem::path>& fo
             ++g_decoded;
             PlatformBitmapPtr bitmap =
                 getPlatformFactory().createBitmapFromMemory(bytes.data(), static_cast<uint32_t>(bytes.size()));
-            if(bitmap && bitmap->getSize() == size)
+            // C7 (0.2.9): the platform decodes lazily; one full decode now, so that a file
+            // with broken pixel data falls through instead of drawing as nothing.
+            if(bitmap && bitmap->getSize() == size && bitmap->lockPixels(true))
                 return bitmap;
         } catch(...) {
         }
@@ -507,7 +509,8 @@ std::string SkinFolderGuide() {
         text += field.name;
         text += "\n";
     }
-    text += "  negative = true or false (dark ink on bright glass)\n";
+    text += "  negative = true or false\n"
+            "Read but without effect so far: negative, wave, wave_outside, loop_edge.\n";
     return text;
 }
 
@@ -551,7 +554,9 @@ std::string ColourTableText(const SkinColours& colours) {
 
 int ApplyColourTable(const std::string& text, SkinColours& colours) {
     int taken = 0;
-    std::istringstream lines(text);
+    // C9 (0.2.9): a table saved as "UTF-8 with BOM" keeps its first line.
+    const bool bom = text.size() >= 3 && text.compare(0, 3, "\xEF\xBB\xBF") == 0;
+    std::istringstream lines(bom ? text.substr(3) : text);
     std::string line;
     while(std::getline(lines, line)) {
         const std::size_t comment = line.find(';');

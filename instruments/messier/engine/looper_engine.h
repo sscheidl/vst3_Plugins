@@ -21,7 +21,7 @@
 
 namespace messier {
 
-constexpr const char* kEngineVersion = "0.1.6";
+constexpr const char* kEngineVersion = "0.1.7";
 
 // A sample file in the core's format: interleaved PCM16, mono or stereo, at the
 // file's own rate (the core converts the rate when it reads). Immutable once handed
@@ -136,6 +136,11 @@ class LooperEngine {
     // file waiting for it, which is released at once.
     void SwapFile(const FileData* file);
     bool Swapping() const { return swapping_; }
+    // While nothing is heard (STOP or Bypass rests the output): lets a running swap
+    // finish now, by rendering the quanta it needs (the old file's fade-out, at most a
+    // few) into nothing. Afterwards the new file is installed and shown, and plays from
+    // START when the sound goes on (0.2.9, F2 of the Fable audit). Does not allocate.
+    void FinishSwapSilently();
     // The file playing (or fading out), and the one a running swap brings.
     const FileData* CurrentFile() const { return current_; }
     const FileData* NextFile() const { return swapping_ ? next_ : current_; }

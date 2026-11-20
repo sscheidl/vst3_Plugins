@@ -85,6 +85,20 @@ class AccentSlider : public CSlider {
         });
     }
 
+    // C6 (0.2.9): VSTGUI's default-value gesture (Ctrl+click) restores the preset's
+    // value as the double-click does, instead of the slider's default 0.5.
+    void dispatchEvent(Event& event) override {
+        if(event.type == EventType::MouseDown
+           && CControl::CheckDefaultValueEventFunc(this, castMouseDownEvent(event))) {
+            auto& down = castMouseDownEvent(event);
+            Guarded([&] { restore_(); });
+            down.consumed = true;
+            down.ignoreFollowUpMoveAndUpEvents(true);
+            return;
+        }
+        CSlider::dispatchEvent(event);
+    }
+
     void draw(CDrawContext* context) override {
         Guarded([&] {
             const CRect area = getViewSize();
@@ -141,6 +155,20 @@ class WaveSlider : public CSlider {
             }
             return CSlider::onMouseDown(point, buttons);
         });
+    }
+
+    // C6 (0.2.9): VSTGUI's default-value gesture (Ctrl+click) restores the preset's
+    // value as the double-click does, instead of the slider's default 0.5.
+    void dispatchEvent(Event& event) override {
+        if(event.type == EventType::MouseDown
+           && CControl::CheckDefaultValueEventFunc(this, castMouseDownEvent(event))) {
+            auto& down = castMouseDownEvent(event);
+            Guarded([&] { restore_(); });
+            down.consumed = true;
+            down.ignoreFollowUpMoveAndUpEvents(true);
+            return;
+        }
+        CSlider::dispatchEvent(event);
     }
 
     void draw(CDrawContext* context) override {
@@ -306,6 +334,8 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
 }
 
 bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
+    if(callbacks_.current)
+        ApplySettings(callbacks_.current()); // F3 (0.2.9); without a frame it only takes them
     frame = new CFrame(CRect(0, 0, kWidth, EditorBaseHeight(settings_.keyboard, settings_.details)), this);
     frame->setBackgroundColor(kBlackCColor);
     frame->enableTooltips(true);
@@ -331,17 +361,19 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
         stop_button_->setTooltipText("Stop: pauses the sound with a short fade; press again to go on where it stopped");
     }
     size_button_ = Add(new ToggleButton(Box(L::kSizeLeft, L::kButtonTop, L::kSizeRight, L::kButtonTop + L::kButtonHeight),
-                                        "", false, [this](bool) { ShowSizeMenu(); }, ToggleButton::Style::Action));
+                                        "", false, [this](bool) { Later([this] { ShowSizeMenu(); }); },
+                                        ToggleButton::Style::Action));
     size_button_->SetIcon(ToggleButton::Icon::kSize);
     size_button_->setTooltipText("Window size");
     preset_button_ = Add(new ToggleButton(Box(L::kPresetLeft, L::kButtonTop, L::kPresetRight, L::kButtonTop + L::kButtonHeight),
-                                          "", false, [this](bool) { ShowPresetMenu(); }, ToggleButton::Style::Action));
+                                          "", false, [this](bool) { Later([this] { ShowPresetMenu(); }); },
+                                          ToggleButton::Style::Action));
     preset_button_->SetIcon(ToggleButton::Icon::kPreset);
     preset_button_->setTooltipText("GUI preset: the look of the window");
 
     // The sample: LOAD, its name, its format or what went wrong, its catalogue number.
     auto* load = Add(new ToggleButton(Box(L::kLoadLeft, L::kLoadTop, L::kLoadRight, L::kLoadBottom), "LOAD...",
-                                      false, [this](bool) { ChooseFile(); }, ToggleButton::Style::Action));
+                                      false, [this](bool) { Later([this] { ChooseFile(); }); }, ToggleButton::Style::Action));
     load->setTooltipText("Load a WAV file: 16 or 24 bit PCM or 32 bit float, mono or stereo");
     load->SetSkin(skin_);
     // The name upright like the rest of the header (0.2.7), as it is spelt; a name too long
@@ -418,6 +450,12 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
         map_view_->setDropTarget(drop);
         file_zone_ = Add(new CView(Box(L::kFileLeft, L::kFileNameTop, L::kFileRight, L::kFileInfoBottom)));
         file_zone_->setDropTarget(drop);
+        // C11 (0.2.9): the catalogue number lies over the file zone and takes the mouse,
+        // so that its own tooltip shows.
+        if(catalogue_) {
+            catalogue_->setMouseEnabled(true);
+            frame->changeViewZOrder(catalogue_, frame->getNbViews() - 1);
+        }
         ApplyFileTexts(); // its tooltip
     }
 
@@ -636,6 +674,25 @@ void Editor::Animate() noexcept {
         map_view_->Tick();
 }
 
+void Editor::Later(std::function<void()> action) noexcept {
+    // C1 of the Fable audit (0.2.9): the file dialog and the menus run their own message
+    // loop, in which the host may close the window. Started from the main queue instead
+    // of from inside the click, no button and no VSTGUI event dispatch is on the stack
+    // then. The task checks that this editor and this window are still there.
+    if(!frame || !action)
+        return;
+    Guarded([&] {
+        const std::weak_ptr<bool> alive = alive_;
+        const std::uint64_t window = window_serial_;
+        Tasks::schedule(Tasks::mainQueue(), [this, alive, window, action = std::move(action)] {
+            const auto still = alive.lock();
+            if(!still || !*still || !frame || window != window_serial_)
+                return;
+            Guarded([&] { action(); });
+        });
+    });
+}
+
 void Editor::AnimateLater() noexcept {
     if(map_view_)
         map_view_->Tick(); // draws only; no call leaves the window
@@ -689,6 +746,9 @@ void Editor::LayOut(int32 width, int32 height) {
     for(Knob& knob : knobs_) {
         if(!knob.knob || !kKnobs[static_cast<std::size_t>(&knob - knobs_.data())].small)
             continue;
+        // C5 (0.2.9): a hidden knob keeps no keyboard focus, or the arrow keys would turn it.
+        if(!settings_.details && frame->getFocusView() == knob.knob)
+            frame->setFocusView(nullptr);
         knob.knob->setVisible(settings_.details);
         if(knob.value)
             knob.value->setVisible(settings_.details);
@@ -764,6 +824,10 @@ void Editor::SetKeyboardVisible(bool show) {
             keyboard_button_->SetOn(before.keyboard);
         return;
     }
+    // E5/C10 (0.2.9): a key held by LATCH is let go with the keyboard, which takes LATCH
+    // out of sight; nothing would be left to end it.
+    if(!show && keyboard_view_)
+        Guarded([&] { keyboard_view_->ReleaseHeld(); });
     UserChanged();
 }
 
@@ -1127,9 +1191,13 @@ void Editor::ApplySettings(const EditorSettings& settings) {
 
 tresult PLUGIN_API Editor::getSize(ViewRect* size) {
     return Guarded(static_cast<tresult>(kResultFalse), [&] {
-        // Before the window exists, answer with the size it will have.
-        if(!frame)
+        // Before the window exists, answer with the size it will have: that of the
+        // controller's settings (F3, 0.2.9).
+        if(!frame) {
+            if(callbacks_.current)
+                ApplySettings(callbacks_.current());
             setRect(ScaledSize());
+        }
         return VSTGUIEditor::getSize(size);
     });
 }
@@ -1137,6 +1205,7 @@ tresult PLUGIN_API Editor::getSize(ViewRect* size) {
 void PLUGIN_API Editor::close() {
     // Each step on its own: whatever one of them meets, the frame is let go.
     Guarded([&] { FinishEdits(); });
+    latch_ = false; // a window opens unlatched, also a view the host opens again (C10, 0.2.9)
     ForgetViews();
     if(frame) {
         Guarded([&] { frame->removeAll(true); });
@@ -1200,13 +1269,15 @@ void Editor::valueChanged(CControl* control) {
     Animate(); // 0.2.1: the plate moves on while the host holds back the timer
 }
 
+// Only parameters go to the host: not HUE and WAVE (window settings) and not the menus,
+// whose controls have the tag -1 (C3 of the Fable audit, 0.2.9).
 void Editor::beginEdit(int32_t tag) {
-    if(tag != kAccentTag && tag != kWaveTag)
+    if(tag >= 0)
         VSTGUIEditor::beginEdit(tag);
 }
 
 void Editor::endEdit(int32_t tag) {
-    if(tag != kAccentTag && tag != kWaveTag)
+    if(tag >= 0)
         VSTGUIEditor::endEdit(tag);
 }
 
@@ -1306,6 +1377,11 @@ void Editor::ShowDisplay(const EngineDisplay& display, std::shared_ptr<const Wav
             catalogue_shown_ = number;
         });
     }
+}
+
+void Editor::ForgetHeldKey() noexcept {
+    if(keyboard_view_)
+        Guarded([&] { keyboard_view_->ForgetHeld(); });
 }
 
 void Editor::ShowFileStatus(const FileStatus& status) noexcept {

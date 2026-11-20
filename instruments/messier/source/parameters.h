@@ -155,7 +155,7 @@ inline float Density(float g) {
 // Two parameters are laid out differently from the module's pots, at the user's
 // wish of 2026-11-18; the core and its laws are unchanged, only the pot position it
 // is given differs:
-// * Speed: 0x exactly at 12 o'clock (the module has +1x there, 0x at 40 % of the
+// * Speed: 0x at 12 o'clock (the module has +1x there, 0x at 40 % of the
 //   travel). The parameter's lower half covers the pot's 0..0.4 (-4x .. 0x), the upper
 //   half 0.4..1 (0x .. +4x); +1x lies at 7/12 of the travel.
 // * Pitch Random: +-12 semitones at the top instead of +-2 octaves (half the pot).

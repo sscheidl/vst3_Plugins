@@ -26,7 +26,15 @@ constexpr std::uint64_t kMaxPcmBytes = 256ull * 1024 * 1024;
 // kOutOfMemory (since 0.1.5, MS-R16): a valid file that could not be decoded for
 // want of memory, apart from kTooLarge, a file beyond the limit. A project load
 // refuses the project on it instead of falling silent.
-enum class WavError : int { kNone = 0, kMissing, kInvalid, kTooLarge, kReadError, kOutOfMemory };
+enum class WavError : int { kNone = 0, kMissing, kInvalid, kTooLarge, kReadError, kOutOfMemory, kCancelled };
+
+// A read that may be given up (0.2.9, F6 of the Fable audit): asked once per chunk header
+// and once per MiB of audio data. Without a check it never gives up.
+struct WavCancel {
+    bool (*check)(const void* context) = nullptr;
+    const void* context = nullptr;
+    bool operator()() const { return check && check(context); }
+};
 
 struct WavResult {
     WavError error = WavError::kNone;
@@ -58,10 +66,12 @@ std::int16_t FloatTo16(float value);
 
 // Decodes a WAV of `size` bytes from `in`.
 // Never throws: a failed allocation is the result kOutOfMemory (MS-R01, MS-R16).
-WavResult DecodeWav(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes = kMaxPcmBytes) noexcept;
+WavResult DecodeWav(std::istream& in, std::uint64_t size, std::uint64_t max_pcm_bytes = kMaxPcmBytes,
+                    WavCancel cancel = {}) noexcept;
 
-// Opens and decodes the file at a UTF-8 path.
-WavResult ReadWavFile(const std::string& utf8_path, std::uint64_t max_pcm_bytes = kMaxPcmBytes) noexcept;
+// Opens and decodes the file at a UTF-8 path. Gives up with kCancelled when `cancel` says so.
+WavResult ReadWavFile(const std::string& utf8_path, std::uint64_t max_pcm_bytes = kMaxPcmBytes,
+                      WavCancel cancel = {}) noexcept;
 // Since 0.1.8: checks the file at a UTF-8 path as ReadWavFile does (headers, format,
 // channels, rate, alignment, length, size limit) without reading the audio data, for
 // a drag over the window. kNone means it would load as far as its headers tell; file

@@ -605,6 +605,10 @@ tresult PLUGIN_API Processor::process(ProcessData& data) {
     if(!TakeHandovers(true))
         if(FileData* file = TakeWindowFile())
             engine_.SwapFile(file);
+    // F2 (0.2.9): while the output rests, a swap would wait for the sound to go on and
+    // then let the old file be heard fading out; it finishes now, unheard.
+    if(gate_.Resting() && engine_.Swapping())
+        engine_.FinishSwapSilently();
     const int32 num_samples = std::max<int32>(data.numSamples, 0);
     // The window's RESET presses (MS-R08). Presses that reach one block act once:
     // the same restart from START. A call without samples leaves them waiting

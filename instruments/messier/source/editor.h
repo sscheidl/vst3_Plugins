@@ -171,6 +171,9 @@ struct EditorCallbacks {
     std::function<void()> poll;
     // The RESET button was pressed.
     std::function<void()> reset;
+    // The settings as the controller holds them now (F3 of the Fable audit, 0.2.9): a view
+    // the host keeps while its window is closed opens with them, not with its own old ones.
+    std::function<EditorSettings()> current;
 };
 
 // The plug-in window (0.2.0, after the window study, version 3; rearranged in 0.2.2 after
@@ -235,6 +238,9 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     void ChooseFile();
     // Called by the controller with what the processor reports about the sample.
     void ShowFileStatus(const FileStatus& status) noexcept;
+    // The processor has restarted without notes (a project, a new connection): the screen
+    // keyboard shows no key held any more, without sending a release (E5, 0.2.9).
+    void ForgetHeldKey() noexcept;
     // Called by the controller with the newest display and the overview of its file
     // (null if the controller has none). Kept while the window is closed, drawn
     // while it is open.
@@ -300,6 +306,8 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     // drawing at once; the request to the processor waits for VSTGUI's main queue, after
     // the controller's call has returned, and is for this window only. At most one waits.
     void AnimateLater() noexcept;
+    // Runs `action` from the main queue, after the event being handled (C1, 0.2.9).
+    void Later(std::function<void()> action) noexcept;
     // Opens the window: counts up, so that a menu's late answer for an earlier window of
     // this editor does nothing (MS-R40).
     std::uint64_t window_serial_ = 0;

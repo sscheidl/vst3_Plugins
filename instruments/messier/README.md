@@ -9,12 +9,12 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 0.2.8, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 0.2.9, bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-**Status 0.2.8:** builds, passes Steinberg's validator, tested automatically (bit for
+**Status 0.2.9:** builds, passes Steinberg's validator, tested automatically (bit for
 bit against the separately compiled firmware core, see the
 [build report](docs/BUILD_REPORT_0.1.0.md)). Codex' review of 0.1.0 found four defects
 ([review](docs/CODEX_REVIEW_0.1.0.md), [fixes](docs/CODEX_REVIEW_0.1.0_UMSETZUNG.md)), its
@@ -48,7 +48,9 @@ the user's look at it: HUE turns only the hue, TRAIL is fixed and WAVE takes its
 ([report](docs/BUILD_REPORT_0.2.6.md)); 0.2.7 makes the file name follow every load in
 Studio One and sets it upright ([report](docs/BUILD_REPORT_0.2.7.md)); 0.2.8 fixes the
 five findings of Codex' short review of 0.2.7, MS-R58 to MS-R62
-([review](docs/CODEX_REVIEW_0.2.7.md), [report](docs/BUILD_REPORT_0.2.8.md)). The user
+([review](docs/CODEX_REVIEW_0.2.7.md), [report](docs/BUILD_REPORT_0.2.8.md)); 0.2.9 fixes the
+findings of the first full audit, by five Fable reviewers while Codex was away
+([audit](docs/FABLE_AUDIT_0.2.8.md), [report](docs/BUILD_REPORT_0.2.9.md)). The user
 has tried 0.1.7, 0.1.8 and 0.2.0 in Studio One
 (operation and sound). The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
@@ -94,8 +96,10 @@ window took that number), through the sidechain input that is already there (see
 The eight controls are the pots of the Daisy kit, as values from 0 to 1; the core's
 laws apply, snap bands included. The host shows the value the law makes of the pot;
 typed text is converted back. Two parameters are laid out differently from the module's
-pots (since 0.1.8, the user's decision): Speed has 0x exactly at 12 o'clock, and Pitch
-Random reaches +-12 semitones. The plug-in gives the core the pot position that
+pots (since 0.1.8, the user's decision): Speed has 0x at 12 o'clock, and Pitch
+Random reaches +-12 semitones. (The core glides to the speed it is given; coming from
++1x it settles a few millionths above 0, inaudible: the playhead creeps by about a
+tenth of a frame per second.) The plug-in gives the core the pot position that
 belongs to the value; the core and its laws are unchanged (the comparison with the
 firmware passes with the same pot positions).
 
@@ -250,8 +254,9 @@ Colour tables are named `messier_<preset>_colours.txt`. Each line reads
 keeps the built-in colour. Where both folders set a colour, the one in Documents wins.
 The names are `metal`, `stain`, `glass`, `text`, `dim`, `marker`, `engrave_light`,
 `engrave_dark`, `rule_dark`, `rule_light`, `grid_line`, `grid_cross`, `plate_text`,
-`nebula_a`, `nebula_b` and the others listed in `Messier skin files.txt`, plus
-`negative = true` (dark ink on bright glass). The built-in tables to start from:
+`nebula_a`, `nebula_b` and the others listed in `Messier skin files.txt`. `negative`,
+`wave`, `wave_outside` and `loop_edge` are read but have no effect so far. A table saved
+with a byte-order mark is read too (since 0.2.9). The built-in tables to start from:
 `preview_messier_window --export-skin <folder>` writes all four. The built-in bitmaps are
 in `resource/gui/`.
 

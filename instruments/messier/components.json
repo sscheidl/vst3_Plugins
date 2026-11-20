@@ -3,7 +3,7 @@
   "product": {
     "id": "messier",
     "name": "Messier",
-    "version": "0.2.8",
+    "version": "0.2.9",
     "vendor": "TAUREON",
     "format": "VST3",
     "platform": "Windows x64",
@@ -22,7 +22,7 @@
       "id": "messier.engine",
       "path": "engine/",
       "layer": 2,
-      "version": "0.1.6",
+      "version": "0.1.7",
       "description": "Looper engine: drives neb::Engine through its public interface; file hand-over by the FileBridge; Volume",
       "interface": "engine/looper_engine.h",
       "depends_on": [
@@ -44,7 +44,7 @@
       "id": "messier.shell",
       "path": "source/",
       "layer": 4,
-      "version": "0.2.8",
+      "version": "0.2.9",
       "description": "VST3 processor, controller, state, editor, WAV reader and file loader",
       "depends_on": [
         "messier.engine",

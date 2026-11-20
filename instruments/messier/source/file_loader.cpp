@@ -43,6 +43,7 @@ static SoundState SoundFor(WavError error) {
         case WavError::kTooLarge: return SoundState::kTooLarge;
         case WavError::kReadError: return SoundState::kReadError;
         case WavError::kOutOfMemory: return SoundState::kReadError; // never a project's sound (MS-R16)
+        case WavError::kCancelled: return SoundState::kReadError;   // only window reads give up
     }
     return SoundState::kInvalid;
 }
@@ -59,6 +60,7 @@ FileLoader::~FileLoader() {
         const std::lock_guard<std::mutex> lock(mutex_);
         stop_ = true;
     }
+    stopping_.store(true, std::memory_order_relaxed); // a read under way gives up (F6)
     wake_.notify_all();
     worker_.join();
 }
@@ -93,7 +95,7 @@ void FileLoader::RefillSpareLocked() noexcept {
 void FileLoader::Request(const std::string& path) noexcept {
     {
         const std::lock_guard<std::mutex> lock(mutex_);
-        ++ticket_;
+        newest_ticket_.store(++ticket_, std::memory_order_relaxed);
         ++status_.serial;
         status_.detail.clear();
         try {
@@ -114,7 +116,7 @@ std::unique_ptr<FileData> FileLoader::LoadProject(const std::string& path,
                                                   std::uint64_t project) noexcept {
     {
         const std::lock_guard<std::mutex> lock(mutex_);
-        ++ticket_; // a request from the window still running gives way
+        newest_ticket_.store(++ticket_, std::memory_order_relaxed); // a window request gives way
         has_wanted_ = false;
         if(status_.request_state == RequestState::kLoading)
             status_.request_state = RequestState::kNone;
@@ -154,6 +156,12 @@ std::unique_ptr<FileData> FileLoader::LoadProject(const std::string& path,
             status_.path = std::move(new_path);
             status_.info = std::move(info);
             status_.sound = sound;
+            // E3 (0.2.9): the project's file is what the line shows now; a window load
+            // that failed before is no longer news.
+            if(status_.request_state == RequestState::kFailed) {
+                status_.request_state = RequestState::kNone;
+                status_.detail.clear();
+            }
         }
     } catch(...) {
         // No memory to take the project over completely (MS-R01, MS-R14): refused as
@@ -164,9 +172,14 @@ std::unique_ptr<FileData> FileLoader::LoadProject(const std::string& path,
         file.reset();
     }
     if(!file) {
-        // Refused (MS-R14): reported apart from the sound, which is unchanged.
+        // Refused (MS-R14): reported apart from the sound, which is unchanged, as a failed
+        // request for the project's file (F1, 0.2.9: with its name, where memory allows).
         status_.request_state = RequestState::kFailed;
         status_.detail = kOutOfMemory;
+        try {
+            status_.request = path;
+        } catch(...) {
+        }
     }
     if(file) {
         file->project = project;
@@ -255,7 +268,19 @@ void FileLoader::Run() {
             has_wanted_ = false;
             busy_ = true;
             lock.unlock();
-            WavResult result = ReadWavFile(path, max_pcm_bytes_);
+            // F6 (0.2.9): the read gives up when it is overtaken or the loader ends.
+            struct Mine {
+                const FileLoader* loader;
+                std::uint64_t ticket;
+            } const mine{this, ticket};
+            const WavCancel cancel{[](const void* context) {
+                                       const auto& m = *static_cast<const Mine*>(context);
+                                       return m.loader->stopping_.load(std::memory_order_relaxed)
+                                              || m.loader->newest_ticket_.load(std::memory_order_relaxed)
+                                                     != m.ticket;
+                                   },
+                                   &mine};
+            WavResult result = ReadWavFile(path, max_pcm_bytes_, cancel);
             // The overview off the lock and off the audio thread, from the very buffer
             // the engine will play.
             std::shared_ptr<WaveOverview> overview = result.file ? MakeOverview(*result.file) : nullptr;
