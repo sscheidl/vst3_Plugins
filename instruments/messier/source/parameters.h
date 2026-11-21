@@ -279,8 +279,11 @@ constexpr std::int32_t kMaxPathBytes = 32768;
 // still read, with Slate.
 // V3 adds DETAILS, V4 adds the accent hues, V5 added the trail time in milliseconds
 // (still read, no longer used: since 0.2.6 the trail is fixed), V6 the waveform's
-// brightness in percent in its place. V7 also accepts kPresetWave in that field.
-constexpr std::int32_t kControllerStateVersion = 7;
+// brightness in percent in its place. V7 also accepts kPresetWave in that field. V8 (beta 2)
+// adds GALAXY or WAVE as int8. V9 (round 3) writes the count of accent hues as int32 before
+// them (one per GUI preset; up to V8 always 4), so that new presets need no new version.
+constexpr std::int32_t kControllerStateVersion = 9;
+constexpr std::int32_t kMaxStoredAccents = 256; // a V9 count above this is refused
 constexpr std::int32_t kTrailMinMs = 150, kTrailDefaultMs = 450, kTrailMaxMs = 900; // V5's range
 constexpr std::int32_t kWaveMinPercent = 25, kWaveDefaultPercent = 100, kWaveMaxPercent = 200;
 constexpr std::int32_t kPresetWave = 0; // use the active GUI preset's WAVE default

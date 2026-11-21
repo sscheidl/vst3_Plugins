@@ -3,7 +3,7 @@
   "product": {
     "id": "messier",
     "name": "Messier",
-    "version": "1.0.0-beta.1",
+    "version": "1.0.0-beta.2",
     "vendor": "TAUREON",
     "format": "VST3",
     "platform": "Windows x64",
@@ -44,7 +44,7 @@
       "id": "messier.shell",
       "path": "source/",
       "layer": 4,
-      "version": "1.0.0-beta.1",
+      "version": "1.0.0-beta.2",
       "description": "VST3 processor, controller, state, editor, WAV reader and file loader",
       "depends_on": [
         "messier.engine",
@@ -59,7 +59,7 @@
       "path": "resource/gui/",
       "layer": 4,
       "version": "slate 2026-11-18",
-      "description": "Bitmaps of the window (surfaces and materials only, 1x and 2x) for the GUI preset Slate and the shared nebulae and keys; made with an image model by Codex/GPT after docs/GRAFIKAUFTRAG_GUI.md, delivered as messier-slate-2026-11-18 (ZIP SHA-256 6c062390973b9fe2d5ba03204ab3533340090c6b317c6aff4abd70dac76a77ac), copied unchanged",
+      "description": "Bitmaps of the window (surfaces and materials only, 1x and 2x): since 1.0.0-beta.2 the chassis, knob caps, START thumb and keys of the former GUI preset Slate and the shared keys, until the bitmaps of docs/GRAPHICS_BRIEF_BETA2.md are delivered; made with an image model by Codex/GPT after docs/GRAFIKAUFTRAG_GUI.md, delivered as messier-slate-2026-11-18 (ZIP SHA-256 6c062390973b9fe2d5ba03204ab3533340090c6b317c6aff4abd70dac76a77ac), copied unchanged",
       "license": "MIT (TAUREON); copyright protection of machine-made images is uncertain, see docs/GRAFIKAUFTRAG_GUI.md"
     },
     {

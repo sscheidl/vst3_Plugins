@@ -13,6 +13,17 @@
 # pre-release part (1.0.0-beta.1 is 1.0.0 here).
 project(Messier VERSION 1.0.0 LANGUAGES CXX)
 
+# A test build that installs beside Messier (beta 2, the user's wish of 2026-11-20): other
+# class IDs, the name "Messier2" and the bundle Messier2.vst3, so that both can be tried
+# side by side in one host. Projects made with it open only in it. Off for every release.
+option(MESSIER_SIDE_BY_SIDE "Build the side-by-side test variant Messier2" OFF)
+if(MESSIER_SIDE_BY_SIDE)
+    set(MESSIER_PLUGIN Messier2)
+    add_compile_definitions(MESSIER_SIDE_BY_SIDE=1)
+else()
+    set(MESSIER_PLUGIN Messier)
+endif()
+
 # The SDK compiles everything with /fp:fast. The DSP, the adapter and their tests
 # use /fp:precise: the bit-exact comparison with the reference needs IEEE semantics.
 set(MESSIER_FP /fp:precise)
@@ -112,21 +123,29 @@ target_link_libraries(messier_shell PUBLIC
 target_link_libraries(messier_shell PRIVATE messier_core)
 set_target_properties(messier_shell PROPERTIES FOLDER "Messier")
 
-smtg_add_vst3plugin(Messier
-    PACKAGE_NAME "Messier"
+smtg_add_vst3plugin(${MESSIER_PLUGIN}
+    PACKAGE_NAME "${MESSIER_PLUGIN}"
     SOURCES_LIST source/factory.cpp)
-target_link_libraries(Messier PRIVATE messier_shell sdk)
-set_target_properties(Messier PROPERTIES FOLDER "Messier")
+target_link_libraries(${MESSIER_PLUGIN} PRIVATE messier_shell sdk)
+set_target_properties(${MESSIER_PLUGIN} PROPERTIES FOLDER "Messier")
 
-# The window's bitmaps (0.2.0): surfaces and materials of the GUI presets at 1x and 2x,
-# painted by Codex/GPT after docs/GRAFIKAUFTRAG_GUI.md, into the bundle's
-# Contents/Resources; gui_skin.cpp knows the names.
-# 0.2.4: eight per GUI preset and four shared, each at 1x and 2x.
-set(MESSIER_GUI_IMAGES messier_nebula_a messier_nebula_b messier_keys_white messier_keys_black)
-foreach(preset IN ITEMS slate silver plum gold)
-    foreach(stem IN ITEMS chassis bezel plate knob_l knob_s thumb button button_down)
-        list(APPEND MESSIER_GUI_IMAGES messier_${preset}_${stem})
-    endforeach()
+# The window's bitmaps (0.2.0): surfaces and materials at 1x and 2x, painted by Codex/GPT,
+# into the bundle's Contents/Resources; gui_skin.cpp knows the names.
+# Beta 2: one design. The bitmaps of docs/GRAPHICS_BRIEF_BETA2.md as far as they are
+# delivered (each taken if both its files are there; delivered 2026-11-20) and the keys of
+# beta 1 (docs/GRAFIKAUFTRAG_GUI.md).
+set(MESSIER_GUI_IMAGES messier_keys_white messier_keys_black)
+set(MESSIER_GUI_NEW chassis ring glass dome dust_wisps_dark dust_veil_dark dust_bands_dark dust_clouds knob_l knob_s thumb button button_down screw pad pad_lit)
+# Round 3: the painted galaxies (blue, orange, red, violet), one GUI preset each; a new
+# galaxy or nebula is one more name here and one more entry in gui_skin.cpp's kPresets.
+foreach(variant IN ITEMS spiral barred ring cloud blue orange red violet)
+    list(APPEND MESSIER_GUI_NEW nebula_${variant} nebula_${variant}_arms nebula_${variant}_haze)
+endforeach()
+foreach(stem IN LISTS MESSIER_GUI_NEW)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resource/gui/messier_${stem}@1x.png"
+       AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resource/gui/messier_${stem}@2x.png")
+        list(APPEND MESSIER_GUI_IMAGES messier_${stem})
+    endif()
 endforeach()
 set(MESSIER_GUI_BITMAPS "")
 foreach(image IN LISTS MESSIER_GUI_IMAGES)
@@ -134,7 +153,7 @@ foreach(image IN LISTS MESSIER_GUI_IMAGES)
         "${CMAKE_CURRENT_SOURCE_DIR}/resource/gui/${image}@1x.png"
         "${CMAKE_CURRENT_SOURCE_DIR}/resource/gui/${image}@2x.png")
 endforeach()
-smtg_target_add_plugin_resources(Messier RESOURCES ${MESSIER_GUI_BITMAPS})
+smtg_target_add_plugin_resources(${MESSIER_PLUGIN} RESOURCES ${MESSIER_GUI_BITMAPS})
 
 if(BUILD_TESTING)
     # The firmware's own vocoder test, unchanged: this FFT backend against the
@@ -192,7 +211,9 @@ if(BUILD_TESTING)
         messier_shell messier_reference sdk_hosting)
     # The bitmaps the window asks for are those the bundle gets (0.2.0).
     target_compile_definitions(test_messier_plugin PRIVATE
-        "MESSIER_GUI_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/resource/gui\"")
+        "MESSIER_GUI_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/resource/gui\""
+        # Beta 2: bitmaps of the former GUI presets, as other images for the skin tests.
+        "MESSIER_TEST_SKIN_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/skin\"")
     add_test(NAME messier.plugin COMMAND test_messier_plugin)
 
     # The copies from Daisy-Seed are what the manifest and the hash list say, and the

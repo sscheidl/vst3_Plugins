@@ -27,7 +27,7 @@ inline const char* UnitOf(std::uint32_t id) {
         case kParamVolume: return "%";
         case kParamSpeed: return "x";
         case kParamDensity: return "/s";
-        case kParamPitch: return "oct";
+        case kParamPitch: return "st"; // beta 2: semitones (the user's decision)
         case kParamPitchRandom: return "st";
         case kParamDisplacement: return "s";
         case kParamPitchBend: return "st";
@@ -76,7 +76,7 @@ inline std::string FormatValue(std::uint32_t id, double normalized) {
             const double rate = DensityRate(v);
             return Printed(rate < 10.0 ? "%.2f" : (rate < 100.0 ? "%.1f" : "%.0f"), rate);
         }
-        case kParamPitch: return Printed("%+.2f", PitchOctaves(v));
+        case kParamPitch: return Printed("%+.1f", 12.0 * PitchOctaves(v)); // -36.0 .. +24.0
         case kParamOverlap:
         case kParamBlend:
         case kParamPanRandom:
@@ -182,7 +182,7 @@ inline bool ParseValue(std::uint32_t id, std::string_view text, double& normaliz
         case kParamSpeed: normalized = SpeedNormalized(x); break;
         case kParamSize: normalized = SizeNormalized(x / 100.0); break;
         case kParamDensity: normalized = DensityNormalized(x); break;
-        case kParamPitch: normalized = PitchNormalized(x); break;
+        case kParamPitch: normalized = PitchNormalized(x / 12.0); break; // typed in semitones
         case kParamSpray:
         case kParamSizeRandom: normalized = SizeNormalized(x / 100.0); break;
         case kParamDisplacement: normalized = SizeNormalized(x / 10.0); break;

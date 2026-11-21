@@ -1,5 +1,87 @@
 # Changes
 
+## 1.0.0-beta.2 (in progress), "1.0 beta 2"
+
+A new window, after the user's render and design decisions of 2026-11-20. The sound, the
+parameters, MIDI and automation are unchanged. Not yet released: the user's DAW test
+findings of beta 1 and the bitmaps of `docs/GRAPHICS_BRIEF_BETA2.md` are still to come.
+
+* The round window: a round glass in the middle, the nine primary knobs on two arcs
+  beside it (PITCH, SPEED, LOOP SIZE, DENSITY on the left; SPRAY, OVERLAP, WINDOW, VOLUME
+  on the right) and BLEND below it; each knob with the ends of its range and its value in
+  a box. Window 880 x 624 (beta 1: 560), 96 more with DETAILS, 84 more with the keyboard.
+* GALAXY / WAVE switches the glass between a slowly turning nebula and the waveform.
+  The setting is saved with the project (controller state version 8); earlier projects
+  open in GALAXY. The nebula turns with the playback's tempo and direction (clockwise
+  forward) and rests at STOP, Freeze and 0x; it fades as BLEND goes to Granular.
+* WAVE lays beta 1's plate onto the glass through a fish-eye lens: the file's start on
+  the left rim, its end on the right, L at the top, R at the bottom, the middle enlarged
+  1.5 times. A click or drag on the glass sets START, the wheel SPRAY, as before. The
+  grains are beta 1's shooting stars at their places in the file, in both views; the
+  seconds run outside the ring on its upper arc, with the position triangle on the ring.
+* The START row (slider, value box, FREEZE, RESET) under the knobs; the info line under
+  it with DETAILS, the file's format, the position and the mode (VOCODER, MIX, GRANULAR).
+* One dark design instead of the GUI presets Slate, Silver, Plum and Gold. Their menu now
+  picks the nebula: Spiral galaxy (M51), Barred spiral (M109), Ring nebula (M57), Diffuse
+  nebula (M42); a project saved with Slate, Silver, Plum or Gold opens with the spiral,
+  the barred spiral, the ring or the diffuse nebula. The nebulae are drawn by code until
+  their bitmaps come.
+* HUE: a neutral slider from red over violet to blue. It colours the nebula and the
+  accents (START's fill, the knobs' arcs, lit switches), no longer the labels; each nebula
+  keeps its own HUE. A hue of beta 1 outside that arc is shown at the nearer end.
+* KEYS carries a small keyboard symbol.
+* Bitmaps: the window takes the names and sizes of `docs/GRAPHICS_BRIEF_BETA2.md` where
+  they are delivered, and beta 1's bitmaps of Slate where they still fit; custom skins
+  likewise (colour table `messier_colours.txt`, beta 1's `messier_slate_colours.txt`
+  still read). The bitmaps of Silver, Plum and Gold, the bezel, the plate and the two
+  nebula bands are no longer in the bundle. `tools/check_gui_bitmaps.py` checks a
+  delivery against the brief.
+
+### The user's test rounds of beta 2 (2026-11-21), in the side-by-side build "Messier2"
+
+These supersede the points above where they differ.
+
+* Bitmaps: the delivered set of `docs/GRAPHICS_BRIEF_BETA2.md` (chassis, ring, glass, dome,
+  knobs, thumb, buttons, screw, pads, nebula layers, dark-cloud masks). The user's own
+  screw and glass highlight replace the delivered ones. Beta 1's bitmaps are gone.
+* GALAXY:
+  - The nebula turns at the speed of the playback, the other way backward, and slowly at
+    0x. It starts and stops along an S-shaped ramp. The bitmaps are turned on the CPU,
+    because Direct2D clips turned bitmaps wrongly.
+  - Dark clouds turn against it. BLEND makes them denser, darker and larger; it no longer
+    fades the nebula.
+  - WAVE sets the nebula's brightness.
+  - The grains fly as a starfield from the centre. Each is a star with a white core, a
+    light glow and four rays, keeps its shape for at least 0.45 s and glows on for 1.2 s.
+    PITCH tints them (red down, blue up).
+* Four painted galaxies (Blue, Orange, Red, Violet) as GUI presets, first in the menu.
+  HUE turns their colour. Their bitmaps are test material made from the user's references.
+  The window settings are now state version 9: the HUE values carry their count, so new
+  presets need no new version. Versions 1 to 8 are still read.
+* WAVE:
+  - The waveform fades softly at its ends and towards its peaks, with a bright equator
+    band and a central glow.
+  - Its body (RMS, new in the overview the loader makes) is dense, and the peaks are
+    translucent.
+  - Each grain keeps a fixed vertical spread round its panorama, and every sounding grain
+    shows a short tail.
+  - L and R show only in WAVE.
+* Controls:
+  - GALAXY / WAVE is two half-arcs round BLEND.
+  - DETAILS is a key at the top left; FREEZE and RESET sit right, above the START row.
+  - START is a range slider with a second thumb for the loop's end, centred between
+    "START" and "END", without a value box.
+  - LOOP SIZE is now LOOP END, also as the host's parameter name ("Loop End", same ID).
+  - All keys with a word share one size.
+  - The KEYS, FREEZE and RESET keys carry symbols.
+  - The knobs' value texts follow HUE.
+  - PITCH shows semitones (also in the host), and its knob turns in 50-cent steps. The
+    SPEED knob catches at 0x and ±1x (in the window only).
+  - Fonts are thinner.
+  - The catalogue number is gone.
+* Keyboard: one octave of 13 touch pads, moved over C2 to C8 by the octave keys. KEYS
+  shows or hides it, also when the host keeps the window size.
+
 ## 1.0.0-beta.1 (2026-11-20), "1.0 beta 1"
 
 The closed, non-profit beta. The code equals 0.2.10; sound, state format and controls are

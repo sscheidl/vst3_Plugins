@@ -121,7 +121,7 @@ void Controller::AddParameters() {
         const TChar* title;
         ParamID id;
     } pots[] = {{STR16("Start"), kParamStart},     {STR16("Speed"), kParamSpeed},
-                {STR16("Size"), kParamSize},       {STR16("Density"), kParamDensity},
+                {STR16("Loop End"), kParamSize},   {STR16("Density"), kParamDensity}, // round 5: was "Size"
                 {STR16("Pitch"), kParamPitch},     {STR16("Overlap"), kParamOverlap},
                 {STR16("Blend"), kParamBlend},     {STR16("Window"), kParamWindow},
                 {STR16("Spray"), kParamSpray},     {STR16("Pan Random"), kParamPanRandom},
@@ -252,12 +252,15 @@ tresult PLUGIN_API Controller::getState(IBStream* state) {
     IBStreamer stream(state, kLittleEndian);
     if(!stream.writeInt32(kControllerStateVersion) || !stream.writeDouble(editor_.zoom)
        || !stream.writeInt8(editor_.keyboard ? 1 : 0) || !stream.writeInt32(editor_.transpose)
-       || !stream.writeInt32(static_cast<int32>(editor_.preset)) || !stream.writeInt8(editor_.details ? 1 : 0))
+       || !stream.writeInt32(static_cast<int32>(editor_.preset)) || !stream.writeInt8(editor_.details ? 1 : 0)
+       || !stream.writeInt32(static_cast<int32>(editor_.accents.size())))
         return kResultFalse;
     for(const int32 accent : editor_.accents)
         if(!stream.writeInt32(accent))
             return kResultFalse;
-    return stream.writeInt32(editor_.wave_percent) ? kResultOk : kResultFalse;
+    // Version 8 (beta 2): GALAXY or WAVE.
+    return stream.writeInt32(editor_.wave_percent) && stream.writeInt8(editor_.galaxy ? 1 : 0) ? kResultOk
+                                                                                                 : kResultFalse;
 }
 
 tresult PLUGIN_API Controller::setState(IBStream* state) {
@@ -268,7 +271,7 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
     double zoom = 1.0;
     int8 keyboard = 1;
     int32 transpose = kKeyboardDefaultTranspose;
-    int32 preset = static_cast<int32>(GuiPreset::kSlate); // version 1 (before 0.2.0)
+    int32 preset = static_cast<int32>(GuiPreset::kSpiral); // version 1 (before 0.2.0)
     int8 details = 0;                                     // versions 1 and 2 (before 0.2.4)
     EditorSettings settings;
     if(!stream.readInt32(version) || version < 1 || version > kControllerStateVersion
@@ -278,12 +281,23 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
     // Every field in its range, or the whole state is refused (MS-R62: the zoom too, which
     // was clamped before).
     if(!std::isfinite(zoom) || zoom < kMinEditorZoom || zoom > kMaxEditorZoom || (keyboard != 0 && keyboard != 1) || (details != 0 && details != 1) || transpose % 12 != 0
-       || transpose < -kKeyboardTransposeLimit || transpose > kKeyboardTransposeLimit || !IsGuiPreset(preset))
+       || transpose < kKeyboardLowestTranspose || transpose > kKeyboardHighestTranspose || !IsGuiPreset(preset))
         return kResultFalse;
-    if(version >= 4)
-        for(int32& accent : settings.accents)
+    if(version >= 4) {
+        // Up to V8 one hue for each of the four presets of then; V9 its count first. Hues of
+        // presets this version does not know are read and checked, not kept; presets the
+        // state has none for keep their own colours.
+        int32 count = kLegacyGuiPresetCount;
+        if(version >= 9 && (!stream.readInt32(count) || count < 0 || count > kMaxStoredAccents))
+            return kResultFalse;
+        for(int32 i = 0; i < count; ++i) {
+            int32 accent = kPresetAccent;
             if(!stream.readInt32(accent) || !IsAccent(accent))
                 return kResultFalse;
+            if(i < kGuiPresetCount)
+                settings.accents[static_cast<std::size_t>(i)] = accent;
+        }
+    }
     int32 trail_ms = kTrailDefaultMs; // version 5 only; the trail is fixed since 0.2.6
     if(version == 5 && (!stream.readInt32(trail_ms) || trail_ms < kTrailMinMs || trail_ms > kTrailMaxMs))
         return kResultFalse;
@@ -293,6 +307,12 @@ tresult PLUGIN_API Controller::setState(IBStream* state) {
         const bool uses_preset = version >= 7 && settings.wave_percent == kPresetWave;
         if(!uses_preset && (settings.wave_percent < kWaveMinPercent || settings.wave_percent > kWaveMaxPercent))
             return kResultFalse;
+    }
+    if(version >= 8) { // beta 2; before it, a project opens in GALAXY
+        int8 galaxy = 1;
+        if(!stream.readInt8(galaxy) || (galaxy != 0 && galaxy != 1))
+            return kResultFalse;
+        settings.galaxy = galaxy != 0;
     }
     settings.zoom = zoom;
     settings.keyboard = keyboard != 0;

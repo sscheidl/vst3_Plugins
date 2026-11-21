@@ -10,7 +10,8 @@ namespace messier {
 static_assert(std::is_trivially_copyable_v<EngineDisplay>);
 static_assert(std::is_trivially_copyable_v<WaveOverview>);
 static_assert(sizeof(EngineDisplay) == 536, "no padding: the bytes travel to the controller");
-static_assert(sizeof(WaveOverview) == 8216, "no padding: the bytes travel to the controller");
+static_assert(sizeof(WaveOverview) == 8216 + 2 * WaveOverview::kMaxColumns,
+              "no padding: the bytes travel to the controller (round 4: with the RMS)");
 
 namespace {
 bool Within(double value, double low, double high) {

@@ -39,174 +39,108 @@ constexpr CColor Rgba(int r, int g, int b, double a) {
                   static_cast<uint8_t>(a * 255.0 + 0.5));
 }
 
-// The colours of the four presets: the delivered packages of 2026-11-19 (their
-// FARBTABELLEN.md). Slate is the graphite standard of the GUI template; since 0.2.5 Plum
-// and Gold take the places (and stored IDs) of Copper and Photo plate.
+// The dark design (beta 2: the only one; the user's decision of 2026-11-20). Its colours are
+// those of Slate, the graphite standard of the GUI template of 0.2.4.
+const SkinColours kDark = {
+    .metal = Rgb(21, 23, 28),
+    .stain = Rgb(38, 44, 56),
+    .glass = Rgb(13, 17, 32),
+    .text = Rgb(242, 241, 239),
+    .dim = Rgb(180, 190, 208),
+    .marker = Rgb(255, 170, 88),
+    .engrave_light = Rgba(255, 255, 255, 0.04705882),
+    .engrave_dark = Rgba(8, 10, 16, 0.56470588),
+    .rule_dark = Rgba(8, 11, 20, 0.63921569),
+    .rule_light = Rgba(186, 196, 223, 0.15686275),
+    .grid_line = Rgba(173, 189, 239, 0.10980392),
+    .grid_cross = Rgba(196, 212, 251, 0.37647059),
+    .plate_text = Rgb(221, 230, 250),
+    .nebula_a = Rgb(113, 83, 178),
+    .nebula_b = Rgb(69, 57, 134),
+    .grain = Rgb(255, 244, 228),
+    .tail = Rgb(255, 200, 152),
+    .playhead = Rgb(242, 241, 239),
+    .loop_fill = Rgba(156, 168, 239, 0.09019608),
+    .spray_fill = Rgba(188, 198, 245, 0.12156863),
+    .loop_edge = Rgba(255, 170, 88, 0.58039216),
+    .wave = Rgb(217, 212, 247),
+    .wave_outside = Rgb(146, 141, 185),
+    .plate_wave = Rgb(182, 175, 240),
+    .groove = Rgba(9, 13, 23, 0.67450980),
+    .tick = Rgba(186, 196, 225, 0.72156863),
+    .pointer = Rgb(242, 241, 239),
+    .button_text = Rgb(242, 241, 239),
+    .warning = Rgb(255, 182, 130),
+    .negative = false,
+    .control = Rgb(165, 159, 242),
+    .value = Rgb(200, 197, 254),
+    .start_fill = Rgb(165, 159, 242),
+};
+
+// The design with another nebula's tints.
+SkinColours WithNebula(CColor a, CColor b) {
+    SkinColours colours = kDark;
+    colours.nebula_a = a;
+    colours.nebula_b = b;
+    return colours;
+}
+
+// Beta 2: the four nebula variants take the places (and stored IDs) of the GUI presets
+// Slate, Silver, Plum and Gold, each with its own tints (what HUE turns): the spiral violet,
+// the barred spiral blue, the ring nebula rose violet, the cloud rose. All use the dark
+// design's bitmaps.
 const GuiPresetInfo kPresets[kGuiPresetCount] = {
-    {"Slate", "slate", true,
-     {
-         .metal = Rgb(21, 23, 28),
-         .stain = Rgb(38, 44, 56),
-         .glass = Rgb(13, 17, 32),
-         .text = Rgb(242, 241, 239),
-         .dim = Rgb(180, 190, 208),
-         .marker = Rgb(255, 170, 88),
-         .engrave_light = Rgba(255, 255, 255, 0.04705882),
-         .engrave_dark = Rgba(8, 10, 16, 0.56470588),
-         .rule_dark = Rgba(8, 11, 20, 0.63921569),
-         .rule_light = Rgba(186, 196, 223, 0.15686275),
-         .grid_line = Rgba(173, 189, 239, 0.10980392),
-         .grid_cross = Rgba(196, 212, 251, 0.37647059),
-         .plate_text = Rgb(221, 230, 250),
-         .nebula_a = Rgb(113, 83, 178),
-         .nebula_b = Rgb(69, 57, 134),
-         .grain = Rgb(255, 244, 228),
-         .tail = Rgb(255, 200, 152),
-         .playhead = Rgb(242, 241, 239),
-         .loop_fill = Rgba(156, 168, 239, 0.09019608),
-         .spray_fill = Rgba(188, 198, 245, 0.12156863),
-         .loop_edge = Rgba(255, 170, 88, 0.58039216),
-         .wave = Rgb(217, 212, 247),
-         .wave_outside = Rgb(146, 141, 185),
-         .plate_wave = Rgb(182, 175, 240),
-         .groove = Rgba(9, 13, 23, 0.67450980),
-         .tick = Rgba(186, 196, 225, 0.72156863),
-         .pointer = Rgb(242, 241, 239),
-         .button_text = Rgb(242, 241, 239),
-         .warning = Rgb(255, 182, 130),
-         .negative = false,
-         .control = Rgb(165, 159, 242),
-         .value = Rgb(200, 197, 254),
-     }},
-
-    {"Silver", "silver", true,
-     {
-         .metal = Rgb(185, 191, 195),
-         .stain = Rgb(137, 148, 158),
-         .glass = Rgb(18, 27, 43),
-         .text = Rgb(34, 41, 50),
-         .dim = Rgb(58, 70, 84),
-         .marker = Rgb(187, 83, 47),
-         .engrave_light = Rgba(255, 255, 255, 0.58039216),
-         .engrave_dark = Rgba(49, 58, 68, 0.14509804),
-         .rule_dark = Rgba(37, 50, 64, 0.37647059),
-         .rule_light = Rgba(255, 255, 255, 0.51764706),
-         .grid_line = Rgba(187, 205, 238, 0.10196078),
-         .grid_cross = Rgba(173, 194, 224, 0.38823529),
-         .plate_text = Rgb(225, 233, 242),
-         .nebula_a = Rgb(88, 110, 172),
-         .nebula_b = Rgb(50, 59, 115),
-         .grain = Rgb(251, 248, 238),
-         .tail = Rgb(232, 190, 144),
-         .playhead = Rgb(246, 246, 242),
-         .loop_fill = Rgba(157, 186, 229, 0.07450980),
-         .spray_fill = Rgba(181, 200, 235, 0.09803922),
-         .loop_edge = Rgba(233, 163, 122, 0.47843137),
-         .wave = Rgb(199, 217, 243),
-         .wave_outside = Rgb(126, 157, 189),
-         .plate_wave = Rgb(170, 195, 232),
-         .groove = Rgba(42, 55, 66, 0.65882353),
-         .tick = Rgba(52, 66, 76, 0.78039216),
-         .pointer = Rgb(37, 45, 53),
-         .button_text = Rgb(35, 44, 56),
-         .warning = Rgb(127, 41, 31),
-         .negative = false,
-         .control = Rgb(52, 77, 131),
-         .value = Rgb(38, 56, 102),
-     }},
-
-    {"Plum", "plum", true,
-     {
-         .metal = Rgb(237, 232, 237),
-         .stain = Rgb(226, 220, 229),
-         .glass = Rgb(224, 226, 213),
-         .text = Rgb(43, 28, 47),
-         .dim = Rgb(82, 69, 86),
-         .marker = Rgb(196, 80, 43),
-         .engrave_light = Rgba(255, 255, 255, 0.49019608),
-         .engrave_dark = Rgba(81, 64, 94, 0.12549020),
-         .rule_dark = Rgba(67, 44, 81, 0.26274510),
-         .rule_light = Rgba(255, 255, 255, 0.50980392),
-         .grid_line = Rgba(55, 63, 61, 0.10980392),
-         .grid_cross = Rgba(55, 65, 61, 0.47058824),
-         .plate_text = Rgb(46, 58, 57),
-         .nebula_a = Rgb(124, 130, 118),
-         .nebula_b = Rgb(161, 148, 128),
-         .grain = Rgb(44, 39, 49),
-         .tail = Rgb(86, 67, 83),
-         .playhead = Rgb(39, 47, 49),
-         .loop_fill = Rgba(74, 83, 69, 0.10980392),
-         .spray_fill = Rgba(103, 102, 75, 0.15294118),
-         .loop_edge = Rgba(169, 72, 48, 0.62745098),
-         .wave = Rgb(64, 72, 89),
-         .wave_outside = Rgb(102, 108, 115),
-         .plate_wave = Rgb(63, 74, 86),
-         .groove = Rgba(69, 50, 74, 0.37647059),
-         .tick = Rgba(93, 76, 96, 0.67058824),
-         .pointer = Rgb(42, 34, 46),
-         .button_text = Rgb(46, 32, 51),
-         .warning = Rgb(145, 46, 53),
-         .negative = true,
-         .control = Rgb(101, 54, 83),
-         .value = Rgb(80, 39, 68),
-     }},
-
-    {"Gold", "gold", true,
-     {
-         .metal = Rgb(239, 222, 185),
-         .stain = Rgb(219, 199, 160),
-         .glass = Rgb(7, 24, 14),
-         .text = Rgb(25, 40, 27),
-         .dim = Rgb(56, 75, 51),
-         .marker = Rgb(213, 106, 34),
-         .engrave_light = Rgba(255, 246, 222, 0.54901961),
-         .engrave_dark = Rgba(71, 54, 23, 0.14901961),
-         .rule_dark = Rgba(89, 75, 43, 0.34901961),
-         .rule_light = Rgba(255, 242, 207, 0.52941176),
-         .grid_line = Rgba(109, 175, 87, 0.20000000),
-         .grid_cross = Rgba(154, 205, 118, 0.56078431),
-         .plate_text = Rgb(184, 223, 155),
-         .nebula_a = Rgb(38, 74, 43),
-         .nebula_b = Rgb(32, 57, 35),
-         .grain = Rgb(255, 244, 220),
-         .tail = Rgb(229, 215, 158),
-         .playhead = Rgb(235, 242, 207),
-         .loop_fill = Rgba(102, 157, 57, 0.08235294),
-         .spray_fill = Rgba(140, 182, 96, 0.09411765),
-         .loop_edge = Rgba(247, 148, 82, 0.57254902),
-         .wave = Rgb(115, 169, 94),
-         .wave_outside = Rgb(76, 121, 71),
-         .plate_wave = Rgb(103, 164, 81),
-         .groove = Rgba(56, 71, 50, 0.62745098),
-         .tick = Rgba(74, 101, 76, 0.65882353),
-         .pointer = Rgb(32, 56, 35),
-         .button_text = Rgb(30, 53, 34),
-         .warning = Rgb(142, 55, 36),
-         .negative = false,
-         .control = Rgb(52, 91, 56),
-         .value = Rgb(44, 77, 45),
-     }},
+    {"Spiral galaxy (M51)", "slate", "spiral", true, kDark},
+    {"Barred spiral (M109)", "slate", "barred", true, WithNebula(Rgb(88, 110, 172), Rgb(50, 59, 115))},
+    {"Ring nebula (M57)", "slate", "ring", true, WithNebula(Rgb(150, 86, 160), Rgb(84, 56, 128))},
+    {"Diffuse nebula (M42)", "slate", "cloud", true, WithNebula(Rgb(178, 92, 120), Rgb(104, 52, 96))},
+    // Round 3: the painted galaxies (messier_nebula_<key>, in colour). The first tint has
+    // the painting's own main hue, so that HUE turns the painting to the hue it shows.
+    {"Blue galaxy", "slate", "blue", true, WithNebula(Rgb(64, 130, 220), Rgb(24, 60, 130))},
+    {"Orange galaxy", "slate", "orange", true, WithNebula(Rgb(222, 128, 66), Rgb(130, 60, 30))},
+    {"Red galaxy", "slate", "red", true, WithNebula(Rgb(206, 56, 92), Rgb(110, 24, 48))},
+    {"Violet galaxy", "slate", "violet", true, WithNebula(Rgb(158, 84, 214), Rgb(84, 40, 128))},
 };
 
 struct ImageSpec {
-    const char* stem;
-    bool per_preset;
+    const char* stem; // "nebula_<variant>_" goes before it for the nebula layers
+    bool per_variant;
     int width, height;
+    const char* legacy; // beta 1's name (GRAFIKAUFTRAG_GUI.md), or null
+    int legacy_width, legacy_height;
 };
 
-// docs/GRAFIKAUFTRAG_GUI.md; the keys as delivered (keys_white, keys_black).
+// Beta 2: docs/GRAPHICS_BRIEF_BETA2.md; beta 1's bitmaps of Slate where they still fit.
+// The keys keep their names (keys_white, keys_black).
 constexpr ImageSpec kImages[kSkinImageCount] = {
-    {"chassis", true, 880, 724}, {"bezel", true, 64, 64},      {"plate", true, 840, 186},
-    {"nebula_a", false, 1000, 260}, {"nebula_b", false, 1000, 260}, {"knob_l", true, 72, 72},
-    {"knob_s", true, 48, 48},    {"thumb", true, 16, 28},      {"button", true, 48, 28},
-    {"button_down", true, 48, 28}, {"keys_white", false, 36, 66},
-    {"keys_black", false, 22, 40},
+    {"chassis", false, 880, 804, "slate_chassis", 880, 724},
+    {"ring", false, 432, 432, nullptr, 0, 0},
+    {"glass", false, 360, 360, nullptr, 0, 0},
+    {"dome", false, 360, 360, nullptr, 0, 0},
+    {"", true, 360, 360, nullptr, 0, 0}, // messier_nebula_<variant>
+    {"dust_wisps_dark", false, 360, 360, nullptr, 0, 0},
+    {"dust_veil_dark", false, 360, 360, nullptr, 0, 0},
+    {"dust_bands_dark", false, 360, 360, nullptr, 0, 0},
+    {"dust_clouds", false, 360, 360, nullptr, 0, 0},
+    {"arms", true, 360, 360, nullptr, 0, 0},
+    {"haze", true, 360, 360, nullptr, 0, 0},
+    {"knob_l", false, 72, 72, "slate_knob_l", 72, 72},
+    {"knob_s", false, 48, 48, "slate_knob_s", 48, 48},
+    {"thumb", false, 24, 24, "slate_thumb", 16, 28},
+    {"button", false, 48, 28, "slate_button", 48, 28},
+    {"button_down", false, 48, 28, "slate_button_down", 48, 28},
+    {"screw", false, 14, 14, nullptr, 0, 0},
+    {"pad", false, 40, 40, nullptr, 0, 0},
+    {"pad_lit", false, 40, 40, nullptr, 0, 0},
+    {"keys_white", false, 36, 66, nullptr, 0, 0},
+    {"keys_black", false, 22, 40, nullptr, 0, 0},
 };
 
 // The bitmap of `image` that suits the context: the 2x one above 100 % device pixels.
+// Beta 2: the scale also under a rotation (the nebula layers turn).
 CBitmap* Pick(CDrawContext* context, const SkinImage& image) {
     const CGraphicsTransform t = context->getCurrentTransform();
-    const double scale = context->getScaleFactor() * std::abs(t.m11);
+    const double scale = context->getScaleFactor() * std::hypot(t.m11, t.m12);
     if(scale > 1.01 && image.x2)
         return image.x2;
     return image.x1 ? image.x1.get() : image.x2.get();
@@ -231,21 +165,26 @@ CCoord SnapY(CDrawContext* context, CCoord y) {
     return (device / s - t.dy) / t.m22;
 }
 
-// The white nebula in the preset's tint, its alpha kept.
-void Tint(CBitmap* bitmap, CColor tint) {
-    if(!bitmap)
-        return;
-    auto access = owned(CBitmapPixelAccess::create(bitmap, false));
-    if(!access)
-        return;
+// A copy of a white bitmap in `tint`, its alpha kept.
+SharedPointer<CBitmap> TintedBitmap(CBitmap* white, CColor tint) {
+    if(!white || !white->getPlatformBitmap())
+        return nullptr;
+    const PlatformBitmapPtr& source = white->getPlatformBitmap();
+    PlatformBitmapPtr copy = getPlatformFactory().createBitmap(source->getSize());
+    if(!copy)
+        return nullptr;
+    copy->setScaleFactor(source->getScaleFactor());
+    auto result = makeOwned<CBitmap>(copy);
+    auto from = owned(CBitmapPixelAccess::create(white, false));
+    auto to = owned(CBitmapPixelAccess::create(result, false));
+    if(!from || !to)
+        return nullptr;
     CColor c;
     do {
-        access->getColor(c);
-        c.red = tint.red;
-        c.green = tint.green;
-        c.blue = tint.blue;
-        access->setColor(c);
-    } while(++(*access));
+        from->getColor(c);
+        to->setColor(CColor(tint.red, tint.green, tint.blue, c.alpha));
+    } while(++(*from) && ++(*to));
+    return result;
 }
 
 // The UTF-8 characters of a text, one string each.
@@ -270,15 +209,17 @@ const GuiPresetInfo& PresetInfo(GuiPreset preset) {
 
 GuiPreset ShownPreset(GuiPreset preset) {
     const auto index = static_cast<std::int32_t>(preset);
-    return IsGuiPreset(index) && kPresets[index].delivered ? preset : GuiPreset::kSlate;
+    return IsGuiPreset(index) && kPresets[index].delivered ? preset : GuiPreset::kSpiral;
 }
 
 std::string SkinImageFileName(GuiPreset preset, SkinImageId id, int scale) {
     const ImageSpec& spec = kImages[static_cast<std::size_t>(id)];
     std::string name = "messier_";
-    if(spec.per_preset) {
-        name += PresetInfo(preset).file_key;
-        name += '_';
+    if(spec.per_variant) {
+        name += "nebula_";
+        name += PresetInfo(preset).nebula_key;
+        if(*spec.stem)
+            name += '_';
     }
     name += spec.stem;
     name += scale == 2 ? "@2x.png" : "@1x.png";
@@ -288,6 +229,159 @@ std::string SkinImageFileName(GuiPreset preset, SkinImageId id, int scale) {
 CPoint SkinImageSize(SkinImageId id) {
     const ImageSpec& spec = kImages[static_cast<std::size_t>(id)];
     return CPoint(spec.width, spec.height);
+}
+
+std::string LegacySkinImageFileName(SkinImageId id, int scale) {
+    const ImageSpec& spec = kImages[static_cast<std::size_t>(id)];
+    if(!spec.legacy)
+        return {};
+    return std::string("messier_") + spec.legacy + (scale == 2 ? "@2x.png" : "@1x.png");
+}
+
+CPoint LegacySkinImageSize(SkinImageId id) {
+    const ImageSpec& spec = kImages[static_cast<std::size_t>(id)];
+    return CPoint(spec.legacy_width, spec.legacy_height);
+}
+
+namespace {
+SharedPointer<CBitmap> HueTurnedBitmap(CBitmap* image, double degrees) {
+    if(!image || !image->getPlatformBitmap())
+        return nullptr;
+    const PlatformBitmapPtr& source = image->getPlatformBitmap();
+    PlatformBitmapPtr copy = getPlatformFactory().createBitmap(source->getSize());
+    if(!copy)
+        return nullptr;
+    copy->setScaleFactor(source->getScaleFactor());
+    auto result = makeOwned<CBitmap>(copy);
+    auto from = owned(CBitmapPixelAccess::create(image, false));
+    auto to = owned(CBitmapPixelAccess::create(result, false));
+    if(!from || !to)
+        return nullptr;
+    CColor c;
+    do {
+        from->getColor(c);
+        if(c.alpha > 0) {
+            double h = 0, s = 0, l = 0;
+            c.toHSL(h, s, l);
+            const uint8_t alpha = c.alpha;
+            c.fromHSL(std::fmod(h + degrees + 720.0, 360.0), s, l);
+            c.alpha = alpha;
+        }
+        to->setColor(c);
+    } while(++(*from) && ++(*to));
+    return result;
+}
+} // namespace
+
+SkinImage HueTurnedCopy(const SkinImage& image, double degrees, bool two) noexcept {
+    SkinImage turned;
+    try {
+        turned.size = image.size;
+        CBitmap* source = two && image.x2 ? image.x2.get() : image.x1 ? image.x1.get() : image.x2.get();
+        auto bitmap = HueTurnedBitmap(source, degrees);
+        if(source == image.x2.get())
+            turned.x2 = bitmap;
+        else
+            turned.x1 = bitmap;
+    } catch(...) {
+        return {};
+    }
+    return turned;
+}
+
+bool ReadPixels(CBitmap* bitmap, PixelBuffer& pixels) noexcept {
+    try {
+        pixels = {};
+        if(!bitmap || !bitmap->getPlatformBitmap())
+            return false;
+        auto access = owned(CBitmapPixelAccess::create(bitmap, true));
+        if(!access || !access->getPlatformBitmapPixelAccess())
+            return false;
+        auto* platform = access->getPlatformBitmapPixelAccess();
+        pixels.width = access->getBitmapWidth();
+        pixels.height = access->getBitmapHeight();
+        pixels.scale = bitmap->getPlatformBitmap()->getScaleFactor();
+        pixels.bytes.resize(std::size_t(pixels.width) * pixels.height * 4);
+        const std::uint8_t* address = platform->getAddress();
+        const std::uint32_t row = platform->getBytesPerRow();
+        for(std::uint32_t y = 0; y < pixels.height; ++y)
+            std::memcpy(pixels.bytes.data() + std::size_t(y) * pixels.width * 4, address + std::size_t(y) * row,
+                        std::size_t(pixels.width) * 4);
+        return true;
+    } catch(...) {
+        pixels = {};
+        return false;
+    }
+}
+
+SharedPointer<CBitmap> MakeBitmap(const PixelBuffer& pixels) noexcept {
+    try {
+        if(!pixels)
+            return nullptr;
+        PlatformBitmapPtr platform = getPlatformFactory().createBitmap(CPoint(pixels.width, pixels.height));
+        if(!platform)
+            return nullptr;
+        platform->setScaleFactor(pixels.scale);
+        auto bitmap = makeOwned<CBitmap>(platform);
+        {
+            auto access = owned(CBitmapPixelAccess::create(bitmap, true));
+            if(!access || !access->getPlatformBitmapPixelAccess())
+                return nullptr;
+            auto* target = access->getPlatformBitmapPixelAccess();
+            std::uint8_t* address = target->getAddress();
+            const std::uint32_t row = target->getBytesPerRow();
+            for(std::uint32_t y = 0; y < pixels.height; ++y)
+                std::memcpy(address + std::size_t(y) * row, pixels.bytes.data() + std::size_t(y) * pixels.width * 4,
+                            std::size_t(pixels.width) * 4);
+        } // the accessor goes first: only then does the bitmap show the pixels
+        return bitmap;
+    } catch(...) {
+        return nullptr;
+    }
+}
+
+void TurnPixels(const PixelBuffer& from, double degrees, PixelBuffer& to) {
+    to.width = from.width;
+    to.height = from.height;
+    to.scale = from.scale;
+    to.bytes.assign(from.bytes.size(), 0);
+    if(!from)
+        return;
+    const double angle = degrees * 3.14159265358979323846 / 180.0;
+    const double c = std::cos(angle), s = std::sin(angle);
+    const double cx = from.width / 2.0, cy = from.height / 2.0;
+    const int w = static_cast<int>(from.width), h = static_cast<int>(from.height);
+    const auto at = [&](int x, int y, int k) -> double {
+        return x < 0 || y < 0 || x >= w || y >= h ? 0.0 : from.bytes[(std::size_t(y) * w + x) * 4 + k];
+    };
+    for(int y = 0; y < h; ++y)
+        for(int x = 0; x < w; ++x) {
+            // Where this pixel's centre comes from: turned back.
+            const double dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+            const double sx = c * dx + s * dy + cx - 0.5, sy = -s * dx + c * dy + cy - 0.5;
+            const int x0 = static_cast<int>(std::floor(sx)), y0 = static_cast<int>(std::floor(sy));
+            if(x0 < -1 || y0 < -1 || x0 >= w || y0 >= h)
+                continue;
+            const double fx = sx - x0, fy = sy - y0;
+            std::uint8_t* out = &to.bytes[(std::size_t(y) * w + x) * 4];
+            for(int k = 0; k < 4; ++k) {
+                const double top = at(x0, y0, k) * (1 - fx) + at(x0 + 1, y0, k) * fx;
+                const double bottom = at(x0, y0 + 1, k) * (1 - fx) + at(x0 + 1, y0 + 1, k) * fx;
+                out[k] = static_cast<std::uint8_t>(std::lround(top * (1 - fy) + bottom * fy));
+            }
+        }
+}
+
+SkinImage TintedCopy(const SkinImage& white, CColor tint) noexcept {
+    SkinImage tinted;
+    try {
+        tinted.size = white.size;
+        tinted.x1 = TintedBitmap(white.x1, tint);
+        tinted.x2 = TintedBitmap(white.x2, tint);
+    } catch(...) {
+        return {};
+    }
+    return tinted;
 }
 
 namespace {
@@ -312,7 +406,7 @@ constexpr ColourField kColourFields[] = {
     {"groove", &SkinColours::groove},        {"tick", &SkinColours::tick},
     {"pointer", &SkinColours::pointer},      {"button_text", &SkinColours::button_text},
     {"warning", &SkinColours::warning},      {"control", &SkinColours::control},
-    {"value", &SkinColours::value},
+    {"value", &SkinColours::value},          {"start_fill", &SkinColours::start_fill},
 };
 
 std::string Trim(std::string text) {
@@ -491,16 +585,17 @@ std::string SkinFolderGuide() {
         "  1. Messier-Skin in your Documents folder\n"
         "  2. Messier-Skin beside Messier.vst3 (for all users; needs administrator rights)\n\n"
         "Bitmaps: PNG, the size below for @1x and exactly twice that for @2x.\n"
-        "<preset> is slate, silver, plum or gold.\n\n";
+        "<nebula> is spiral, barred, ring or cloud.\n\n";
     char line[128];
     for(const ImageSpec& spec : kImages) {
-        const std::string name = std::string("messier_") + (spec.per_preset ? "<preset>_" : "") + spec.stem + "@1x.png";
+        const std::string name = std::string("messier_") + (spec.per_variant ? "nebula_<nebula>_" : "") + spec.stem + "@1x.png";
         std::snprintf(line, sizeof line, "  %-36s %4d x %-4d   @2x.png: %d x %d\n", name.c_str(), spec.width,
                       spec.height, spec.width * 2, spec.height * 2);
         text += line;
     }
-    text += "\nThe two nebula bitmaps are white; the colours nebula_a and nebula_b tint them.\n\n"
-            "Colour tables: messier_<preset>_colours.txt, one line per colour,\n"
+    text += "\nThe nebula layers are white; HUE and the colours nebula_a (arms) and nebula_b (haze)\n"
+            "tint them. Bitmaps of beta 1 (messier_slate_*) are still taken where they fit.\n\n"
+            "Colour tables: messier_colours.txt, one line per colour,\n"
             "  name = #RRGGBB or #RRGGBBAA (AA: opacity); from \";\" on a comment.\n"
             "A line left out keeps the built-in colour. The tables of both folders apply;\n"
             "where both set a colour, the one in Documents wins. Names:\n";
@@ -533,8 +628,8 @@ bool OpenUserSkinFolder() noexcept {
     }
 }
 
-std::string ColourTableFileName(GuiPreset preset) {
-    return std::string("messier_") + PresetInfo(preset).file_key + "_colours.txt";
+std::string ColourTableFileName(GuiPreset) {
+    return "messier_colours.txt"; // beta 2: one design
 }
 
 std::string ColourTableText(const SkinColours& colours) {
@@ -594,46 +689,61 @@ Skin::Skin(GuiPreset preset, const std::vector<std::filesystem::path>& folders)
     const IPlatformFactory& factory = getPlatformFactory();
     // Custom skins (0.2.7): the folders' colour tables, the first folder's last so that
     // it wins, and their bitmaps before the built-in ones.
-    for(auto folder = folders.rbegin(); folder != folders.rend(); ++folder) {
-        std::string text;
-        if(ReadSkinTable(*folder / ColourTableFileName(preset_), text))
-            overrides_ += ApplyColourTable(text, base_colours_);
-    }
+    // Beta 2: beta 1's table of Slate first, the new one over it.
+    for(auto folder = folders.rbegin(); folder != folders.rend(); ++folder)
+        for(const std::string& table : {std::string("messier_slate_colours.txt"), ColourTableFileName(preset_)}) {
+            std::string text;
+            if(ReadSkinTable(*folder / table, text))
+                overrides_ += ApplyColourTable(text, base_colours_);
+        }
     colours_ = base_colours_;
-    for(std::size_t i = 0; i < kSkinImageCount; ++i) {
-        const auto id = static_cast<SkinImageId>(i);
-        SkinImage& image = images_[i];
-        image.size = SkinImageSize(id);
-        // Only a bitmap of the size the brief gives is taken; another one is left out
-        // and drawn as the stand-in, so a wrong file cannot distort the layout.
-        const std::string name1 = SkinImageFileName(preset_, id, 1);
-        PlatformBitmapPtr file1 = BitmapFromFolders(folders, name1, CPoint(image.size.x, image.size.y));
+    // One image, both sizes, under one name: from the folders, else built in. Only a
+    // bitmap of the size the brief gives is taken; another one is left out and drawn as the
+    // stand-in, so a wrong file cannot distort the layout.
+    const auto load = [&](SkinImage& image, const std::string& name1, const std::string& name2, CPoint size) {
+        image.size = size;
+        PlatformBitmapPtr file1 = BitmapFromFolders(folders, name1, size);
         if(file1) {
             image.x1 = makeOwned<CBitmap>(file1);
             ++overrides_;
         } else if(auto bitmap = factory.createBitmap(CResourceDescription(name1.c_str()))) {
-            if(bitmap->getSize() == CPoint(image.size.x, image.size.y))
+            if(bitmap->getSize() == size)
                 image.x1 = makeOwned<CBitmap>(bitmap);
         }
-        const std::string name2 = SkinImageFileName(preset_, id, 2);
-        PlatformBitmapPtr file2 = BitmapFromFolders(folders, name2, CPoint(image.size.x * 2, image.size.y * 2));
+        const CPoint twice(size.x * 2, size.y * 2);
+        PlatformBitmapPtr file2 = BitmapFromFolders(folders, name2, twice);
         if(file2) {
             file2->setScaleFactor(2.0);
             image.x2 = makeOwned<CBitmap>(file2);
             ++overrides_;
         } else if(auto bitmap = factory.createBitmap(CResourceDescription(name2.c_str()))) {
-            if(bitmap->getSize() == CPoint(image.size.x * 2, image.size.y * 2)) {
+            if(bitmap->getSize() == twice) {
                 bitmap->setScaleFactor(2.0);
                 image.x2 = makeOwned<CBitmap>(bitmap);
             }
         }
+    };
+    for(std::size_t i = 0; i < kSkinImageCount; ++i) {
+        const auto id = static_cast<SkinImageId>(i);
+        SkinImage& image = images_[i];
+        load(image, SkinImageFileName(preset_, id, 1), SkinImageFileName(preset_, id, 2), SkinImageSize(id));
+        // Beta 2: beta 1's bitmap where the new one is not there; for one size only where
+        // both have the same size (a custom skin with only one of the new files).
+        const bool same_size = LegacySkinImageSize(id) == SkinImageSize(id);
+        if((!image || (same_size && (!image.x1 || !image.x2))) && !LegacySkinImageFileName(id, 1).empty()) {
+            SkinImage old;
+            load(old, LegacySkinImageFileName(id, 1), LegacySkinImageFileName(id, 2), LegacySkinImageSize(id));
+            if(!image) {
+                image = old;
+            } else {
+                if(!image.x1)
+                    image.x1 = old.x1;
+                if(!image.x2)
+                    image.x2 = old.x2;
+            }
+        }
     }
-    for(auto [id, tint] : {std::pair{SkinImageId::kNebulaA, colours_.nebula_a},
-                           std::pair{SkinImageId::kNebulaB, colours_.nebula_b}}) {
-        SkinImage& image = images_[static_cast<std::size_t>(id)];
-        Tint(image.x1, tint);
-        Tint(image.x2, tint);
-    }
+    SetAccent(kPresetAccent); // beta 2: the accents in the nebula's hue
 }
 
 VSTGUI::CColor AccentColour(double hue) noexcept {
@@ -645,23 +755,33 @@ VSTGUI::CColor AccentColour(double hue) noexcept {
 void Skin::SetAccent(std::int32_t hue) noexcept {
     const SkinColours& original = base_colours_;
     colours_ = original;
-    if(hue == kPresetAccent || !IsAccent(hue))
-        return;
     // 0.2.6 (the user's wish): only the hue turns. Each colour keeps its own lightness and
-    // saturation, so contrast and brightness stay as the preset made them; near-grey ink
-    // (most labels) hardly changes, the coloured controls and values take the new hue.
-    const auto turned = [&](CColor colour) {
+    // saturation, so contrast and brightness stay as the design made them. Beta 2 (the
+    // user's wishes of 2026-11-20): HUE, from red over violet to blue, colours the nebula
+    // and the accents (START's fill, the knobs' arcs, lit switches); the labels stay neutral.
+    // Without a HUE of its own the accents take the nebula's hue. Round 5 (the user's wish):
+    // the value texts follow too, at their own lightness, so they stay as readable.
+    const auto turned = [](CColor colour, double to) {
         double h = 0, saturation = 0, lightness = 0;
         colour.toHSL(h, saturation, lightness);
         CColor result = colour;
-        result.fromHSL(static_cast<double>(hue), saturation, lightness);
+        result.fromHSL(to, saturation, lightness);
         result.alpha = colour.alpha;
         return result;
     };
-    colours_.control = turned(original.control);
-    colours_.value = turned(original.value);
-    colours_.text = turned(original.text);
-    colours_.button_text = turned(original.button_text);
+    double to = 0;
+    if(hue == kPresetAccent || !IsAccent(hue)) {
+        double saturation = 0, lightness = 0;
+        original.nebula_a.toHSL(to, saturation, lightness);
+    } else {
+        to = AccentOnScale(hue);
+        colours_.nebula_a = turned(original.nebula_a, to);
+        colours_.nebula_b = turned(original.nebula_b, to);
+    }
+    colours_.start_fill = turned(original.start_fill, to);
+    colours_.control = turned(original.control, to);
+    colours_.value = turned(original.value, to);
+    colours_.plate_wave = turned(original.plate_wave, to); // the user's DAW test of beta 2
 }
 
 CFontRef Skin::FontOf(int kind, double size) const {
@@ -677,8 +797,11 @@ CFontRef Skin::FontOf(int kind, double size) const {
     switch(kind) {
         case 0: font.font = makeOwned<CFontDesc>("Palatino Linotype", size, kBoldFace); break;
         case 1: font.font = makeOwned<CFontDesc>("Palatino Linotype", size, kItalicFace); break;
-        case 3: font.font = makeOwned<CFontDesc>("Bahnschrift", size); break;
-        default: font.font = makeOwned<CFontDesc>("Consolas", size); break;
+        // Beta 2 (the user's wish): thinner, the semi-light cut of Bahnschrift (Windows 10
+        // and 11), for the values too (its figures are of one width; Cascadia Mono's light
+        // cuts are not offered as families).
+        case 3: font.font = makeOwned<CFontDesc>("Bahnschrift SemiLight", size); break;
+        default: font.font = makeOwned<CFontDesc>("Bahnschrift SemiLight", size); break;
     }
     fonts_.push_back(font);
     return font.font;

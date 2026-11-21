@@ -44,7 +44,12 @@ namespace L = layout;
 namespace {
 
 constexpr CCoord kWidth = kEditorWidth;
-constexpr std::array kPresetMenuOrder{GuiPreset::kSlate, GuiPreset::kSilver, GuiPreset::kGold, GuiPreset::kPlum};
+// Beta 2: the nebula variants, in the menu that chose the GUI presets; round 3: the painted
+// galaxies first.
+constexpr std::array kPresetMenuOrder{GuiPreset::kBlueGalaxy, GuiPreset::kOrangeGalaxy, GuiPreset::kRedGalaxy,
+                                      GuiPreset::kVioletGalaxy, GuiPreset::kSpiral,     GuiPreset::kBarred,
+                                      GuiPreset::kRing,         GuiPreset::kCloud};
+static_assert(kPresetMenuOrder.size() == kGuiPresetCount);
 
 // After the last step of a drag, wait this long before telling the host the
 // project changed. Hosts may do real work for that message.
@@ -71,8 +76,8 @@ class AccentSlider : public CSlider {
               int32_t(rect.getWidth() - 2 * kTrackInset + 1), nullptr, nullptr),
       restore_(std::move(restore)) {
         setSliderMode(CSliderMode::FreeClick);
-        setWheelInc(1.0f / kAccentMaxHue);
-        setTooltipText("Accent colour: red to violet. Double-click to restore the preset colour.");
+        setWheelInc(1.0f / (360 - kAccentBlueHue));
+        setTooltipText("Colour of the nebula and the START bar: red, violet, blue. Double-click: the preset's colour.");
     }
 
     CMouseEventResult onMouseDown(CPoint& point, const CButtonState& buttons) override {
@@ -106,16 +111,13 @@ class AccentSlider : public CSlider {
             const double left = area.left + kTrackInset, right = area.right - kTrackInset;
             const double x = left + (right - left) * getValueNormalized();
             context->setDrawMode(kAntiAliasing);
-            if(auto track = VSTGUI::owned(context->createGraphicsPath())) {
-                track->addRect(CRect(left, y - 2, right, y + 2));
-                if(auto colours = VSTGUI::owned(CGradient::create(0, 1, AccentColour(0), AccentColour(kAccentMaxHue)))) {
-                    for(const double hue : {60.0, 120.0, 180.0, 240.0})
-                        colours->addColorStop(hue / kAccentMaxHue, AccentColour(hue));
-                    context->fillLinearGradient(track, *colours, CPoint(left, y), CPoint(right, y));
-                }
-            }
+            // Beta 2 (the user's wish): neutral, not a rainbow; the colour shows on the nebula.
+            context->setFillColor(CColor(0, 0, 0, 120));
+            context->drawRect(CRect(left, y - 2, right, y + 2), kDrawFilled);
+            context->setFillColor(CColor(200, 200, 206, 140));
+            context->drawRect(CRect(left, y - 1, right, y + 1), kDrawFilled);
             const CRect thumb(x - 4, y - 6, x + 4, y + 6);
-            context->setFillColor(kWhiteCColor);
+            context->setFillColor(CColor(232, 232, 236));
             context->setFrameColor(kBlackCColor);
             context->setLineWidth(1);
             context->drawEllipse(thumb, kDrawFilledAndStroked);
@@ -139,7 +141,8 @@ class WaveSlider : public CSlider {
       restore_(std::move(restore)) {
         setSliderMode(CSliderMode::FreeClick);
         setWheelInc(5.0f / kWaveSpan);
-        setTooltipText("Waveform contrast, 25 to 200 %. Double-click: preset default.");
+        setTooltipText("Brightness of the waveform (WAVE) or the nebula (GALAXY), 25 to 200 %. "
+                       "Double-click: preset default.");
     }
     void SetColours(CColor groove, CColor fill) {
         groove_ = groove;
@@ -199,25 +202,25 @@ class WaveSlider : public CSlider {
 struct KnobSpec {
     ParamID id;
     const char* name;
-    int column;
+    int place; // a primary: its slot (gui_layout.h, kPrimary); a secondary: its column
     bool small;
     bool bipolar;
 };
 
-// The columns of the GUI standard (0.2.4): START is the slider under the plate; the
-// primary knobs in three groups (SPRAY, the secondary of Start, at the head since 0.2.2);
-// the other secondaries under DETAILS, in columns of their own. The secondaries of Speed
-// and Blend, which act on the audio input, come with 0.3.0.
+// Beta 2 (the user's round window): the primary knobs on the arcs beside the glass, left
+// PITCH, SPEED, LOOP END, DENSITY, right SPRAY, OVERLAP, WINDOW, VOLUME, BLEND below it;
+// START is the bar under them. The secondaries under DETAILS, in columns of their own. The
+// secondaries of Speed and Blend, which act on the audio input, come with 0.3.0.
 constexpr KnobSpec kKnobs[Editor::kKnobCount] = {
     {kParamSpeed, "SPEED", 1, false, true},
-    {kParamSize, "LOOP SIZE", 2, false, false},
+    {kParamSize, "LOOP END", 2, false, false},
     {kParamDensity, "DENSITY", 3, false, false},
-    {kParamPitch, "PITCH", 4, false, true},
+    {kParamPitch, "PITCH", 0, false, true},
     {kParamOverlap, "OVERLAP", 5, false, false},
     {kParamWindow, "WINDOW", 6, false, false},
-    {kParamBlend, "BLEND", 7, false, false},
-    {kParamVolume, "VOLUME", 8, false, false},
-    {kParamSpray, "SPRAY", 0, false, false},
+    {kParamBlend, "BLEND", 8, false, false},
+    {kParamVolume, "VOLUME", 7, false, false},
+    {kParamSpray, "SPRAY", 4, false, false},
     {kParamPanRandom, "PAN RND", 0, true, false},
     {kParamDisplacement, "DISPLACE", 1, true, false},
     {kParamPitchRandom, "PITCH RND", 2, true, false},
@@ -227,6 +230,10 @@ constexpr KnobSpec kKnobs[Editor::kKnobCount] = {
 
 CRect Box(double left, double top, double right, double bottom) {
     return CRect(left, top, right, bottom);
+}
+
+CRect Box(const L::Box& box) {
+    return CRect(box.left, box.top, box.right, box.bottom);
 }
 
 CTextLabel* MakeLabel(const CRect& size, const char* text, CFontRef font, CColor color,
@@ -247,6 +254,39 @@ CTextLabel* MakeLabel(const CRect& size, const char* text, CFontRef font, CColor
     return label;
 }
 
+// Beta 2: where the window's knobs rest (the user's wish): SPEED at 0x, +1x and -1x within
+// a band of 0.06x, PITCH on every 50 cents.
+ParamValue SnappedByKnob(ParamID id, ParamValue normalized) {
+    if(id == kParamSpeed) {
+        const double factor = SpeedFactor(normalized);
+        for(const double rest : {-1.0, 0.0, 1.0})
+            if(std::abs(factor - rest) < 0.06)
+                return SpeedNormalized(rest);
+    } else if(id == kParamPitch) {
+        const double octaves = std::round(PitchOctaves(normalized) * 24.0) / 24.0;
+        return PitchNormalized(octaves);
+    }
+    return normalized;
+}
+
+// A parameter's value as the host shows it, with its unit.
+std::string ParamText(EditController* controller, ParamID id, ParamValue normalized) {
+    String128 text{};
+    controller->getParamStringByValue(id, normalized, text);
+    std::string display = StringConvert::convert(text);
+    ParameterInfo info{};
+    const int32 count = controller->getParameterCount();
+    for(int32 i = 0; i < count; ++i) {
+        if(controller->getParameterInfo(i, info) == kResultOk && info.id == id) {
+            const std::string units = StringConvert::convert(info.units);
+            if(!units.empty())
+                display += " " + units;
+            break;
+        }
+    }
+    return display;
+}
+
 } // namespace
 
 Editor::Editor(EditController* controller, const EditorSettings& settings,
@@ -256,9 +296,10 @@ Editor::Editor(EditController* controller, const EditorSettings& settings,
     settings_.keyboard = settings.keyboard;
     settings_.details = settings.details;
     settings_.transpose = ClampKeyboardTranspose(settings.transpose);
-    settings_.preset = IsGuiPreset(static_cast<std::int32_t>(settings.preset)) ? settings.preset : GuiPreset::kSlate;
+    settings_.preset = IsGuiPreset(static_cast<std::int32_t>(settings.preset)) ? settings.preset : GuiPreset::kSpiral;
     settings_.accents = settings.accents;
     settings_.wave_percent = ClampWaveSetting(settings.wave_percent);
+    settings_.galaxy = settings.galaxy;
     setRect(ScaledSize());
 }
 
@@ -292,6 +333,9 @@ void Editor::ForgetViews() {
     file_name_ = nullptr;
     file_info_ = nullptr;
     map_view_ = nullptr;
+    start_bar_ = nullptr;
+    view_switch_ = nullptr;
+    status_ = nullptr;
     file_zone_ = nullptr;
     window_shape_ = nullptr;
     latch_button_ = nullptr;
@@ -300,8 +344,6 @@ void Editor::ForgetViews() {
     panel_ = nullptr;
     size_button_ = nullptr;
     preset_button_ = nullptr;
-    catalogue_ = nullptr;
-    catalogue_shown_ = ~std::uint64_t(0);
     skin_.reset();
 }
 
@@ -336,6 +378,7 @@ bool PLUGIN_API Editor::open(void* parent, const PlatformType& platformType) {
 bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     if(callbacks_.current)
         ApplySettings(callbacks_.current()); // F3 (0.2.9); without a frame it only takes them
+    const L::BottomRows rows = L::Bottom();
     frame = new CFrame(CRect(0, 0, kWidth, EditorBaseHeight(settings_.keyboard, settings_.details)), this);
     frame->setBackgroundColor(kBlackCColor);
     frame->enableTooltips(true);
@@ -353,6 +396,7 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     // The header: KEYS, STOP and the size and preset menus, as one group (0.2.4).
     keyboard_button_ = Add(new ToggleButton(Box(L::kKeysLeft, L::kButtonTop, L::kKeysRight, L::kButtonTop + L::kButtonHeight),
                                             "KEYS", settings_.keyboard, [this](bool on) { SetKeyboardVisible(on); }));
+    keyboard_button_->SetIcon(ToggleButton::Icon::kKeyboard);
     keyboard_button_->setTooltipText("Keys: shows or hides the keyboard");
     {
         const bool stopped = controller && IsOn(controller->getParamNormalized(kParamStop));
@@ -369,26 +413,29 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
                                           "", false, [this](bool) { Later([this] { ShowPresetMenu(); }); },
                                           ToggleButton::Style::Action));
     preset_button_->SetIcon(ToggleButton::Icon::kPreset);
-    preset_button_->setTooltipText("GUI preset: the look of the window");
+    preset_button_->setTooltipText("Nebula: the object in the glass");
 
-    // The sample: LOAD, its name, its format or what went wrong, its catalogue number.
+    // The sample: LOAD, its name, its format or what went wrong (beta 2, the user's test:
+    // no catalogue number; the loader's sequence number stays internal).
     auto* load = Add(new ToggleButton(Box(L::kLoadLeft, L::kLoadTop, L::kLoadRight, L::kLoadBottom), "LOAD...",
                                       false, [this](bool) { Later([this] { ChooseFile(); }); }, ToggleButton::Style::Action));
     load->setTooltipText("Load a WAV file: 16 or 24 bit PCM or 32 bit float, mono or stereo");
     load->SetSkin(skin_);
     // The name upright like the rest of the header (0.2.7), as it is spelt; a name too long
-    // for its place ends in "..", the tooltip has the whole path.
-    file_name_ = Add(MakeLabel(Box(L::kFileLeft, L::kFileNameTop, L::kCatalogueLeft, L::kFileNameBottom), "",
+    // for its place ends in "..", the tooltip has the whole path. Beta 2: the format, or
+    // what went wrong, in the info line.
+    file_name_ = Add(MakeLabel(Box(L::kFileLeft, L::kFileNameTop, L::kFileRight, L::kFileNameBottom), "",
                                skin.Sans(18), colours.text, kLeftText));
     file_name_->setTextTruncateMode(CTextLabel::kTruncateTail);
-    file_info_ = Add(MakeLabel(Box(L::kFileLeft, L::kFileNameBottom, L::kFileRight, L::kFileInfoBottom), "",
+    file_info_ = Add(MakeLabel(Box(rows.file_info), "",
                                skin.Mono(11), colours.dim, kLeftText));
-    catalogue_ = Add(MakeLabel(Box(L::kCatalogueLeft, L::kFileNameTop, L::kFileRight, L::kFileNameBottom), "",
-                               skin.Caps(15), colours.value, kRightText));
-    catalogue_->setTooltipText("Catalogue number: the how-manyth file this instance has loaded");
+    file_info_->setTextTruncateMode(CTextLabel::kTruncateTail);
+    status_ = Add(MakeLabel(Box(rows.status), "",
+                            skin.Mono(11), colours.dim, kRightText));
     ApplyFileTexts();
 
-    map_view_ = Add(new MapView(Box(L::kMapLeft, L::kMapTop, L::kMapRight, L::kMapBottom), L::kBezelEdge));
+    map_view_ = Add(new MapView(Box(L::kMapLeft, L::kMapTop, L::kMapRight, L::kMapBottom)));
+    map_view_->SetGalaxy(settings_.galaxy);
     map_view_->Show(shown_display_, shown_wave_);
     if(controller) {
         map_view_->SetStart(controller->getParamNormalized(kParamStart));
@@ -425,9 +472,42 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
             controller->performEdit(kParamSpray, value);
             controller->endEdit(kParamSpray);
         };
-        edits.freeze_off = [this] { SetFreeze(false); }; // a click on the snowflake (0.2.1)
+        // Beta 2: the START bar sets START the same way.
+        StartBar::Edits bar;
+        bar.begin = edits.start_begin;
+        bar.start = edits.start;
+        bar.end = edits.start_end;
+        // Round 2: its end thumb sets LOOP END, as the knob does.
+        bar.size_begin = [this] {
+            if(controller)
+                controller->beginEdit(kParamSize);
+        };
+        bar.size = [this](double size) {
+            if(!controller)
+                return;
+            controller->setParamNormalized(kParamSize, size);
+            controller->performEdit(kParamSize, controller->getParamNormalized(kParamSize));
+        };
+        bar.size_end = [this] {
+            if(controller)
+                controller->endEdit(kParamSize);
+        };
         map_view_->SetEdits(std::move(edits));
+        start_bar_ = Add(new StartBar(Box(rows.start_bar), rows.track_left, rows.track_right));
+        start_bar_->SetEdits(std::move(bar));
+        if(controller) {
+            start_bar_->SetStart(controller->getParamNormalized(kParamStart));
+            start_bar_->SetSize(controller->getParamNormalized(kParamSize));
+        }
+        start_bar_->setTooltipText("Start: where the loop begins in the file; click or drag. "
+                                   "The right thumb is the loop's end: drag it for LOOP END");
     }
+    // GALAXY / WAVE (beta 2).
+    // Round 5: round the BLEND knob, behind it (added before the knobs).
+    view_switch_ = Add(new ViewSwitch(Box(L::ArcSwitchBox()),
+                                      [this](bool galaxy) { SetGalaxy(galaxy); }));
+    view_switch_->SetGalaxy(settings_.galaxy);
+    view_switch_->setTooltipText("The glass: the spiral nebula (GALAXY) or the waveform (WAVE)");
     // Drag and drop (since 0.1.8): a WAV dropped on the file line or the map loads as
     // with LOAD... . The target outlives no editor: it checks alive_ first.
     {
@@ -448,14 +528,8 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
                     callbacks_.load(path);
             });
         map_view_->setDropTarget(drop);
-        file_zone_ = Add(new CView(Box(L::kFileLeft, L::kFileNameTop, L::kFileRight, L::kFileInfoBottom)));
+        file_zone_ = Add(new CView(Box(L::kFileLeft, L::kFileNameTop, L::kFileRight, L::kFileNameBottom)));
         file_zone_->setDropTarget(drop);
-        // C11 (0.2.9): the catalogue number lies over the file zone and takes the mouse,
-        // so that its own tooltip shows.
-        if(catalogue_) {
-            catalogue_->setMouseEnabled(true);
-            frame->changeViewZOrder(catalogue_, frame->getNbViews() - 1);
-        }
         ApplyFileTexts(); // its tooltip
     }
 
@@ -499,25 +573,32 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     const CFontRef small_value_font = skin.Mono(11.5);
     for(std::size_t i = 0; i < knobs_.size(); ++i) {
         const KnobSpec& spec = kKnobs[i];
-        const CCoord left = spec.small ? L::SmallColumnLeft(spec.column) : L::ColumnLeft(spec.column);
-        const CCoord right = left + L::kColumnWidth;
-        const CCoord size = spec.small ? L::kSmallKnobSize : L::kKnobSize;
-        const CCoord top = spec.small ? L::kSmallKnobTop : L::kKnobTop;
-        const CCoord name_top = spec.small ? L::kSmallNameTop : L::kNameTop;
-        const CCoord value_top = spec.small ? L::kSmallValueTop : L::kValueTop;
-        const CCoord knob_left = left + (L::kColumnWidth - size) / 2;
-
-        panel_->AddLabel(Box(left - 4, name_top, right + 4, name_top + (spec.small ? 14 : 16)), spec.name,
-                         spec.small ? PanelView::LabelKind::kSmallKnob : PanelView::LabelKind::kKnob);
-        auto* knob = Add(new MetalKnob(Box(knob_left, top, knob_left + size, top + size), this,
-                                       static_cast<int32_t>(spec.id), spec.small, spec.bipolar));
+        CRect knob_box, name_box, value_box;
+        if(spec.small) {
+            const CCoord left = L::SmallColumnLeft(spec.place), right = left + L::kColumnWidth;
+            const CCoord knob_left = left + (L::kColumnWidth - L::kSmallKnobSize) / 2;
+            knob_box = Box(knob_left, L::kSmallKnobTop, knob_left + L::kSmallKnobSize, L::kSmallKnobTop + L::kSmallKnobSize);
+            name_box = Box(left - 4, L::kSmallNameTop, right + 4, L::kSmallNameTop + 14);
+            value_box = Box(left, L::kSmallValueTop, right, L::kSmallValueTop + 14);
+        } else {
+            // Beta 2: on the arcs beside the glass, with the scale's ends and the value in a box.
+            knob_box = Box(L::KnobBox(spec.place));
+            name_box = Box(L::NameBox(spec.place));
+            value_box = Box(L::ValueBox(spec.place));
+            panel_->AddLabel(value_box, "", PanelView::LabelKind::kValueBox);
+            if(controller && spec.id != kParamWindow)
+                for(const bool high : {false, true})
+                    panel_->AddLabel(Box(L::ScaleBox(spec.place, high)), ParamText(controller, spec.id, high ? 1.0 : 0.0),
+                                     high ? PanelView::LabelKind::kScaleHigh : PanelView::LabelKind::kScaleLow);
+        }
+        panel_->AddLabel(name_box, spec.name, spec.small ? PanelView::LabelKind::kSmallKnob : PanelView::LabelKind::kKnob);
+        auto* knob = Add(new MetalKnob(knob_box, this, static_cast<int32_t>(spec.id), spec.small, spec.bipolar));
         knob->setDefaultValue(static_cast<float>(kDefaults[static_cast<std::size_t>(Index(spec.id))]));
         knob->setWheelInc(0.01f);
-        auto* value = Add(MakeLabel(Box(left, value_top, right, value_top + (spec.small ? 14 : 16)), "",
-                                    spec.small ? small_value_font : value_font, colours.value, kCenterText));
+        auto* value = Add(MakeLabel(value_box, "", spec.small ? small_value_font : value_font, colours.value, kCenterText));
         if(spec.id == kParamWindow) // the mixed window as a symbol (0.1.8)
-            window_shape_ = Add(new WindowShapeView(Box(left + (L::kColumnWidth - 46) / 2, value_top + 1,
-                                                        left + (L::kColumnWidth + 46) / 2, value_top + 15)));
+            window_shape_ = Add(new WindowShapeView(Box(value_box.getCenter().x - 23, value_box.top + 1,
+                                                        value_box.getCenter().x + 23, value_box.top + 15)));
         knobs_[i] = {spec.id, knob, value};
         const ParamValue normalized = controller ? controller->getParamNormalized(spec.id) : 0.0;
         knob->setValue(static_cast<float>(normalized));
@@ -530,11 +611,9 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     latch_button_->setTooltipText("Latch: a struck key stays held; click it again, another key or LATCH to let go");
     // DETAILS (0.2.4): opens and closes the row of the secondary knobs; their values and
     // automation stay as they are.
-    details_button_ = Add(new ToggleButton(Box(L::kDetailsLeft, L::kDetailsBarTop, L::kDetailsRight,
-                                               L::kDetailsBarTop + L::kDetailsBarHeight),
-                                           "DETAILS", settings_.details, [this](bool on) { SetDetailsVisible(on); },
-                                           ToggleButton::Style::Toggle));
-    details_button_->SetFlat(true);
+    // Round 4: a key of the common size (the user's wish); round 5 in the top left corner.
+    details_button_ = Add(new ToggleButton(Box(rows.details), "DETAILS", settings_.details,
+                                           [this](bool on) { SetDetailsVisible(on); }, ToggleButton::Style::Toggle));
     details_button_->setTooltipText("Details: the secondary knobs (pan, displacement, pitch and size random, mask)");
 
     panel_->AddLabel(Box(L::kAccentLeft, L::kSmallNameTop, L::kAccentRight, L::kSmallKnobTop),
@@ -544,7 +623,8 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
                                          this, [this] { SetAccent(kPresetAccent); }));
     accent_slider_->setVisible(settings_.details);
 
-    // WAVE (0.2.6) in TRAIL's place: the waveform's brightness; the trail is fixed.
+    // WAVE (0.2.6) in TRAIL's place: the waveform's brightness (round 2: in GALAXY the
+    // nebula's); the trail is fixed.
     panel_->AddLabel(Box(L::kWaveLeft, L::kSmallNameTop, L::kWaveRight, L::kSmallKnobTop),
                      "WAVE", PanelView::LabelKind::kSmallKnob);
     wave_slider_ = Add(new WaveSlider(Box(L::kWaveLeft, L::kSmallKnobTop, L::kWaveRight,
@@ -556,17 +636,14 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
     wave_value_->setVisible(settings_.details);
     ApplyWave();
 
-    // Freeze and Reset beside Volume.
-    const CCoord column = L::kButtonColumnLeft;
+    // Freeze and Reset (beta 2), round 5 above the START row on the right, below VOLUME.
     const bool frozen = controller && IsOn(controller->getParamNormalized(kParamFreeze));
-    freeze_button_ = Add(new ToggleButton(Box(column, L::kFreezeTop, column + L::kButtonWidth,
-                                              L::kFreezeTop + L::kButtonHeight),
-                                          "FREEZE", frozen, [this](bool on) { SetFreeze(on); }));
+    freeze_button_ = Add(new ToggleButton(Box(rows.freeze), "FREEZE", frozen, [this](bool on) { SetFreeze(on); }));
+    freeze_button_->SetIcon(ToggleButton::Icon::kFreeze);
     freeze_button_->setTooltipText("Freeze: the playhead stands still; grains and the vocoder go on");
-    auto* reset = Add(new ToggleButton(Box(column, L::kResetTop, column + L::kButtonWidth,
-                                           L::kResetTop + L::kButtonHeight),
-                                       "RESET", false, [this](bool) { PressReset(); },
+    auto* reset = Add(new ToggleButton(Box(rows.reset), "RESET", false, [this](bool) { PressReset(); },
                                        ToggleButton::Style::Action));
+    reset->SetIcon(ToggleButton::Icon::kReset);
     reset->setTooltipText("Reset: all knobs and START to their defaults, Freeze off, playback back to START");
     // The resize grip in the lower right corner (0.1.11), added last so that it is on top;
     // LayOut() puts it into the corner of the height the keyboard leaves.
@@ -574,6 +651,7 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
                                [this](double dx, double dy) { GripDrag(dx, dy); }));
 
     ApplySkin();
+    ShowDisplay(shown_display_, shown_wave_); // the START bar's file and the info line
     if(!frame->open(parent, platformType)) {
         frame->forget();
         frame = nullptr;
@@ -595,9 +673,14 @@ void Editor::ApplySkin() noexcept {
     const SkinColours colours = skin_->Colours();
     Guarded([&] {
         if(accent_slider_) {
-            double hue = 0, saturation = 0, brightness = 0;
-            colours.control.toHSV(hue, saturation, brightness);
-            accent_slider_->setValueNormalized(static_cast<float>(std::clamp(hue / kAccentMaxHue, 0.0, 1.0)));
+            // Beta 2: the place of HUE, or of the preset's own nebula colour.
+            std::int32_t hue = settings_.Accent();
+            if(hue == kPresetAccent) {
+                double h = 0, saturation = 0, lightness = 0;
+                skin_->BaseColours().nebula_a.toHSL(h, saturation, lightness);
+                hue = static_cast<std::int32_t>(std::lround(h)) % 360;
+            }
+            accent_slider_->setValueNormalized(static_cast<float>(AccentSliderValue(hue)));
             accent_slider_->invalid();
         }
     });
@@ -607,6 +690,10 @@ void Editor::ApplySkin() noexcept {
             Guarded([&] {
                 if(auto* button = dynamic_cast<ToggleButton*>(view))
                     button->SetSkin(skin_);
+                else if(auto* bar = dynamic_cast<StartBar*>(view))
+                    bar->SetSkin(skin_);
+                else if(auto* view_switch = dynamic_cast<ViewSwitch*>(view))
+                    view_switch->SetSkin(skin_);
                 else if(auto* knob = dynamic_cast<MetalKnob*>(view))
                     knob->SetSkin(skin_);
             });
@@ -646,8 +733,8 @@ void Editor::ApplySkin() noexcept {
             file_name_->setFontColor(colours.text);
     });
     Guarded([&] {
-        if(catalogue_)
-            catalogue_->setFontColor(colours.value);
+        if(status_)
+            status_->setFontColor(colours.dim);
     });
     Guarded([&] { ApplyFileInfoColour(); }); // on its own, not behind the texts (MS-R41)
     Guarded([&] { frame->invalid(); });
@@ -780,7 +867,7 @@ void Editor::LayOut(int32 width, int32 height) {
     for(ToggleButton* octave : {octave_down_, octave_up_}) {
         if(!octave)
             continue;
-        const int limit = octave == octave_down_ ? -kKeyboardTransposeLimit : kKeyboardTransposeLimit;
+        const int limit = octave == octave_down_ ? kKeyboardLowestTranspose : kKeyboardHighestTranspose;
         octave->setMouseEnabled(settings_.transpose != limit);
         octave->invalid();
     }
@@ -815,15 +902,11 @@ bool Editor::Resize() {
 void Editor::SetKeyboardVisible(bool show) {
     if(show == settings_.keyboard)
         return;
-    const EditorSettings before = settings_;
     settings_.keyboard = show;
-    if(frame && !Resize()) {
-        // The host keeps the window as it is, so the keyboard stays as it was.
-        settings_ = before;
-        if(keyboard_button_)
-            keyboard_button_->SetOn(before.keyboard);
-        return;
-    }
+    // Round 4 (the user's test: KEYS no longer hid the keyboard): the choice holds even when
+    // the host keeps the window as it is or answers later; the content is laid out into the
+    // window as it is now, and again when the host changes its size (onSize).
+    ShowSections();
     // E5/C10 (0.2.9): a key held by LATCH is let go with the keyboard, which takes LATCH
     // out of sight; nothing would be left to end it.
     if(!show && keyboard_view_)
@@ -831,18 +914,31 @@ void Editor::SetKeyboardVisible(bool show) {
     UserChanged();
 }
 
+void Editor::ShowSections() {
+    if(!frame)
+        return;
+    if(!Resize())
+        LayOut(rect.getWidth(), rect.getHeight()); // the host keeps the window: fitted into it
+    else if(rect.getWidth() != ScaledSize().getWidth() || rect.getHeight() != ScaledSize().getHeight())
+        LayOut(rect.getWidth(), rect.getHeight()); // asked; until the host answers, fitted
+}
+
 void Editor::SetDetailsVisible(bool show) {
     if(show == settings_.details)
         return;
-    const EditorSettings before = settings_;
     settings_.details = show;
-    if(frame && !Resize()) {
-        // The host keeps the window as it is, so DETAILS stays as it was.
-        settings_ = before;
-        if(details_button_)
-            details_button_->SetOn(before.details);
+    ShowSections(); // round 4: as KEYS
+    UserChanged();
+}
+
+void Editor::SetGalaxy(bool galaxy) {
+    if(galaxy == settings_.galaxy)
         return;
-    }
+    settings_.galaxy = galaxy;
+    if(map_view_)
+        map_view_->SetGalaxy(galaxy);
+    if(view_switch_)
+        view_switch_->SetGalaxy(galaxy);
     UserChanged();
 }
 
@@ -1156,7 +1252,7 @@ void Editor::ApplySettings(const EditorSettings& settings) {
     const double zoom = ClampEditorZoom(settings.zoom);
     const int transpose = ClampKeyboardTranspose(settings.transpose);
     const GuiPreset preset =
-        IsGuiPreset(static_cast<std::int32_t>(settings.preset)) ? settings.preset : GuiPreset::kSlate;
+        IsGuiPreset(static_cast<std::int32_t>(settings.preset)) ? settings.preset : GuiPreset::kSpiral;
     const std::int32_t old_accent = settings_.Accent();
     const std::int32_t old_wave = settings_.WavePercent();
     settings_.accents = settings.accents;
@@ -1179,6 +1275,12 @@ void Editor::ApplySettings(const EditorSettings& settings) {
     settings_.wave_percent = ClampWaveSetting(settings.wave_percent);
     if(settings_.WavePercent() != old_wave)
         Guarded([&] { ApplyWave(); });
+    // Beta 2: GALAXY or WAVE, without a change of size.
+    settings_.galaxy = settings.galaxy;
+    if(map_view_)
+        map_view_->SetGalaxy(settings_.galaxy);
+    if(view_switch_)
+        Guarded([&] { view_switch_->SetGalaxy(settings_.galaxy); });
     if(zoom == settings_.zoom && settings.keyboard == settings_.keyboard
        && settings.details == settings_.details && transpose == settings_.transpose)
         return;
@@ -1250,6 +1352,10 @@ void Editor::FinishEdits() {
         if(map_view_)
             map_view_->Release(); // a START drag still going: its edit ends here (0.1.8)
     });
+    Guarded([&] {
+        if(start_bar_)
+            start_bar_->Release(); // the same for the START bar (beta 2)
+    });
 }
 
 void Editor::valueChanged(CControl* control) {
@@ -1257,7 +1363,7 @@ void Editor::valueChanged(CControl* control) {
         if(!control)
             return;
         if(control == accent_slider_) {
-            SetAccent(static_cast<std::int32_t>(std::lround(control->getValueNormalized() * kAccentMaxHue)));
+            SetAccent(AccentOfSlider(control->getValueNormalized())); // beta 2: red, violet, blue
             return;
         }
         if(control == wave_slider_) {
@@ -1267,7 +1373,14 @@ void Editor::valueChanged(CControl* control) {
         if(!controller)
             return;
         const auto id = static_cast<ParamID>(control->getTag());
-        const ParamValue normalized = control->getValueNormalized();
+        ParamValue normalized = control->getValueNormalized();
+        // Beta 2 (the user's DAW test): the knob rests at 0x, +1x and -1x and turns PITCH in
+        // 50-cent steps. Only in the window: automation and MIDI stay as they come.
+        const ParamValue snapped = SnappedByKnob(id, normalized);
+        if(snapped != normalized) {
+            normalized = snapped;
+            control->setValueNormalized(static_cast<float>(snapped));
+        }
         controller->setParamNormalized(id, normalized);
         controller->performEdit(id, normalized);
     });
@@ -1370,18 +1483,34 @@ void Editor::ShowDisplay(const EngineDisplay& display, std::shared_ptr<const Wav
     shown_wave_ = std::move(wave);
     if(map_view_)
         map_view_->Show(shown_display_, shown_wave_);
-    // The catalogue number of the file the core reads (0.2.0), only when it changes.
-    const std::uint64_t number = display.frames > 0 ? display.sequence : 0;
-    if(catalogue_ && number != catalogue_shown_) {
-        Guarded([&] {
-            char text[32] = "";
-            if(number > 0)
-                std::snprintf(text, sizeof text, "No. %llu", static_cast<unsigned long long>(number));
-            catalogue_->setText(text);
-            catalogue_->invalid();
-            catalogue_shown_ = number;
-        });
+    if(start_bar_) {
+        const bool known = shown_wave_ && shown_wave_->sequence == display.sequence;
+        start_bar_->SetFile(display.frames, known ? shown_wave_->rate : 0.0);
     }
+    ShowStatus();
+}
+
+void Editor::ShowStatus() noexcept {
+    if(!status_)
+        return;
+    Guarded([&] {
+        // Beta 2: where the playhead is, and what BLEND makes of the sound.
+        std::string text;
+        const EngineDisplay& d = shown_display_;
+        const bool known = shown_wave_ && shown_wave_->sequence == d.sequence && shown_wave_->rate > 0;
+        if(d.frames > 0 && known) {
+            char position[48];
+            std::snprintf(position, sizeof position, "POS %.2f s", d.playhead / shown_wave_->rate);
+            text = position;
+            const double blend = controller ? controller->getParamNormalized(kParamBlend) : 0.0;
+            text += blend < 0.005 ? "   VOCODER" : blend > 0.995 ? "   GRANULAR" : "   MIX";
+        }
+        if(text == status_text_)
+            return;
+        status_text_ = text;
+        status_->setText(text.c_str());
+        status_->invalid();
+    });
 }
 
 void Editor::ForgetHeldKey() noexcept {
@@ -1490,11 +1619,17 @@ void Editor::ParameterChanged(ParamID id, ParamValue normalized) {
         return;
     }
     if(id == kParamStart && map_view_)
-        map_view_->SetStart(normalized); // the slider under the plate (0.2.0)
+        map_view_->SetStart(normalized); // the loop's preview (0.2.1)
+    if(id == kParamStart && start_bar_)
+        start_bar_->SetStart(normalized); // the START bar (beta 2)
     if(id == kParamSize && map_view_)
         map_view_->SetSize(normalized); // the loop at once (0.2.1)
+    if(id == kParamSize && start_bar_)
+        start_bar_->SetSize(normalized); // the START bar's end thumb (round 2)
     if(id == kParamBlend && map_view_)
         map_view_->SetBlend(normalized);
+    if(id == kParamBlend)
+        ShowStatus(); // the mode in the info line (beta 2)
     if(id == kParamPitch && map_view_)
         map_view_->SetPitch(PitchOctaves(normalized)); // the grains' tint (0.2.3)
     // 0.2.1: also while the host automates and holds back the timer; MS-R44: not from
@@ -1515,19 +1650,7 @@ void Editor::ParameterChanged(ParamID id, ParamValue normalized) {
 void Editor::ShowValue(Knob& knob, ParamValue normalized) {
     if(!controller || !knob.value)
         return;
-    String128 text{};
-    controller->getParamStringByValue(knob.id, normalized, text);
-    std::string display = StringConvert::convert(text);
-    ParameterInfo info{};
-    const int32 count = controller->getParameterCount();
-    for(int32 i = 0; i < count; ++i) {
-        if(controller->getParameterInfo(i, info) == kResultOk && info.id == knob.id) {
-            const std::string units = StringConvert::convert(info.units);
-            if(!units.empty())
-                display += " " + units;
-            break;
-        }
-    }
+    const std::string display = ParamText(controller, knob.id, normalized);
     if(knob.id == kParamWindow && window_shape_) {
         // The curve says it; the name of the nearest shape is the knob's tooltip.
         window_shape_->SetValue(PotOf(kParamWindow, normalized));

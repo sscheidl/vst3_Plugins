@@ -9,7 +9,7 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 1.0 beta 1 (`1.0.0-beta.1`), bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 1.0 beta 2 in progress (`1.0.0-beta.2`; the last release is 1.0 beta 1), bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
@@ -96,6 +96,19 @@ has tried 0.1.7, 0.1.8 and 0.2.0 in Studio One
 (operation and sound). The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
 
+**The window of 1.0 beta 2** (the user's round window of 2026-11-20; in progress, see the
+[CHANGELOG](CHANGELOG.md)): a round glass in the middle, the nine primary knobs on two arcs
+beside it and BLEND below it, the START row with FREEZE and RESET, and an info line with
+DETAILS, the file's format, the position and the mode. GALAXY / WAVE switches the glass
+between a slowly turning nebula (four to choose from: a spiral galaxy, a barred spiral, a
+ring nebula, a diffuse nebula) and beta 1's plate laid onto the glass through a fish-eye
+lens (`source/fisheye.h`), with the grains as shooting stars in both. HUE colours the
+nebula and the accents, from red over violet to blue; the GUI presets Slate, Silver, Plum
+and Gold are gone. The bitmaps come after [the graphics brief](docs/GRAPHICS_BRIEF_BETA2.md);
+until then the window uses beta 1's bitmaps of Slate where they fit and draws the rest.
+The text below describes the window of beta 1, of which the plate's data, timing and
+mouse are kept.
+
 **The window** (since 0.2.0, after the window study the user settled on 2026-11-18):
 old metal with patina, a measuring plate of dark glass in a milled bezel, and below it
 the wide START slider, on one time axis with the seconds of the file above the plate. On
@@ -148,9 +161,9 @@ firmware passes with the same pot positions).
 | --- | --- | --- | --- | --- |
 | 100 | Start | where the loop starts, 0 to 100 % of the file | 0 % | CC 20 |
 | 101 | Speed | playhead speed, -4x to +4x; 0x at the centre, +1x at about 1 o'clock (the module: +1x at the centre) | +1x | CC 21 |
-| 102 | Size | loop length as a share of the file after Start (the pot squared) | 100 % | CC 22 |
+| 102 | Loop End (before 1.0 beta 2: Size) | where the loop ends: its length as a share of the file after Start (the pot squared) | 100 % | CC 22 |
 | 103 | Density | grains per second, 0.125 to 983 (the core's tanh/cubic law) | pot 0.4, 8.8 /s | CC 23 |
-| 104 | Pitch | -3 to +2 octaves; the centre is unchanged | 0 oct | CC 24 |
+| 104 | Pitch | -3 to +2 octaves, shown in semitones (-36 to +24 st, since beta 2); the centre is unchanged; the window's knob turns in 50-cent steps | 0 st | CC 24 |
 | 105 | Overlap | grain length relative to the grain period, 0 to 100 % | 50 % | CC 25 |
 | 106 | Blend | 0 % vocoder only, 100 % grains only, equal-power between | 0 % | CC 26 |
 | 107 | Window | grain shape, seven shapes crossfaded continuously: Gaussian, Blackman-Harris, Ramp Down, Bartlett, Ramp Up, Sinc, Rectangle. The window draws the mixed shape as a small curve; the host shows the nearest shape's name, with "~" between two | Gaussian | CC 27 |

@@ -5,6 +5,7 @@
 // vectors.
 #pragma once
 
+#include "gui_layout.h"
 #include "gui_skin.h"
 
 #include "vstgui/lib/ccolor.h"
@@ -12,6 +13,8 @@
 #include "vstgui/lib/controls/cknob.h"
 #include "vstgui/lib/cview.h"
 
+#include <array>
+#include <cstdint>
 #include <functional>
 #include <memory>
 
@@ -86,6 +89,23 @@ class WindowShapeView : public VSTGUI::CView {
     VSTGUI::CColor colour_{232, 232, 236};
 };
 
+// The KEYS symbol (round 2; round 4: the group of three; round 5: symmetric): in whole
+// pixels, relative to its top left; 4 white keys (F, G, A, B), then 3 black keys (F#, G#, A#).
+struct KeyIconRect {
+    int left, top, right, bottom;
+    bool black;
+};
+constexpr int kKeyIconWhites = 4, kKeyIconWidth = 4 * kKeyIconWhites - 1, kKeyIconHeight = 13;
+constexpr std::array<KeyIconRect, 7> KeyIconRects() {
+    std::array<KeyIconRect, 7> keys{};
+    for(int k = 0; k < kKeyIconWhites; ++k)
+        keys[k] = {4 * k, 0, 4 * k + 3, kKeyIconHeight, false};
+    int n = kKeyIconWhites;
+    for(const int gap : {1, 2, 3}) // after F, G and A
+        keys[n++] = {4 * gap - 2, 0, 4 * gap + 1, 8, true};
+    return keys;
+}
+
 // A key of the window: a switch (FREEZE, STOP, KEYS, LATCH) shows its state, pressed
 // in (the preset's pressed face) and with its text in the controls' light colour while
 // on; an action (LOAD..., RESET, the octave keys, the size and preset menus) only calls
@@ -95,8 +115,9 @@ class WindowShapeView : public VSTGUI::CView {
 class ToggleButton : public VSTGUI::CView {
   public:
     enum class Style { Toggle, Action };
-    // Instead of text, a symbol (0.2.0): the window size and the GUI preset menus.
-    enum class Icon { kNone, kSize, kPreset };
+    // Instead of text, a symbol (0.2.0): the window size and the GUI preset menus. Beta 2:
+    // KEYS carries a small keyboard before its text.
+    enum class Icon { kNone, kSize, kPreset, kKeyboard, kFreeze, kReset };
     ToggleButton(const VSTGUI::CRect& size, const char* title, bool on,
                  std::function<void(bool on)> toggled, Style style = Style::Toggle);
 
@@ -175,6 +196,89 @@ class ResizeGrip : public VSTGUI::CView {
     std::function<void(double, double)> drag_;
     bool dragging_ = false;
     double start_x_ = 0.0, start_y_ = 0.0;
+};
+
+// The START row (beta 2): the name, the slider over the whole file with its thumb where
+// the loop starts (MS-R56: at most on the last frame, as the core clamps it), and START's
+// value in a box, in seconds and percent. A click or drag on the track sets START, as an
+// edit the host records (begin, the steps, end). Without a file it takes no mouse.
+// Round 2 (the user's test): a range slider. A second thumb marks the loop's end, as the
+// core sets it (START, then SIZE squared of the rest of the file, never past its end), so
+// it moves along with START; dragging it sets LOOP END, the same parameter as the knob.
+class StartBar : public VSTGUI::CView {
+  public:
+    struct Edits {
+        std::function<void()> begin;
+        std::function<void(double share)> start; // 0..1 of the file
+        std::function<void()> end;
+        std::function<void()> size_begin;
+        std::function<void(double size)> size; // LOOP END, normalized
+        std::function<void()> size_end;
+    };
+    // Round 4: no value box; round 5: the track between `track_left` and `track_right`
+    // inside the view, "START" before it and "END" after it.
+    explicit StartBar(const VSTGUI::CRect& size, double track_left = layout::Bottom().track_left,
+                      double track_right = layout::Bottom().track_right);
+    void SetEdits(Edits edits) { edits_ = std::move(edits); }
+    void SetSkin(std::shared_ptr<const Skin> skin);
+    void SetStart(double start) noexcept;
+    void SetSize(double size) noexcept; // LOOP END, normalized
+    // The file the core reads: its length in frames and its rate (0: not known).
+    void SetFile(std::uint32_t frames, double rate) noexcept;
+    // Where the thumb and a frame of the file stand, relative to the view.
+    double StartX() const;
+    double EndX() const;
+    double FrameX(double frame) const;
+    // LOOP END (normalized) that puts the loop's end at x, START kept.
+    double SizeAt(double x) const;
+    // What the mouse does (public for tests), relative to the view; false if nothing.
+    bool PressAt(double x);
+    void DragTo(double x);
+    void Release();
+    void draw(VSTGUI::CDrawContext* context) override;
+    void DrawUnchecked(VSTGUI::CDrawContext* context);
+    void onMouseDownEvent(VSTGUI::MouseDownEvent& event) override;
+    void onMouseMoveEvent(VSTGUI::MouseMoveEvent& event) override;
+    void onMouseUpEvent(VSTGUI::MouseUpEvent& event) override;
+    void onMouseCancelEvent(VSTGUI::MouseCancelEvent& event) override;
+
+  private:
+    double TrackLeft() const;
+    double TrackRight() const;
+    double Share(double x) const;
+    double LoopFrames() const; // with a file
+    Edits edits_;
+    std::shared_ptr<const Skin> skin_;
+    double track_left_ = 0.0, track_right_ = 0.0;
+    double start_ = 0.0, size_ = 1.0;
+    std::uint32_t frames_ = 0;
+    double rate_ = 0.0;
+    bool dragging_ = false, dragging_end_ = false;
+};
+
+// GALAXY / WAVE (beta 2; round 5 round the BLEND knob, layout::ArcSwitchBox): two half-arcs
+// behind the knob, outside its value arc, with their names beside them; the lit one names
+// the glass' view, a click on the other (arc or name) switches to it. Elsewhere, the knob in
+// the middle included, it takes no mouse. A window setting, no parameter.
+class ViewSwitch : public VSTGUI::CView {
+  public:
+    ViewSwitch(const VSTGUI::CRect& size, std::function<void(bool galaxy)> chosen);
+    void SetGalaxy(bool galaxy);
+    bool Galaxy() const { return galaxy_; }
+    void SetSkin(std::shared_ptr<const Skin> skin);
+    // Which side a point (relative to the view) is on: -1 GALAXY, 1 WAVE, 0 neither.
+    int SideAt(double x, double y) const;
+    // A click there; true if the view changed.
+    bool PressAt(double x, double y);
+    bool hitTest(const VSTGUI::CPoint& where, const VSTGUI::Event& event) override;
+    void draw(VSTGUI::CDrawContext* context) override;
+    void DrawUnchecked(VSTGUI::CDrawContext* context);
+    void onMouseDownEvent(VSTGUI::MouseDownEvent& event) override;
+
+  private:
+    bool galaxy_ = true;
+    std::function<void(bool)> chosen_;
+    std::shared_ptr<const Skin> skin_;
 };
 
 } // namespace messier

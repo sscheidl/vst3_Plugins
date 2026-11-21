@@ -36,7 +36,9 @@ class MapView;
 class MetalKnob;
 class PanelView;
 class ResizeGrip;
+class StartBar;
 class ToggleButton;
+class ViewSwitch;
 class WindowShapeView;
 
 // The window's timer: how often it asks for the display (and, while a file loads,
@@ -126,16 +128,21 @@ struct EditorSettings {
     double zoom = 1.0;
     bool keyboard = true;
     int transpose = kKeyboardDefaultTranspose; // of the keyboard, in semitones
-    GuiPreset preset = GuiPreset::kSlate;       // since 0.2.0
+    GuiPreset preset = GuiPreset::kSpiral;       // since 0.2.0
     bool details = false;                       // DETAILS open (0.2.4; closed for a new instance)
-    std::array<std::int32_t, kGuiPresetCount> accents{kPresetAccent, kPresetAccent, kPresetAccent, kPresetAccent};
+    std::array<std::int32_t, kGuiPresetCount> accents = [] {
+        std::array<std::int32_t, kGuiPresetCount> all{};
+        all.fill(kPresetAccent);
+        return all;
+    }();
     std::int32_t wave_percent = kPresetWave;
+    bool galaxy = true; // beta 2: the glass shows GALAXY (true) or WAVE
 
     std::int32_t Accent() const { return accents[static_cast<std::size_t>(preset)]; }
     std::int32_t WavePercent() const {
         if(wave_percent != kPresetWave)
             return wave_percent;
-        return preset == GuiPreset::kPlum ? 200 : kWaveDefaultPercent;
+        return kWaveDefaultPercent; // beta 2: one design (0.2.6 to beta 1: 200 % for Plum)
     }
 };
 
@@ -176,14 +183,14 @@ struct EditorCallbacks {
     std::function<EditorSettings()> current;
 };
 
-// The plug-in window (0.2.0, after the window study, version 3; rearranged in 0.2.2 after
-// the user's design round): a header with STOP and the menus for the window size and the
-// GUI preset as one group; the sample's file line with its LOAD button; the measuring
-// plate (MapView) with the waveform and the START slider on one time axis; SPRAY, the
-// seven knobs for the other pots' primary functions and Volume in the upper row, below
-// them LATCH and KEYS, five small knobs for the secondary functions under the pot they
-// belong to, FREEZE and RESET; and an on-screen keyboard that KEYS shows and hides, with
-// the octave keys "- OCT" and "OCT +" beside it. Surfaces come from
+// The plug-in window (1.0 beta 2, the user's round window of 2026-11-20): a header with
+// the brand, LOAD and the file's name, KEYS, STOP and the menus for the window size and the
+// GUI preset; the round glass (MapView) with GALAXY or WAVE behind the plate's marks, the
+// nine primary knobs on two arcs beside it and BLEND below it; the START row with FREEZE
+// and RESET; the info line with DETAILS, the file's format, the position and the mode; the
+// five small knobs of the secondary functions with HUE and WAVE under DETAILS; and an
+// on-screen keyboard that KEYS shows and hides, with LATCH and the octave keys "- OCT"
+// and "OCT +" beside it. Surfaces come from
 // the GUI preset's bitmaps (gui_skin.h); everything that carries information is drawn.
 // The layout is fixed, so the window scales as a whole: by the zoom the user picks
 // (resizing, the grip or the size menu), times the host's display scale factor. The
@@ -208,6 +215,11 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     void SetKeyboardVisible(bool show);
     // DETAILS open or closed (0.2.4): the window grows or shrinks by the secondary knobs.
     void SetDetailsVisible(bool show);
+    // Round 4: the window's sections after KEYS or DETAILS changed: a new size asked of the
+    // host, and the content laid out into the window as it is meanwhile.
+    void ShowSections();
+    // GALAXY or WAVE in the glass (beta 2): a window setting, saved with the project.
+    void SetGalaxy(bool galaxy);
     void SetLatch(bool on);
     void SetStop(bool on);
     // For tests: the screen keyboard while the window is open, else nullptr.
@@ -368,6 +380,11 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     VSTGUI::CTextLabel* file_name_ = nullptr;
     VSTGUI::CTextLabel* file_info_ = nullptr;
     MapView* map_view_ = nullptr;
+    StartBar* start_bar_ = nullptr;     // beta 2: the START row
+    ViewSwitch* view_switch_ = nullptr; // beta 2: GALAXY / WAVE
+    VSTGUI::CTextLabel* status_ = nullptr; // beta 2: the position and the mode in the info line
+    std::string status_text_;
+    void ShowStatus() noexcept;
     // Since 0.1.8: the file line as a drop zone for WAV files (it carries the file
     // name's tooltip, as the labels take no mouse); owned by the frame.
     VSTGUI::CView* file_zone_ = nullptr;
@@ -377,12 +394,10 @@ class Editor : public Steinberg::Vst::VSTGUIEditor,
     ToggleButton* latch_button_ = nullptr;
     ToggleButton* stop_button_ = nullptr; // since 0.1.8
     ResizeGrip* grip_ = nullptr;          // since 0.1.11
-    // Since 0.2.0: the background, the header's menus, the catalogue number of the file.
+    // Since 0.2.0: the background, the header's menus (beta 2: no catalogue number).
     PanelView* panel_ = nullptr;
     ToggleButton* size_button_ = nullptr;
     ToggleButton* preset_button_ = nullptr;
-    VSTGUI::CTextLabel* catalogue_ = nullptr;
-    std::uint64_t catalogue_shown_ = ~std::uint64_t(0);
     std::shared_ptr<Skin> skin_; // the look of the open window
     bool latch_ = false;
     EngineDisplay shown_display_{};             // the newest display, also while closed

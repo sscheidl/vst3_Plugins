@@ -67,6 +67,9 @@ std::shared_ptr<WaveOverview> MakeWave() {
         wave->high[c] = static_cast<std::int16_t>(env * 32767);
         seed = seed * 1664525u + 1013904223u;
         wave->low[c] = static_cast<std::int16_t>(-env * (0.85 + 0.15 * ((seed >> 8) / 16777216.0)) * 32767);
+        // Round 4: a body of about a third of the peaks, more in the louder phrases.
+        seed = seed * 1664525u + 1013904223u;
+        wave->rms[c] = static_cast<std::uint16_t>(env * env * (0.35 + 0.2 * ((seed >> 8) / 16777216.0)) * 32767);
     }
     return wave;
 }
@@ -142,11 +145,16 @@ struct Case {
     bool latch, stop, freeze;
     double pitch = 0;   // octaves (0.2.3: the grains' tint)
     bool dense = false; // many grains
-    GuiPreset preset = GuiPreset::kSlate; // 0.2.4
+    GuiPreset preset = GuiPreset::kSpiral; // 0.2.4
     bool details = false;                 // 0.2.4: DETAILS open
     std::int32_t hue = kPresetAccent;     // 0.2.6: HUE (the preset's own colour)
     std::int32_t wave = kPresetWave;
     const char* file = "down from.wav"; // 0.2.7: a long name too
+    bool galaxy = true;                 // beta 2: GALAXY or WAVE in the glass
+    MapView::Dust dust = MapView::Dust::kWisps; // beta 2: the dust experiment
+    double dust_strength = 0.5;
+    // Round 4: DETAILS in the info line (else in the START row); round 5: neither.
+    double blend = 0.0; // round 5: BLEND, which thickens the dark clouds
 };
 
 } // namespace
@@ -195,24 +203,66 @@ int main(int argc, char** argv) {
 
     const auto wave = MakeWave();
     const Case cases[] = {
-        {"slate_keys_lowest", true, -kKeyboardTransposeLimit, true, false, false, -3.0},
-        {"slate_highest_stop", true, kKeyboardTransposeLimit, false, true, false, 0.0},
-        {"slate_dense_pitch_down", true, kKeyboardDefaultTranspose, false, false, false, -1.5, true},
-        {"slate_open", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kSlate, true},
-        {"slate_closed", false, kKeyboardDefaultTranspose, false, false, true, 2.0, false, GuiPreset::kSlate, false},
-        {"silver_open", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kSilver, true},
-        {"silver_closed", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kSilver, false},
-        {"plum_open", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kPlum, true},
-        {"plum_closed", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kPlum, false},
-        {"plum_keys_only", true, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kPlum, false},
-        {"plum_details_only", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kPlum, true},
-        {"gold_open", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kGold, true},
-        {"slate_hue_wave", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kSlate, true, 30,
+        // Round 5: BLEND at 0, 50 and 100 % thickens the dark clouds; the layout open.
+        {"blend_0", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kVioletGalaxy, false},
+        {"blend_50", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kVioletGalaxy, false,
+         kPresetAccent, kPresetWave, "down from.wav", true, MapView::Dust::kWisps, 0.5, 0.5},
+        {"blend_100", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kVioletGalaxy, false,
+         kPresetAccent, kPresetWave, "down from.wav", true, MapView::Dust::kWisps, 0.5, 1.0},
+        {"layout_open", true, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kBlueGalaxy, true},
+        {"layout_wave", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kOrangeGalaxy, false,
+         kPresetAccent, kPresetWave, "down from.wav", false},
+        // Round 3: the painted galaxies, one with HUE, one dense.
+        {"galaxy_blue", true, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kBlueGalaxy, false},
+        {"galaxy_orange_dense", false, kKeyboardDefaultTranspose, false, false, false, 0.0, true,
+         GuiPreset::kOrangeGalaxy, false},
+        {"galaxy_red", false, kKeyboardDefaultTranspose, false, false, false, 1.0, false, GuiPreset::kRedGalaxy, false},
+        {"galaxy_violet_hue_blue", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false,
+         GuiPreset::kVioletGalaxy, false, kAccentBlueHue},
+        {"spiral_keys_lowest", true, kKeyboardLowestTranspose, true, false, false, -3.0},
+        {"spiral_highest_stop", true, kKeyboardHighestTranspose, false, true, false, 0.0},
+        {"spiral_dense_pitch_down", true, kKeyboardDefaultTranspose, false, false, false, -1.5, true},
+        {"spiral_open", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kSpiral, true},
+        {"spiral_closed", false, kKeyboardDefaultTranspose, false, false, true, 2.0, false, GuiPreset::kSpiral, false},
+        {"barred_open", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kBarred, true},
+        {"barred_closed", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kBarred, false},
+        {"ring_open", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kRing, true},
+        {"ring_closed", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kRing, false},
+        {"ring_keys_only", true, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kRing, false},
+        {"ring_details_only", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kRing, true},
+        {"cloud_open", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kCloud, true},
+        {"spiral_hue_red", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kSpiral, true, 0,
          160},
-        {"gold_hue_wave", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kGold, true, 200,
+        {"cloud_hue_blue", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kCloud, true, 235,
          50},
-        {"gold_closed", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kGold, false},
-        {"slate_long_name", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kSlate, false,
+        // Beta 2: WAVE in the glass.
+        {"spiral_wave_closed", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kSpiral, false,
+         kPresetAccent, kPresetWave, "down from.wav", false},
+        {"spiral_wave_frozen", false, kKeyboardDefaultTranspose, false, false, true, 2.0, false, GuiPreset::kSpiral, false,
+         kPresetAccent, kPresetWave, "down from.wav", false},
+        {"spiral_wave_dense", false, kKeyboardDefaultTranspose, false, false, false, -1.5, true, GuiPreset::kSpiral, false,
+         kPresetAccent, kPresetWave, "down from.wav", false},
+        {"barred_wave_closed", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kBarred, false,
+         kPresetAccent, kPresetWave, "down from.wav", false},
+        {"ring_wave_closed", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kRing, false,
+         kPresetAccent, kPresetWave, "down from.wav", false},
+        {"cloud_wave_open", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kCloud, true,
+         kPresetAccent, kPresetWave, "down from.wav", false},
+        {"cloud_closed", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kCloud, false},
+        // The dust experiment: the three masks at 0, 30, 50 and 70 % (GALAXY, closed; round 2: 50 % by default).
+        {"dust_off", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kSpiral, false,
+         kPresetAccent, kPresetWave, "down from.wav", true, MapView::Dust::kWisps, 0.0},
+        {"dust_wisps_30", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kSpiral, false,
+         kPresetAccent, kPresetWave, "down from.wav", true, MapView::Dust::kWisps, 0.30},
+        {"dust_wisps_50", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kSpiral, false,
+         kPresetAccent, kPresetWave, "down from.wav", true, MapView::Dust::kWisps, 0.50},
+        {"dust_wisps_70", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kSpiral, false,
+         kPresetAccent, kPresetWave, "down from.wav", true, MapView::Dust::kWisps, 0.70},
+        {"dust_bands_50", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kSpiral, false,
+         kPresetAccent, kPresetWave, "down from.wav", true, MapView::Dust::kBands, 0.50},
+        {"dust_veil_50", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kSpiral, false,
+         kPresetAccent, kPresetWave, "down from.wav", true, MapView::Dust::kVeil, 0.50},
+        {"spiral_long_name", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kSpiral, false,
          kPresetAccent, kPresetWave, "Field Recording 2026-11-19, Rain on the Glasshouse Roof (Take 12).wav"},
     };
     for(const Case& c : cases) {
@@ -226,6 +276,9 @@ int main(int argc, char** argv) {
         settings.details = c.details;
         settings.accents[static_cast<std::size_t>(c.preset)] = c.hue;
         settings.wave_percent = c.wave;
+        settings.galaxy = c.galaxy;
+        MapView::ChooseDust({c.dust, c.dust_strength});
+        controller->setParamNormalized(kParamBlend, c.blend);
         IPtr<Editor> editor(new Editor(controller, settings, EditorCallbacks{}), false);
         editor->ShowDisplay(MakeDisplay(c.freeze, c.dense), wave);
         FileStatus status;

@@ -6,20 +6,27 @@
 
 namespace messier {
 
-// Two octaves and the top C, the range of the Daisy kit's 16 keys.
-constexpr int kKeyboardLowNote = 60;  // C4
-constexpr int kKeyboardHighNote = 84; // C6
-constexpr int kKeyboardWhiteKeys = 15;
+// Round 3 (the user's wish, provisional): one octave and the top C, C4..C5, as 13 touch
+// pads (8 white notes below, 5 black ones above); before it two octaves (C4..C6). The
+// count of octaves is the one place to change it.
+constexpr int kKeyboardOctaves = 1;
+constexpr int kKeyboardLowNote = 60; // C4
+constexpr int kKeyboardHighNote = kKeyboardLowNote + 12 * kKeyboardOctaves;
+constexpr int kKeyboardWhiteKeys = 7 * kKeyboardOctaves + 1;
+constexpr int kKeyboardBlackKeys = 5 * kKeyboardOctaves;
 constexpr int kKeyboardVelocity = 100;
-// The octave keys beside the keyboard move its range by whole octaves, at
-// most two either way from C4..C6. As in Mendelejew, it starts one octave
-// down, at C3..C5.
+// The octave keys beside the keyboard move its range by whole octaves, over the notes the
+// two octaves reached before: from C2 up to C8 (MIDI 36 to 108). As in Mendelejew, it
+// starts one octave down.
 constexpr int kKeyboardDefaultTranspose = -12;
-constexpr int kKeyboardTransposeLimit = 24;
+constexpr int kKeyboardLowestNote = 36, kKeyboardHighestNote = 108;
+constexpr int kKeyboardLowestTranspose = kKeyboardLowestNote - kKeyboardLowNote;    // -24
+constexpr int kKeyboardHighestTranspose = kKeyboardHighestNote - kKeyboardHighNote; // +36 for one octave
 
 constexpr int ClampKeyboardTranspose(int semitones) {
     const int octaves = semitones / 12;
-    return (octaves < -2 ? -2 : (octaves > 2 ? 2 : octaves)) * 12;
+    constexpr int lowest = kKeyboardLowestTranspose / 12, highest = kKeyboardHighestTranspose / 12;
+    return (octaves < lowest ? lowest : (octaves > highest ? highest : octaves)) * 12;
 }
 
 // Black keys relative to the white ones.
@@ -71,6 +78,32 @@ inline int NoteAt(double x, double y, double width, double height) {
     for(int note = kKeyboardLowNote; note <= kKeyboardHighNote; ++note)
         if(!IsBlackKey(note) && WhiteKeyIndex(note) == index)
             return note;
+    return -1;
+}
+
+// The touch pads (beta 2, round 3): the black notes' pads in the upper row, centred on the
+// boundary of their white keys and nearly as wide; the white notes' pads in the lower row.
+// Between the black pads the upper row plays nothing.
+constexpr double kPadSplit = 0.5;      // of the keyboard's height: where the lower row begins
+constexpr double kBlackPadWidth = 0.9; // of a white pad's width
+
+inline KeyRect PadRectFor(int note, double width, double height) {
+    const double white = width / kKeyboardWhiteKeys;
+    const double left = WhiteKeyIndex(note) * white;
+    if(!IsBlackKey(note))
+        return {left, height * kPadSplit, left + white, height};
+    const double centre = left + white, half = white * kBlackPadWidth / 2.0;
+    return {centre - half, 0.0, centre + half, height * kPadSplit};
+}
+
+inline int PadNoteAt(double x, double y, double width, double height) {
+    if(!(x >= 0.0 && x < width && y >= 0.0 && y < height))
+        return -1;
+    for(int note = kKeyboardLowNote; note <= kKeyboardHighNote; ++note) {
+        const KeyRect pad = PadRectFor(note, width, height);
+        if(x >= pad.left && x < pad.right && y >= pad.top && y < pad.bottom)
+            return note;
+    }
     return -1;
 }
 

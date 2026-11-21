@@ -299,6 +299,47 @@ The new window (0.2.0, Slate; judge the look as well as what it shows):
 - [ ] The size and preset menus: open one, close the plug-in window from the host while
       it is open, then click elsewhere: no crash (GA.1).
 
+1.0.0-beta.2 (the round window; compare with the previews in
+`out/messier-1.0.0-beta.2/preview/`). The sound must be exactly that of beta 1:
+
+- [ ] A project saved with beta 1 opens: same sound, same knob values, same file; the
+      window in GALAXY, at the saved size (now taller: 624 instead of 560 at 100 %).
+      A project of beta 1 with Silver, Plum or Gold shows the barred spiral, the ring or
+      the diffuse nebula.
+- [ ] Size menu and grip, 50 to 200 %: the round glass stays round, nothing is cut off;
+      DETAILS and KEYS open and close on their own, the window grows and shrinks by them.
+- [ ] Knobs: each turns, double-click restores its default, the value in its box follows
+      automation and MIDI; the range ends beside each knob are right (WINDOW has none).
+- [ ] GALAXY / WAVE (top left): switches the glass at once, without a click or change in
+      the sound; saved with the project, also when nothing else changed; not offered as
+      automation.
+- [ ] GALAXY: the nebula turns slowly, clockwise at +1x, the other way with negative SPEED;
+      it comes to rest with STOP, FREEZE and SPEED at 0x and starts again smoothly; it fades
+      as BLEND goes to 100 %.
+- [ ] WAVE: the waveform lies on the glass like through a lens, the file's start at the
+      left rim, its end at the right, L at the top; brighter inside the loop. WAVE (under
+      DETAILS) changes its brightness.
+- [ ] In both views: the loop's edges (orange), SPRAY's band and the grains (shooting
+      stars, tinted by PITCH) where the file plays; the playhead line and the triangle on
+      the ring move with the sound; the seconds outside the ring fit the file's length.
+- [ ] Click and drag on the glass sets START (also near the rim: the file's ends); the
+      wheel over the glass changes SPRAY (Shift: finer); a click outside the ring does
+      nothing; the snowflake ends FREEZE.
+- [ ] The START bar: click or drag sets START, the thumb stands where the loop begins, the
+      box shows seconds and percent; host automation of START moves it.
+- [ ] Drop a WAV on the glass: a round frame and "Drop WAV to load"; the file loads.
+- [ ] The info line: DETAILS opens and closes; the file's format (or what went wrong, in
+      the warning colour); POS follows the playhead; VOCODER at BLEND 0 %, GRANULAR at
+      100 %, MIX between.
+- [ ] Nebula menu (spiral symbol): four nebulae, the current one ticked; each has its own
+      colour and keeps its own HUE; "Reload skin folders" and "Open skin folder" work.
+- [ ] HUE (under DETAILS): a grey slider; red at the left, violet in the middle, blue at the
+      right. It colours the nebula, START's fill, the knobs' arcs and lit switches, not the
+      labels or values. Double-click: the nebula's own colour.
+- [ ] KEYS shows a keyboard symbol; the keyboard, LATCH and the octave keys work as before.
+- [ ] CPU: the host's meter with the window open in GALAXY and in WAVE, at 100 % and
+      200 %, compared with the window closed.
+
 ## 7. Listening
 
 - [ ] Against the Daisy kit with Nebulae on Daisy 0.2.2, if at hand, same file, same

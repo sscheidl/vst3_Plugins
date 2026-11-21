@@ -12,6 +12,7 @@
 #include "dialog_start.h"
 #include "display_data.h"
 #include "editor.h"
+#include "fisheye.h"
 #include "file_drop.h"
 #include "gui_layout.h"
 #include "gui_skin.h"
@@ -949,8 +950,9 @@ void TestController() {
     CHECK(Text(*controller, kParamSpeed, 0.5) == "+0.00" && Text(*controller, kParamSpeed, 7.0 / 12.0) == "+1.00");
     CHECK(Text(*controller, kParamPitchRandom, 1.0) == "\xC2\xB1" "12.0" && Text(*controller, kParamPitchRandom, 0.25) == "\xC2\xB1" "3.0");
     CHECK(Text(*controller, kParamWindow, 0.55) == "~Bartlett" && Text(*controller, kParamWindow, 0.6) == "~Ramp Up");
-    CHECK(Text(*controller, kParamPitch, 0.5) == "+0.00");
-    CHECK(Text(*controller, kParamPitch, 0.0) == "-3.00" && Text(*controller, kParamPitch, 1.0) == "+2.00");
+    // Beta 2 (the user's decision): PITCH in semitones, also typed.
+    CHECK(Text(*controller, kParamPitch, 0.5) == "+0.0");
+    CHECK(Text(*controller, kParamPitch, 0.0) == "-36.0" && Text(*controller, kParamPitch, 1.0) == "+24.0");
     CHECK(Text(*controller, kParamWindow, 0.0) == "Gaussian" && Text(*controller, kParamWindow, 1.0) == "Rectangle");
     CHECK(Text(*controller, kParamWindow, 0.5) == "Bartlett");
     CHECK(Text(*controller, kParamSize, 0.5) == "25.0");
@@ -960,6 +962,7 @@ void TestController() {
     CHECK(ParseValue(kParamSpeed, "1x", v) && std::fabs(v - 7.0 / 12.0) < 1e-12);
     CHECK(ParseValue(kParamSpeed, "0", v) && v == 0.5);
     CHECK(ParseValue(kParamPitchRandom, "+-6 st", v) && v == 0.5);
+    CHECK(ParseValue(kParamPitch, "-7.5 st", v) && std::abs(PitchOctaves(v) * 12.0 + 7.5) < 1e-6);
     CHECK(ParseValue(kParamWindow, "~Ramp Up", v) && std::fabs(v - 4.0 / 6.0) < 1e-12);
     CHECK(ParseValue(kParamWindow, "rect", v) && v == 1.0);
     CHECK(ParseValue(kParamWindow, "4", v) && v == 0.5);
@@ -1573,9 +1576,13 @@ void TestDialogStart() {
 }
 
 // The map takes the mouse (0.1.8): a click or drag sets START to that place in the
-// file, the wheel steps SPRAY; without a file a click does nothing.
+// file, the wheel steps SPRAY; without a file a click does nothing. Beta 2: on the round
+// glass, through the lens; outside it, the nearest point of its rim.
 void TestMapEdits() {
-    auto map = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 120));
+    // A glass of radius 180 centred at (218, 218): on its middle line a quarter of the file
+    // lies 0.6 of the radius left of the centre (the lens enlarges the middle by 1.5).
+    auto map = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 436, 436));
+    CHECK(map->GlassRadius() == 180.0 && map->GlassCentre() == VSTGUI::CPoint(218, 218));
     std::vector<std::string> calls;
     MapView::Edits edits;
     edits.start_begin = [&] { calls.push_back("begin"); };
@@ -1583,16 +1590,16 @@ void TestMapEdits() {
     edits.start_end = [&] { calls.push_back("end"); };
     edits.spray = [&](double step) { char t[32]; std::snprintf(t, sizeof t, "spray %+.3f", step); calls.push_back(t); };
     map->SetEdits(std::move(edits));
-    CHECK(!map->PressAt(420) && calls.empty()); // no file yet
+    CHECK(!map->PressAt(218) && calls.empty()); // no file yet
     EngineDisplay display;
     display.sequence = 1;
     display.frames = 48000;
     display.loop_length = 48000;
     map->Show(display, nullptr);
-    CHECK(map->PressAt(420));
+    CHECK(map->PressAt(218));
     map->DragTo(-30);
     map->DragTo(2000);
-    map->DragTo(210);
+    map->DragTo(218 - 0.6 * 180);
     map->Release();
     map->Release(); // a second release does nothing
     CHECK(map->Wheel(1.0, false) && map->Wheel(-3.0, true) && !map->Wheel(0.0, false));
@@ -1627,17 +1634,32 @@ void TestViewLayout() {
             CHECK(NoteAt(centre, height * 0.9, width, height) == note);
         }
     }
-    CHECK(white == kKeyboardWhiteKeys && black == 10);
-    CHECK(ClampKeyboardTranspose(-36) == -24 && ClampKeyboardTranspose(13) == 12);
+    CHECK(white == kKeyboardWhiteKeys && black == kKeyboardBlackKeys);
+    // Round 3: one octave of pads, moved over C2..C8 as the two octaves were.
+    CHECK(ClampKeyboardTranspose(-36) == -24 && ClampKeyboardTranspose(13) == 12 && ClampKeyboardTranspose(60) == 36);
+    CHECK(kKeyboardLowNote + kKeyboardLowestTranspose == 36 && kKeyboardHighNote + kKeyboardHighestTranspose == 108);
+    {
+        int pads = 0;
+        for(int note = kKeyboardLowNote; note <= kKeyboardHighNote; ++note) {
+            const KeyRect pad = PadRectFor(note, width, height);
+            CHECK(pad.left >= 0.0 && pad.right <= width + 1e-9 && (pad.top == 0.0) == IsBlackKey(note));
+            pads += PadNoteAt((pad.left + pad.right) / 2, (pad.top + pad.bottom) / 2, width, height) == note ? 1 : 0;
+        }
+        CHECK(pads == kKeyboardWhiteKeys + kKeyboardBlackKeys);
+        // C# and D# apart, with a gap between them; above E-F, between the black pads: nothing.
+        CHECK(PadRectFor(kKeyboardLowNote + 1, width, height).right < PadRectFor(kKeyboardLowNote + 3, width, height).left);
+        const double white_width = width / kKeyboardWhiteKeys;
+        CHECK(PadNoteAt(3 * white_width, height * 0.25, width, height) == -1);
+    }
     const auto same = [](EditorSize a, EditorSize b) { return a.width == b.width && a.height == b.height; };
-    // 0.2.4: 560 high, 84 more with the keyboard, 96 more with DETAILS open.
-    CHECK(same(EditorSizeFor(1.0, false, false), {880, 560}) && same(EditorSizeFor(1.0, true, false), {880, 644})
-          && same(EditorSizeFor(1.0, true, true), {880, 740}));
+    // Beta 2: 624 high (0.2.4: 560), 84 more with the keyboard, 96 more with DETAILS open.
+    CHECK(same(EditorSizeFor(1.0, false, false), {880, 624}) && same(EditorSizeFor(1.0, true, false), {880, 708})
+          && same(EditorSizeFor(1.0, true, true), {880, 804}));
     using Clock = DragConstraint::Clock;
     Clock::time_point now{};
     DragConstraint drag;
     now += std::chrono::milliseconds(10);
-    CHECK(same(drag.Apply({1320, 560}, {880, 560}, 1.0, false, false, now), {1320, 840}));
+    CHECK(same(drag.Apply({1320, 624}, {880, 624}, 1.0, false, false, now), {1320, 936}));
     for(const bool keyboard : {false, true})
         for(const bool details : {false, true})
             for(int w = 200; w <= 1600; w += 7)
@@ -1653,7 +1675,7 @@ void TestViewLayout() {
                 const EditorSize size = EditorSizeFor(scale * zoom, keyboard, true);
                 CHECK(std::fabs(EditorZoomForSize(size.width, size.height, scale, keyboard, true) - zoom) < 0.005);
             }
-    std::printf("layout: 25 keys where they are drawn; window 880 x 560 (+84 keys, +96 DETAILS), aspect "
+    std::printf("layout: 25 keys where they are drawn; window 880 x 624 (+84 keys, +96 DETAILS), aspect "
                 "ratio and zoom limits kept\n");
 }
 
@@ -1722,6 +1744,217 @@ class CoalescingHandler : public IComponentHandler, public IComponentHandler2 {
 // engine must always run one complete project: the file and the values of the
 // same load, never the new values with the old file. In the end the last project
 // plays, also as the first block of an export.
+// Beta 2 (the user's round window): the lens lays the plate onto the glass and back. Its
+// edges are the rim (the file's start the left arc, its end the right one, L the top), the
+// middle line stays a line across, enlarged 1.5 times at the centre; a point of the glass
+// gives back its place in the file, a point outside it the nearest place on the rim.
+void TestLens() {
+    using namespace messier::lens;
+    const auto close_to = [](double a, double b) { return std::abs(a - b) < 1e-9; };
+    CHECK(close_to(ToGlass(0.5, 0).x, 0) && close_to(ToGlass(0.5, 0).y, 0));
+    for(const double share : {0.0, 1.0})
+        for(const double down : {-1.0, -0.4, 0.0, 0.7, 1.0})
+            CHECK(close_to(std::hypot(ToGlass(share, down).x, ToGlass(share, down).y), 1.0));
+    CHECK(close_to(std::hypot(ToGlass(0.3, -1.0).x, ToGlass(0.3, -1.0).y), 1.0) && ToGlass(0.3, -1.0).y < 0);
+    CHECK(close_to(ToGlass(0.0, 0).x, -1) && close_to(ToGlass(1.0, 0).x, 1) && close_to(ToGlass(0.25, 0).x, -0.6));
+    CHECK(std::abs(ToGlass(0.5 + 1e-6, 0).x / 2e-6 - 1.5) < 1e-4); // the centre's enlargement
+    for(const double share : {0.0, 0.1, 0.37, 0.5, 0.81, 1.0})
+        for(const double down : {-0.9, -0.3, 0.0, 0.45, 0.9}) {
+            const Point glass = ToGlass(share, down);
+            const Point back = FromGlass(glass.x, glass.y);
+            CHECK(std::abs(back.x - share) < 1e-6 && std::abs(back.y - down) < 1e-6);
+        }
+    CHECK(close_to(FromGlass(-3.0, 0).x, 0) && close_to(FromGlass(2.0, 0).x, 1) && close_to(FromGlass(0, -5).y, -1));
+    // Monotonic across the middle line, so a drag goes one way through the file.
+    double last = -2;
+    for(int k = 0; k <= 100; ++k) {
+        const double x = ToGlass(k / 100.0, 0).x;
+        CHECK(x > last);
+        last = x;
+    }
+    CHECK(PanDown(0) == -kPanReach && PanDown(1) == kPanReach && PanDown(0.5) == 0);
+    std::printf("lens: the plate fills the glass, edges on the rim, middle 1.5x, every place found back\n");
+}
+
+// Beta 2 (the user's wishes): GALAXY's stars fly out from near the centre while the
+// playback goes forward, in from the rim backward, and stand at 0x; ever faster further
+// out; each in a direction of its own, the same every time, all round the glass.
+void TestStarfield() {
+    int quarters[4] = {};
+    for(std::uint32_t n = 1; n <= 400; ++n) {
+        const MapView::Star a = MapView::StarDirection(n), b = MapView::StarDirection(n);
+        CHECK(a.x == b.x && a.y == b.y && std::abs(std::hypot(a.x, a.y) - 1.0) < 1e-9);
+        ++quarters[(a.x >= 0 ? 0 : 1) + (a.y >= 0 ? 0 : 2)];
+    }
+    for(const int q : quarters)
+        CHECK(q > 70); // not only to the left and right
+    CHECK(MapView::StarStart(7, 1.0) < 0.05 && MapView::StarStart(7, -1.0) > 0.95);
+    const double still = MapView::StarStart(7, 0.0);
+    CHECK(still >= 0.15 && still <= 0.9 && MapView::StarFly(still, 0.0, 1.0) == still);
+    CHECK(MapView::StarFly(0.5, 1.0, 0.1) > 0.5 && MapView::StarFly(0.5, -1.0, 0.1) < 0.5);
+    CHECK(MapView::StarFly(0.8, 1.0, 0.1) - 0.8 > MapView::StarFly(0.2, 1.0, 0.1) - 0.2); // faster further out
+    CHECK(MapView::StarFly(MapView::StarStart(7, 1.0), 1.0, 1.45) >= 0.99);  // about 1.4 s at +1x
+    CHECK(MapView::StarFly(MapView::StarStart(7, 2.0), 2.0, 0.75) >= 0.99);  // twice as fast at +2x
+    // Round 4: a short grain's star keeps its shape (rays) for kStarMinLife, then glows on;
+    // its light runs on without a jump, its rays fade over the glow and end with it.
+    {
+        using S = MapView;
+        const double short_life = 0.03, end = S::kStarMinLife + S::kStarGlow;
+        CHECK(S::StarLook(0.3, short_life).rays == 1.0 && S::StarLook(0.3, short_life).bright >= 0.8);
+        const S::StarLight before = S::StarLook(S::kStarMinLife - 1e-6, short_life);
+        const S::StarLight after = S::StarLook(S::kStarMinLife + 1e-6, short_life);
+        CHECK(std::abs(before.bright - after.bright) < 1e-3 && std::abs(before.rays - after.rays) < 1e-3);
+        CHECK(S::StarLook(S::kStarMinLife + 0.5 * S::kStarGlow, short_life).rays > 0.1
+              && S::StarLook(S::kStarMinLife + 0.5 * S::kStarGlow, short_life).rays < 0.5);
+        CHECK(S::StarLook(end, short_life).bright == 0.0 && S::StarLook(end, short_life).rays == 0.0);
+        CHECK(S::StarLook(end - 0.01, short_life).rays < 1e-3);
+        // A long grain keeps its shape while it sounds.
+        CHECK(S::StarLook(0.9, 1.0).rays == 1.0 && S::StarLook(1.0 + S::kStarGlow, 1.0).bright == 0.0);
+    }
+    // Round 5: the turn's speed starts and stops along an S: hardly moving at first (slower
+    // than the first-order ease of before), never past its target, close to it after 5 s,
+    // and from full speed to rest the same way.
+    {
+        double speed = 0, rate = 0, last = 0;
+        bool monotonic = true;
+        for(int k = 1; k <= 400; ++k) {
+            MapView::EaseTurn(speed, rate, 1.0, 0.025);
+            if(k == 4)
+                CHECK(speed < 0.25 * (1.0 - std::exp(-0.1 / MapView::kTurnEase)));
+            monotonic = monotonic && speed >= last && speed <= 1.0;
+            last = speed;
+            if(k == 200)
+                CHECK(speed > 0.95);
+        }
+        CHECK(monotonic);
+        for(int k = 0; k < 800; ++k)
+            MapView::EaseTurn(speed, rate, 0.0, 0.025);
+        CHECK(speed == 0.0 && rate == 0.0);
+    }
+    // Round 5: GALAXY / WAVE round BLEND: the left arc and name choose GALAXY, the right ones
+    // WAVE, the knob in the middle neither.
+    {
+        auto arcs = VSTGUI::makeOwned<ViewSwitch>(VSTGUI::CRect(0, 0, 237, 50), [](bool) {});
+        const double cx = 237 / 2.0, cy = 25;
+        CHECK(arcs->SideAt(cx - layout::kArcRadius, cy) == -1 && arcs->SideAt(cx + layout::kArcRadius, cy) == 1);
+        CHECK(arcs->SideAt(10, cy) == -1 && arcs->SideAt(227, cy) == 1); // the names
+        CHECK(arcs->SideAt(cx, cy) == 0 && arcs->SideAt(cx + 20, cy + 5) == 0); // the knob
+        CHECK(arcs->PressAt(cx + layout::kArcRadius, cy) && !arcs->Galaxy() && !arcs->PressAt(cx, cy));
+    }
+    std::printf("starfield: out forward, in backward, standing at 0x, faster further out; directions all round\n");
+}
+
+// Beta 2: HUE from red over violet to blue; a hue of beta 1 outside that arc is shown at
+// its nearer end; HUE turns the nebula and the accents, not the labels and values.
+void TestHueScale() {
+    CHECK(AccentOfSlider(0.0) == 0 && AccentOfSlider(1.0) == kAccentBlueHue && AccentOfSlider(0.5) == 295);
+    CHECK(AccentSliderValue(0) == 0.0 && AccentSliderValue(kAccentBlueHue) == 1.0 && AccentSliderValue(295) == 0.5);
+    for(const double value : {0.0, 0.1, 0.33, 0.5, 0.9, 1.0})
+        CHECK(std::abs(AccentSliderValue(AccentOfSlider(value)) - value) < 0.5 / (360 - kAccentBlueHue));
+    CHECK(AccentOnScale(30) == 0 && AccentOnScale(120) == kAccentBlueHue && AccentOnScale(285) == 285);
+    CHECK(IsAccent(359) && !IsAccent(360) && IsAccent(kPresetAccent));
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); // as TestCustomSkin
+    VSTGUI::init(GetModuleHandleW(nullptr));
+    if(auto* win32 = VSTGUI::getPlatformFactory().asWin32Factory())
+        win32->setResourceBasePath(VSTGUI::UTF8String(MESSIER_GUI_DIR "/"));
+    {
+    Skin skin(GuiPreset::kSpiral, {});
+    const SkinColours before = skin.Colours();
+    skin.SetAccent(0); // red
+    const SkinColours& after = skin.Colours();
+    CHECK(after.text == before.text && after.button_text == before.button_text && after.dim == before.dim
+          && after.control != before.control); // the accents follow HUE, the names stay neutral
+    // Round 5: the values follow HUE as well, at their own lightness.
+    double h = 0, sat = 0, light = 0, light_before = 0;
+    before.value.toHSL(h, sat, light_before);
+    after.value.toHSL(h, sat, light);
+    CHECK(after.value != before.value && std::lround(h) % 360 == 0 && std::abs(light - light_before) < 0.01);
+    after.nebula_a.toHSL(h, sat, light);
+    CHECK(std::lround(h) % 360 == 0 && after.nebula_a != before.nebula_a && after.start_fill != before.start_fill);
+    }
+    VSTGUI::exit();
+    if(SUCCEEDED(com))
+        CoUninitialize();
+    std::printf("HUE: red to violet to blue, old hues at the nearer end; only the nebula and START's fill\n");
+}
+
+// Beta 2: the round window's layout. Every primary knob, its name, value and scale stay
+// clear of the glass' ring and of each other, inside the window and between the header and
+// the START row; the START row, FREEZE, RESET and the info line inside the margins.
+void TestRoundLayout() {
+    namespace L = layout;
+    const auto overlap = [](const L::Box& a, const L::Box& b) {
+        return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    };
+    // The farthest a box's corner may come to the glass' centre: outside the ring, with air.
+    const auto clear_of_ring = [](const L::Box& b) {
+        const double x = std::clamp(L::kGlassX, b.left, b.right), y = std::clamp(L::kGlassY, b.top, b.bottom);
+        return std::hypot(x - L::kGlassX, y - L::kGlassY) >= L::kRingRadius + 4;
+    };
+    std::vector<L::Box> boxes;
+    for(int slot = 0; slot < L::kPrimaryCount; ++slot) {
+        for(const L::Box& b : {L::KnobBox(slot), L::NameBox(slot), L::ValueBox(slot)}) {
+            CHECK(b.left >= L::kMargin / 2 && b.right <= L::kWidth - L::kMargin / 2);
+            CHECK(b.top > L::kHeaderRule && b.bottom < L::kStartTop);
+            CHECK(slot == L::kBelowGlass ? clear_of_ring(L::NameBox(slot)) : clear_of_ring(b));
+            boxes.push_back(b);
+        }
+        if(slot != L::kBelowGlass)
+            for(const bool high : {false, true})
+                CHECK(clear_of_ring(L::ScaleBox(slot, high)) && L::ScaleBox(slot, high).left >= L::kMargin / 2
+                      && L::ScaleBox(slot, high).right <= L::kWidth - L::kMargin / 2);
+    }
+    // BLEND below the glass: its knob may touch the ring, never the glass.
+    {
+        const L::Box b = L::KnobBox(L::kBelowGlass);
+        CHECK(b.top >= L::kGlassY + L::kGlassRadius);
+    }
+    for(std::size_t i = 0; i < boxes.size(); ++i)
+        for(std::size_t j = i + 1; j < boxes.size(); ++j)
+            CHECK(i / 3 == j / 3 || !overlap(boxes[i], boxes[j]));
+    // The plate view: the ring and the axis inside it, below the header.
+    CHECK(L::kMapTop >= L::kHeaderRule && L::kMapRight - L::kMapLeft == 2 * L::kMapHalf);
+    // Round 5: DETAILS top left, FREEZE and RESET above the START row, the START track
+    // centred between its two names, and GALAXY / WAVE round BLEND: all clear of the knobs,
+    // their names, values and scales (the arcs lie behind BLEND's own knob only), of each
+    // other and of the glass' ring.
+    std::vector<L::Box> scales;
+    for(int slot = 0; slot < L::kPrimaryCount; ++slot)
+        if(slot != L::kBelowGlass)
+            for(const bool high : {false, true})
+                scales.push_back(L::ScaleBox(slot, high));
+    for(const bool high : {false, true})
+        scales.push_back(L::ScaleBox(L::kBelowGlass, high)); // BLEND's, drawn below its knob
+    const L::BottomRows r = L::Bottom();
+    const L::Box arcs = L::ArcSwitchBox();
+    const std::array<L::Box, 4> keys{r.details, r.freeze, r.reset, arcs};
+    for(std::size_t k = 0; k < keys.size(); ++k) {
+        CHECK(keys[k].left >= L::kMargin && keys[k].right <= L::kWidth - L::kMargin && keys[k].top >= L::kHeaderRule
+              && keys[k].bottom <= L::kStartTop);
+        for(std::size_t i = 0; i < boxes.size(); ++i)
+            CHECK(!overlap(keys[k], boxes[i]) || (k == 3 && i == 3 * L::kBelowGlass)); // the arcs: behind BLEND
+        for(const L::Box& scale : scales)
+            CHECK(!overlap(keys[k], scale));
+        for(std::size_t j = k + 1; j < keys.size(); ++j)
+            CHECK(!overlap(keys[k], keys[j]));
+    }
+    for(const L::Box& key : {r.details, r.freeze, r.reset})
+        CHECK(key.right - key.left == L::kButtonWidth && key.bottom - key.top == L::kButtonHeight);
+    for(const double angle : {L::kGalaxyArcFrom, L::kGalaxyArcTo, L::kWaveArcFrom, L::kWaveArcTo}) {
+        const double a = angle * 3.14159265358979 / 180.0, reach = L::kArcRadius + L::kArcWidth / 2;
+        const double x = L::kPrimary[L::kBelowGlass].x + std::sin(a) * reach;
+        const double y = L::kPrimary[L::kBelowGlass].y - std::cos(a) * reach;
+        CHECK(std::hypot(x - L::kGlassX, y - L::kGlassY) >= L::kRingRadius + 2);
+    }
+    CHECK(L::kStartTop + L::kStartHeight <= L::kInfoTop && L::kInfoTop + L::kInfoHeight <= L::kTopHeight);
+    const double track_left = r.start_bar.left + r.track_left, track_right = r.start_bar.left + r.track_right;
+    CHECK(std::abs((track_left + track_right) / 2 - L::kWidth / 2) < 1e-9 && track_right - track_left > 600
+          && track_right <= r.start_bar.right - L::kThumbRoom);
+    CHECK(!overlap(r.file_info, r.status) && r.status.right <= r.version_left);
+    CHECK(L::kTopHeight == 624);
+    std::printf("round layout: knobs, names, values and scales clear of the ring and of each other\n");
+}
+
 // The window of 0.2.1, without a window: the snowflake ends Freeze (the user's wish);
 // playhead and grains move on at the display's speeds (0.2.2: MS-R43, MS-R45), the loop
 // returns to the core's after a preview (MS-R46); the menus carry
@@ -1729,34 +1962,6 @@ class CoalescingHandler : public IComponentHandler, public IComponentHandler2 {
 // RESET sets every knob and START to its default and Freeze off (the user's wish).
 void TestWindow021() {
     using Clock = MapView::Clock;
-    // The snowflake: a click on it ends Freeze and places no START.
-    {
-        auto map = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 840, 342));
-        std::vector<std::string> calls;
-        MapView::Edits edits;
-        edits.start_begin = [&] { calls.push_back("begin"); };
-        edits.start = [&](double) { calls.push_back("start"); };
-        edits.start_end = [&] { calls.push_back("end"); };
-        edits.freeze_off = [&] { calls.push_back("thaw"); };
-        map->SetEdits(std::move(edits));
-        EngineDisplay display;
-        display.sequence = 1;
-        display.frames = 48000;
-        display.loop_length = 48000;
-        display.playhead = 24000;
-        map->Show(display, nullptr);
-        CHECK(map->SnowflakeBox().isEmpty()); // not frozen: no snowflake
-        display.frozen = 1;
-        map->Show(display, nullptr);
-        const VSTGUI::CRect box = map->SnowflakeBox();
-        CHECK(!box.isEmpty() && std::abs(box.getCenter().x - 420) < 0.5);
-        CHECK(map->PressAt(box.getCenter().x, box.getCenter().y));
-        map->Release();
-        CHECK(calls == std::vector<std::string>{"thaw"});
-        CHECK(map->PressAt(box.getCenter().x, box.bottom + 20)); // below it: START as before
-        map->Release();
-        CHECK(calls.size() == 4 && calls[1] == "begin" && calls[2] == "start" && calls[3] == "end");
-    }
     // 0.2.2 (MS-R43, MS-R45): playhead and grains move on at the speeds the display
     // carries, the playhead inside the display's own loop; nothing is kept from the
     // display before. Codex' cases: a 2,000-frame loop at +1x (30 ms: 1,440 frames
@@ -1837,15 +2042,19 @@ void TestWindow021() {
         auto free_size = MakeSizeMenu(1.1);
         for(int32 i = 0; i < 6; ++i)
             CHECK(!free_size->getEntry(i)->isChecked());
-        auto presets = MakePresetMenu(GuiPreset::kSlate);
-        CHECK(presets->isMultipleCheckStyle() && presets->getNbEntries() == 7); // 0.2.7: and the two skin entries
-        CHECK(presets->getEntry(0)->isChecked() && presets->getEntry(0)->isEnabled());
-        for(int32 i = 1; i < 4; ++i)
-            CHECK(!presets->getEntry(i)->isChecked() && presets->getEntry(i)->isEnabled()); // 0.2.4: all delivered
-        CHECK(presets->getEntry(0)->getTitle() == "Slate" && presets->getEntry(1)->getTitle() == "Silver");
-        CHECK(presets->getEntry(2)->getTitle() == "Gold" && presets->getEntry(3)->getTitle() == "Plum");
-        CHECK(MakePresetMenu(GuiPreset::kGold)->getEntry(2)->isChecked());
-        CHECK(MakePresetMenu(GuiPreset::kPlum)->getEntry(3)->isChecked());
+        auto presets = MakePresetMenu(GuiPreset::kSpiral);
+        // 0.2.7: and the two skin entries after a separator.
+        CHECK(presets->isMultipleCheckStyle() && presets->getNbEntries() == kGuiPresetCount + 3);
+        for(int32 i = 0; i < kGuiPresetCount; ++i) // 0.2.4: all delivered; the spiral checked
+            CHECK(presets->getEntry(i)->isChecked() == (i == 4) && presets->getEntry(i)->isEnabled());
+        // Round 3: the painted galaxies first, then beta 2's nebula variants.
+        CHECK(presets->getEntry(0)->getTitle() == "Blue galaxy" && presets->getEntry(3)->getTitle() == "Violet galaxy");
+        CHECK(presets->getEntry(4)->getTitle() == "Spiral galaxy (M51)"
+              && presets->getEntry(5)->getTitle() == "Barred spiral (M109)");
+        CHECK(presets->getEntry(6)->getTitle() == "Ring nebula (M57)"
+              && presets->getEntry(7)->getTitle() == "Diffuse nebula (M42)");
+        CHECK(MakePresetMenu(GuiPreset::kRing)->getEntry(6)->isChecked());
+        CHECK(MakePresetMenu(GuiPreset::kRedGalaxy)->getEntry(2)->isChecked());
         CHECK(!PopUpMenu(nullptr, sizes, VSTGUI::CPoint(), {})); // nothing to show it in
     }
     VSTGUI::exit();
@@ -1915,7 +2124,7 @@ void TestWindow021() {
         CHECK(controller->terminate() == kResultOk);
     }
     std::printf("window 0.2.1/0.2.2: no request from inside the controller's call, windows from a held list "
-                "(MS-R44); the snowflake ends Freeze; playhead and grains at the display's speeds (MS-R43, "
+                "(MS-R44); playhead and grains at the display's speeds (MS-R43, "
                 "MS-R45); the core's loop after a preview (MS-R46); menus with ticks (MS-R42); RESET to "
                 "defaults and Freeze off\n");
 }
@@ -2128,28 +2337,54 @@ void TestWindow022() {
             std::printf("engine displays after 111 and 129 quanta: %d grains ended between them, each glows\n", ended);
         }
         // MS-R56 (0.2.5): START at 100 % of a file of five frames: the core clamps the loop
-        // to start at frame 4, the thumb stands there too.
+        // to start at frame 4, the thumb (beta 2: of the START bar) stands there too.
         {
-            auto view = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(8, 54, 872, 396), layout::kBezelEdge);
-            EngineDisplay g = d;
-            g.frames = 5;
-            g.loop_start = 4;
-            g.loop_length = 1;
-            g.playhead = 4;
-            g.grain_count = 0;
-            view->ShowAt(g, nullptr, t);
-            view->SetStart(1.0);
-            CHECK(std::abs(view->StartX() - view->FrameX(4)) < 1e-9);
+            auto bar = VSTGUI::makeOwned<StartBar>(VSTGUI::CRect(20, 566, 680, 598));
+            bar->SetFile(5, 48000.0);
+            bar->SetStart(1.0);
+            CHECK(std::abs(bar->StartX() - bar->FrameX(4)) < 1e-9 && bar->StartX() < bar->FrameX(5));
         }
-        // START (0.2.4): the thumb stands on the left loop bracket, at the start, the middle
-        // and near the end of the file.
+        // START (0.2.4): the thumb stands where the loop the core reports begins, at the
+        // start, the middle and near the end of the file.
         for(const double start : {0.0, 0.5, 0.98}) {
-            auto view = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(8, 54, 872, 396), layout::kBezelEdge);
+            auto view = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 436, 436));
+            auto bar = VSTGUI::makeOwned<StartBar>(VSTGUI::CRect(20, 566, 680, 598));
             EngineDisplay g = d;
             g.loop_start = start * g.frames;
             view->ShowAt(g, nullptr, t);
             view->SetStart(start);
-            CHECK(std::abs(view->StartX() - view->FrameX(view->ShownLoop(t + std::chrono::seconds(1)).start)) < 1e-9);
+            bar->SetFile(g.frames, 48000.0);
+            bar->SetStart(start);
+            CHECK(std::abs(bar->StartX() - bar->FrameX(view->ShownLoop(t + std::chrono::seconds(1)).start)) < 1e-9);
+            // Round 2: the end thumb stands where the core's loop ends (START, then SIZE
+            // squared of the rest), and a drag to it gives that SIZE back.
+            for(const double size : {0.0, 0.3, 0.7, 1.0}) {
+                view->SetSize(size);
+                bar->SetSize(size);
+                const MapView::Loop loop = view->ShownLoop(MapView::Clock::now()); // the preview: START, SIZE
+                CHECK(std::abs(bar->EndX() - bar->FrameX(std::min<double>(g.frames, loop.start + loop.length))) < 1e-6);
+                if(size > 0.05 && start < 0.9)
+                    CHECK(std::abs(bar->SizeAt(bar->EndX()) - size) < 1e-6);
+            }
+        }
+        // Round 2: a press on the end thumb sets LOOP SIZE, one elsewhere START.
+        {
+            auto bar = VSTGUI::makeOwned<StartBar>(VSTGUI::CRect(20, 566, 680, 598));
+            double started = -1, sized = -1;
+            StartBar::Edits edits;
+            edits.start = [&](double share) { started = share; };
+            edits.size = [&](double size) { sized = size; };
+            bar->SetEdits(std::move(edits));
+            bar->SetFile(48000, 48000.0);
+            bar->SetStart(0.2);
+            bar->SetSize(0.5); // the loop ends at 0.2 + 0.25 x 0.8 = 0.4 of the file
+            CHECK(bar->PressAt(bar->EndX() + 2) && sized >= 0 && started < 0);
+            bar->DragTo(bar->FrameX(48000 * 0.6));
+            CHECK(std::abs(sized - std::sqrt(0.5)) < 1e-3); // (0.6 - 0.2) / 0.8
+            bar->Release();
+            sized = -1;
+            CHECK(bar->PressAt(bar->FrameX(48000 * 0.8)) && started > 0.79 && sized < 0);
+            bar->Release();
         }
         // Another file: the glow is gone at once.
         EngineDisplay other = next;
@@ -2158,21 +2393,15 @@ void TestWindow022() {
         map->ShowAt(other, nullptr, t + ms(60));
         CHECK(map->Afterglows(t + ms(60)) == 0);
     }
-    // The layout: STOP and the symbol keys one group with even gaps; LATCH and KEYS as
-    // high as FREEZE and RESET; the triangle's lane between the axis and the bezel, taken
-    // from the plate, whose bottom (and the window's size) stays.
+    // The layout: STOP and the symbol keys one group with even gaps; KEYS, LATCH, the
+    // octave keys and the keyboard one row inside the margins.
     CHECK(layout::kStopRight + layout::kHeaderGap == layout::kSizeLeft
           && layout::kSizeRight + layout::kHeaderGap == layout::kPresetLeft);
-    // 0.2.4: KEYS in the header group; LATCH, the octave keys and the keyboard one row
-    // inside the margins; FREEZE and RESET beside the third group.
     CHECK(layout::kKeysRight + layout::kHeaderGap == layout::kStopLeft);
     CHECK(layout::kLatchLeft >= layout::kMargin && layout::kOctaveUpLeft + layout::kButtonWidth <= layout::kWidth - layout::kMargin);
-    CHECK(layout::ColumnLeft(8) + layout::kColumnWidth < layout::kButtonColumnLeft
-          && layout::kButtonColumnLeft + layout::kButtonWidth <= layout::kWidth - 16);
-    CHECK(layout::kAxisBottom < layout::kMarkerTop && layout::kMarkerBottom <= layout::kPlateTop - layout::kBezelEdge);
-    CHECK(layout::kPlateTop + layout::kPlateHeight == 274 && layout::kTopHeight == 560);
+    TestRoundLayout();
     // Slate: blue-violet controls, orange markers, kept apart.
-    const SkinColours& slate = PresetInfo(GuiPreset::kSlate).colours;
+    const SkinColours& slate = PresetInfo(GuiPreset::kSpiral).colours;
     CHECK(slate.control == VSTGUI::CColor(165, 159, 242) && slate.value == VSTGUI::CColor(200, 197, 254));
     CHECK(slate.marker == VSTGUI::CColor(255, 170, 88)); // 0.2.4: the delivered tables
     // 0.2.3: PITCH tints the grains only away from 0 octaves.
@@ -2203,18 +2432,19 @@ void TestCustomSkin() {
     fs::create_directories(user);
     fs::create_directories(shared);
     const fs::path gui(MESSIER_GUI_DIR);
+    const fs::path fixtures(MESSIER_TEST_SKIN_DIR); // beta 2: images other than the built-in ones
     auto copy = [&](const char* from, const fs::path& to) {
-        CHECK(fs::copy_file(gui / from, to, fs::copy_options::overwrite_existing));
+        CHECK(fs::copy_file(fixtures / from, to, fs::copy_options::overwrite_existing));
     };
-    copy("messier_plum_knob_s@1x.png", user / "messier_gold_knob_s@1x.png");   // taken
-    copy("messier_plum_knob_s@1x.png", user / "messier_gold_knob_l@1x.png");   // 48 x 48: wrong size
-    copy("messier_plum_knob_s@1x.png", user / "messier_gold_knob_s@2x.png");   // 1x under the 2x name
-    std::ofstream(user / "messier_gold_chassis@1x.png", std::ios::binary) << "not a PNG";
-    std::ofstream(user / "messier_gold_plate@1x.png", std::ios::binary); // empty
-    copy("messier_plum_knob_l@1x.png", shared / "messier_gold_knob_l@1x.png");   // taken: the user's is wrong
-    copy("messier_silver_knob_s@1x.png", shared / "messier_gold_knob_s@1x.png"); // the user's wins
-    std::ofstream(user / "messier_gold_colours.txt", std::ios::binary) << "glass = #102030\n";
-    std::ofstream(shared / "messier_gold_colours.txt", std::ios::binary) << "glass = #FFFFFF\nmarker = #010203\n";
+    copy("messier_plum_knob_s@1x.png", user / "messier_knob_s@1x.png");   // taken
+    copy("messier_plum_knob_s@1x.png", user / "messier_knob_l@1x.png");   // 48 x 48: wrong size
+    copy("messier_plum_knob_s@1x.png", user / "messier_knob_s@2x.png");   // 1x under the 2x name
+    std::ofstream(user / "messier_chassis@1x.png", std::ios::binary) << "not a PNG";
+    std::ofstream(user / "messier_glass@1x.png", std::ios::binary); // empty
+    copy("messier_plum_knob_l@1x.png", shared / "messier_knob_l@1x.png");   // taken: the user's is wrong
+    copy("messier_silver_knob_s@1x.png", shared / "messier_knob_s@1x.png"); // the user's wins
+    std::ofstream(user / "messier_slate_colours.txt", std::ios::binary) << "glass = #102030\n";
+    std::ofstream(shared / "messier_slate_colours.txt", std::ios::binary) << "glass = #FFFFFF\nmarker = #010203\n";
     // 0.2.8, MS-R60: a PNG is checked by its IHDR before any decoding. The real thumb
     // with an IHDR length of 12, a header declaring 100000 x 100000 pixels, and the real
     // bezel padded past 32 MiB: none reaches the decoder.
@@ -2223,13 +2453,13 @@ void TestCustomSkin() {
         return std::string(std::istreambuf_iterator<char>(in), {});
     };
     {
-        std::string thumb = read_all(gui / "messier_gold_thumb@1x.png");
+        std::string thumb = read_all(gui / "messier_thumb@1x.png");
         std::uint32_t w = 0, h = 0;
-        CHECK(SkinPngSize(thumb, w, h) && w == 16 && h == 28);
+        CHECK(SkinPngSize(thumb, w, h) && w == 24 && h == 24);
         thumb[11] = 12;
         CHECK(!SkinPngSize(thumb, w, h));
-        std::ofstream(user / "messier_gold_thumb@1x.png", std::ios::binary) << thumb;
-        std::string huge = read_all(gui / "messier_gold_button@1x.png");
+        std::ofstream(user / "messier_thumb@1x.png", std::ios::binary) << thumb;
+        std::string huge = read_all(gui / "messier_button@1x.png");
         for(int at : {16, 20}) {
             huge[at] = 0;
             huge[at + 1] = 1;
@@ -2237,11 +2467,11 @@ void TestCustomSkin() {
             huge[at + 3] = static_cast<char>(0xA0); // 100000
         }
         CHECK(SkinPngSize(huge, w, h) && w == 100000 && h == 100000);
-        std::ofstream(user / "messier_gold_button@1x.png", std::ios::binary) << huge;
-        std::string padded = read_all(gui / "messier_gold_bezel@1x.png");
+        std::ofstream(user / "messier_button@1x.png", std::ios::binary) << huge;
+        std::string padded = read_all(gui / "messier_button_down@1x.png");
         padded.resize(kMaxSkinFileBytes + 1, '\0');
-        CHECK(SkinPngSize(padded, w, h) && w == 64 && h == 64);
-        std::ofstream(user / "messier_gold_bezel@1x.png", std::ios::binary) << padded;
+        CHECK(SkinPngSize(padded, w, h) && w == 48 && h == 28);
+        std::ofstream(user / "messier_button_down@1x.png", std::ios::binary) << padded;
         CHECK(!SkinPngSize("not a PNG", w, h) && !SkinPngSize(std::string(), w, h));
     }
     const IPlatformFactory& factory = getPlatformFactory();
@@ -2251,30 +2481,35 @@ void TestCustomSkin() {
                    : PNGBitmapBuffer{};
     };
     auto file_png = [&](const char* name) {
-        const std::string path = (gui / name).string();
+        const std::string path = (fixtures / name).string();
         PlatformBitmapPtr bitmap = factory.createBitmapFromPath(path.c_str());
         return bitmap ? factory.createBitmapMemoryPNGRepresentation(bitmap) : PNGBitmapBuffer{};
     };
-    auto complete = [](const Skin& skin) {
+    // Every image the bundle has (beta 2: under its new name or beta 1's), in both sizes.
+    auto complete = [&](const Skin& skin) {
         bool all = true;
         for(std::size_t i = 0; i < kSkinImageCount; ++i) {
-            const SkinImage& image = skin.Image(static_cast<SkinImageId>(i));
+            const auto id = static_cast<SkinImageId>(i);
+            const std::string legacy = LegacySkinImageFileName(id, 1);
+            if(!fs::exists(gui / SkinImageFileName(skin.Preset(), id, 1)) && (legacy.empty() || !fs::exists(gui / legacy)))
+                continue; // not delivered: drawn by code or left out
+            const SkinImage& image = skin.Image(id);
             all = all && image.x1 && image.x2 && image.x1->getWidth() == image.size.x
                   && image.x1->getHeight() == image.size.y;
         }
         return all;
     };
-    const SkinColours& gold = PresetInfo(GuiPreset::kGold).colours;
+    const SkinColours& gold = PresetInfo(GuiPreset::kCloud).colours;
     {
-    const Skin plain(GuiPreset::kGold, {none});
+    const Skin plain(GuiPreset::kCloud, {none});
     CHECK(plain.Overrides() == 0 && complete(plain) && plain.Colours().glass == gold.glass);
-    const Skin built_in(GuiPreset::kGold, {});
+    const Skin built_in(GuiPreset::kCloud, {});
     CHECK(png(plain.Image(SkinImageId::kChassis).x1) == png(built_in.Image(SkinImageId::kChassis).x1));
     const int decoded_before = SkinFilesDecoded();
-    const Skin custom(GuiPreset::kGold, {user, none, shared});
+    const Skin custom(GuiPreset::kCloud, {user, none, shared});
     CHECK(custom.Overrides() == 2 + 3 && complete(custom)); // two bitmaps, three colour values
     CHECK(SkinFilesDecoded() - decoded_before == 2); // only the two that are taken were decoded
-    for(const SkinImageId id : {SkinImageId::kThumb, SkinImageId::kButton, SkinImageId::kBezel})
+    for(const SkinImageId id : {SkinImageId::kThumb, SkinImageId::kButton, SkinImageId::kButtonDown})
         CHECK(png(custom.Image(id).x1) == png(built_in.Image(id).x1));
     // MS-R61: a colour table of more than 64 KiB is refused whole; one of exactly 64 KiB
     // is read.
@@ -2283,11 +2518,11 @@ void TestCustomSkin() {
         fs::create_directories(big);
         std::string table = "marker = #040506\n";
         table.resize(kMaxSkinTableBytes, ';');
-        std::ofstream(big / "messier_gold_colours.txt", std::ios::binary) << table;
-        const Skin exact(GuiPreset::kGold, {big});
+        std::ofstream(big / "messier_slate_colours.txt", std::ios::binary) << table;
+        const Skin exact(GuiPreset::kCloud, {big});
         CHECK(exact.Overrides() == 1 && exact.Colours().marker == CColor(4, 5, 6));
-        std::ofstream(big / "messier_gold_colours.txt", std::ios::binary) << table << ';';
-        const Skin larger(GuiPreset::kGold, {big});
+        std::ofstream(big / "messier_slate_colours.txt", std::ios::binary) << table << ';';
+        const Skin larger(GuiPreset::kCloud, {big});
         CHECK(larger.Overrides() == 0 && larger.Colours().marker == gold.marker);
     }
     // C7 (0.2.9): a PNG with a valid header but its pixel data zeroed is decoded once in
@@ -2296,12 +2531,16 @@ void TestCustomSkin() {
     {
         const fs::path cut = g_dir / "skin cut";
         fs::create_directories(cut);
-        std::string keys = read_all(gui / "messier_gold_chassis@1x.png");
-        for(std::size_t i = keys.size() / 4; i < keys.size() * 3 / 4; ++i)
+        // Beta 2: from the image data's chunk on (the delivered PNGs have one image chunk, in
+        // which zeros alone leave WIC a partial picture without an error).
+        std::string keys = read_all(gui / "messier_chassis@1x.png");
+        const std::size_t data = keys.find("IDAT");
+        CHECK(data != std::string::npos && data > 33);
+        for(std::size_t i = data; i < keys.size() * 3 / 4; ++i)
             keys[i] = 0;
-        std::ofstream(cut / "messier_gold_chassis@1x.png", std::ios::binary) << keys;
+        std::ofstream(cut / "messier_chassis@1x.png", std::ios::binary) << keys;
         const int before = SkinFilesDecoded();
-        const Skin broken(GuiPreset::kGold, {cut});
+        const Skin broken(GuiPreset::kCloud, {cut});
         CHECK(SkinFilesDecoded() - before == 1 && broken.Overrides() == 0);
         CHECK(png(broken.Image(SkinImageId::kChassis).x1) == png(built_in.Image(SkinImageId::kChassis).x1));
     }
@@ -2309,7 +2548,7 @@ void TestCustomSkin() {
     const PNGBitmapBuffer plum_small = file_png("messier_plum_knob_s@1x.png");
     CHECK(!plum_small.empty() && png(custom.Image(SkinImageId::kKnobSmall).x1) == plum_small);
     CHECK(png(custom.Image(SkinImageId::kKnobLarge).x1) == file_png("messier_plum_knob_l@1x.png"));
-    for(const SkinImageId id : {SkinImageId::kChassis, SkinImageId::kPlate})
+    for(const SkinImageId id : {SkinImageId::kChassis, SkinImageId::kKeyWhite})
         CHECK(png(custom.Image(id).x1) == png(built_in.Image(id).x1));
     CHECK(png(custom.Image(SkinImageId::kKnobSmall).x2) == png(built_in.Image(SkinImageId::kKnobSmall).x2));
     } // the skins go before VSTGUI does
@@ -2321,42 +2560,70 @@ void TestCustomSkin() {
 }
 
 void TestGuiPresets() {
-    int checked = 0;
+    // Beta 2: every bitmap the bundle has, under its new name or beta 1's, at its size; the
+    // ones the window cannot do without are there under one of them (until the delivery of
+    // docs/GRAPHICS_BRIEF_BETA2.md, beta 1's of Slate).
+    const auto size_of = [](const std::filesystem::path& file, std::uint32_t& w, std::uint32_t& h) {
+        std::ifstream in(file, std::ios::binary);
+        unsigned char head[24] = {};
+        in.read(reinterpret_cast<char*>(head), sizeof head);
+        if(in.gcount() != 24 || std::memcmp(head + 12, "IHDR", 4) != 0)
+            return false;
+        const auto be = [&](int at) {
+            return (std::uint32_t(head[at]) << 24) | (std::uint32_t(head[at + 1]) << 16)
+                   | (std::uint32_t(head[at + 2]) << 8) | std::uint32_t(head[at + 3]);
+        };
+        w = be(16);
+        h = be(20);
+        return true;
+    };
+    int found = 0;
     for(std::int32_t p = 0; p < kGuiPresetCount; ++p)
-    for(std::size_t i = 0; i < kSkinImageCount; ++i) {
-        const auto id = static_cast<SkinImageId>(i);
-        for(int scale : {1, 2}) {
-            const std::filesystem::path file =
-                std::filesystem::path(MESSIER_GUI_DIR) / SkinImageFileName(static_cast<GuiPreset>(p), id, scale);
-            std::ifstream in(file, std::ios::binary);
-            unsigned char head[24] = {};
-            in.read(reinterpret_cast<char*>(head), sizeof head);
-            CHECK(in.gcount() == 24 && std::memcmp(head + 12, "IHDR", 4) == 0);
-            const auto be = [&](int at) {
-                return (std::uint32_t(head[at]) << 24) | (std::uint32_t(head[at + 1]) << 16)
-                       | (std::uint32_t(head[at + 2]) << 8) | std::uint32_t(head[at + 3]);
-            };
-            const VSTGUI::CPoint size = SkinImageSize(id);
-            CHECK(be(16) == std::uint32_t(size.x) * scale && be(20) == std::uint32_t(size.y) * scale);
-            ++checked;
+        for(std::size_t i = 0; i < kSkinImageCount; ++i) {
+            const auto id = static_cast<SkinImageId>(i);
+            bool any = false;
+            for(const bool legacy : {false, true}) {
+                bool both = true;
+                for(int scale : {1, 2}) {
+                    const std::string name = legacy ? LegacySkinImageFileName(id, scale)
+                                                    : SkinImageFileName(static_cast<GuiPreset>(p), id, scale);
+                    const std::filesystem::path file = std::filesystem::path(MESSIER_GUI_DIR) / name;
+                    std::uint32_t w = 0, h = 0;
+                    if(name.empty() || !std::filesystem::exists(file)) {
+                        both = false;
+                        continue;
+                    }
+                    const VSTGUI::CPoint size = legacy ? LegacySkinImageSize(id) : SkinImageSize(id);
+                    CHECK(size_of(file, w, h) && w == std::uint32_t(size.x) * scale && h == std::uint32_t(size.y) * scale);
+                }
+                any = any || both;
+            }
+            const bool needed = id == SkinImageId::kChassis || id == SkinImageId::kKnobLarge || id == SkinImageId::kKnobSmall
+                                || id == SkinImageId::kThumb || id == SkinImageId::kButton
+                                || id == SkinImageId::kButtonDown || id == SkinImageId::kKeyWhite
+                                || id == SkinImageId::kKeyBlack;
+            CHECK(!needed || any);
+            found += any ? 1 : 0;
         }
-    }
-    CHECK(checked == 96); // 0.2.4: all four presets, 12 images each (4 shared), 1x and 2x
-    CHECK(SkinImageFileName(GuiPreset::kGold, SkinImageId::kChassis, 2) == "messier_gold_chassis@2x.png");
-    CHECK(SkinImageFileName(GuiPreset::kPlum, SkinImageId::kNebulaA, 1) == "messier_nebula_a@1x.png");
+    CHECK(found >= 4 * 8);
+    CHECK(SkinImageFileName(GuiPreset::kCloud, SkinImageId::kChassis, 2) == "messier_chassis@2x.png");
+    CHECK(SkinImageFileName(GuiPreset::kRing, SkinImageId::kNebulaArms, 1) == "messier_nebula_ring_arms@1x.png");
+    CHECK(LegacySkinImageFileName(SkinImageId::kThumb, 2) == "messier_slate_thumb@2x.png"
+          && LegacySkinImageSize(SkinImageId::kThumb) == VSTGUI::CPoint(16, 28)
+          && LegacySkinImageFileName(SkinImageId::kRing, 1).empty());
     // 0.2.6: a colour table written as text reads back the same; unknown lines and
     // comments are left alone; a skin folder only in a skin test build.
     for(std::int32_t p = 0; p < kGuiPresetCount; ++p) {
         const SkinColours& colours = PresetInfo(static_cast<GuiPreset>(p)).colours;
-        SkinColours read = PresetInfo(GuiPreset::kSlate).colours;
+        SkinColours read = PresetInfo(GuiPreset::kSpiral).colours;
         read.negative = !colours.negative;
-        CHECK(ApplyColourTable(ColourTableText(colours), read) == 32);
+        CHECK(ApplyColourTable(ColourTableText(colours), read) == 33); // beta 2: start_fill
         CHECK(ColourTableText(read) == ColourTableText(colours) && read.negative == colours.negative);
     }
     {
-        SkinColours some = PresetInfo(GuiPreset::kGold).colours;
+        SkinColours some = PresetInfo(GuiPreset::kCloud).colours;
         CHECK(ApplyColourTable("; a comment\nglass = #102030 ; dark\nnothing = #FFFFFF\nmarker = red\n", some) == 1);
-        CHECK(some.glass == VSTGUI::CColor(16, 32, 48) && some.marker == PresetInfo(GuiPreset::kGold).colours.marker);
+        CHECK(some.glass == VSTGUI::CColor(16, 32, 48) && some.marker == PresetInfo(GuiPreset::kCloud).colours.marker);
         // C9 (0.2.9): a byte-order mark before the first line.
         CHECK(ApplyColourTable("\xEF\xBB\xBFmarker = #010203\n", some) == 1 && some.marker == VSTGUI::CColor(1, 2, 3));
     }
@@ -2366,10 +2633,11 @@ void TestGuiPresets() {
           && UserSkinFolder() != BundleSkinFolder());
     {
         const std::string guide = SkinFolderGuide();
-        CHECK(guide.find("messier_<preset>_chassis@1x.png") != std::string::npos
-              && guide.find("880 x 724") != std::string::npos && guide.find("1760 x 1448") != std::string::npos
-              && guide.find("messier_keys_black@1x.png") != std::string::npos);
-        std::istringstream table(ColourTableText(PresetInfo(GuiPreset::kSlate).colours));
+        // Beta 2: the new names and sizes, the nebula layers per variant.
+        CHECK(guide.find("messier_chassis@1x.png") != std::string::npos && guide.find("880 x 804") != std::string::npos
+              && guide.find("1760 x 1608") != std::string::npos && guide.find("messier_keys_black@1x.png") != std::string::npos
+              && guide.find("messier_nebula_<nebula>_arms@1x.png") != std::string::npos);
+        std::istringstream table(ColourTableText(PresetInfo(GuiPreset::kSpiral).colours));
         std::string line;
         while(std::getline(table, line))
             CHECK(guide.find("  " + line.substr(0, line.find(' ')) + "\n") != std::string::npos
@@ -2377,7 +2645,7 @@ void TestGuiPresets() {
     }
     for(std::int32_t p = 0; p < kGuiPresetCount; ++p) // 0.2.4: all delivered
         CHECK(PresetInfo(static_cast<GuiPreset>(p)).delivered && ShownPreset(static_cast<GuiPreset>(p)) == static_cast<GuiPreset>(p));
-    CHECK(ShownPreset(static_cast<GuiPreset>(9)) == GuiPreset::kSlate);
+    CHECK(ShownPreset(static_cast<GuiPreset>(9)) == GuiPreset::kSpiral);
     // The seconds axis: labels at least 64 units apart on the 840 of the plate.
     CHECK(layout::AxisStep(8.0, 840) == 1 && layout::AxisStep(0.5, 840) == 0.05 && layout::AxisStep(600, 840) == 60);
     CHECK(layout::AxisLabel(1.5, 0.5) == "1.5 s" && layout::AxisLabel(0.25, 0.25) == "0.25 s"
@@ -2387,8 +2655,8 @@ void TestGuiPresets() {
     IPtr<Controller> controller = owned(new Controller());
     CHECK(controller->initialize(app) == kResultOk);
     auto load = [&](std::int32_t version, double zoom, std::int8_t keys, std::int32_t transpose, const std::int32_t* preset,
-                    std::int8_t details = -1, const std::array<std::int32_t, kGuiPresetCount>* accents = nullptr,
-                    std::int32_t tail = -1) {
+                    std::int8_t details = -1, const std::vector<std::int32_t>* accents = nullptr,
+                    std::int32_t tail = -1, std::int8_t galaxy = -1) {
         MemoryStream stream;
         int32 written = 0;
         stream.write(&version, 4, &written);
@@ -2399,62 +2667,112 @@ void TestGuiPresets() {
             stream.write(const_cast<std::int32_t*>(preset), 4, &written);
         if(details >= 0)
             stream.write(&details, 1, &written);
-        if(accents)
+        if(accents) {
+            if(version >= 9) { // round 3: their count first
+                std::int32_t count = static_cast<std::int32_t>(accents->size());
+                stream.write(&count, 4, &written);
+            }
             for(std::int32_t hue : *accents)
                 stream.write(&hue, 4, &written);
-        if(tail >= 0) // version 5: trail time; versions 6 and 7: WAVE setting
+        }
+        if(tail >= 0) // version 5: trail time; versions 6 to 8: WAVE setting
             stream.write(&tail, 4, &written);
+        if(galaxy >= 0) // version 8 (beta 2): GALAXY or WAVE
+            stream.write(&galaxy, 1, &written);
         stream.seek(0, IBStream::kIBSeekSet, nullptr);
         return controller->setState(&stream);
     };
-    const std::int32_t plum = 2, unknown = 7;
+    const std::int32_t plum = 2, unknown = kGuiPresetCount;
     CHECK(load(2, 1.25, 0, 12, &plum) == kResultOk);
-    CHECK(controller->WindowSettings().preset == GuiPreset::kPlum && controller->WindowSettings().zoom == 1.25);
-    CHECK(controller->WindowSettings().wave_percent == kPresetWave && controller->WindowSettings().WavePercent() == 200);
+    CHECK(controller->WindowSettings().preset == GuiPreset::kRing && controller->WindowSettings().zoom == 1.25);
+    CHECK(controller->WindowSettings().wave_percent == kPresetWave && controller->WindowSettings().WavePercent() == 100);
     MemoryStream own;
     CHECK(controller->getState(&own) == kResultOk);
     int64 length = 0;
     own.seek(0, IBStream::kIBSeekEnd, &length);
-    CHECK(length == 42); // version 7 keeps the version 6 layout
+    CHECK(length == 43 + 4 + 4 * (kGuiPresetCount - kLegacyGuiPresetCount)); // version 9: the accents' count
+    CHECK(controller->WindowSettings().galaxy); // a song before beta 2: GALAXY
     CHECK(!controller->WindowSettings().details); // a song of 0.2.3: DETAILS closed
     CHECK(load(3, 1.0, 1, 0, &plum, 1) == kResultOk && controller->WindowSettings().details);
     CHECK(load(1, 1.0, 1, -12, nullptr) == kResultOk); // a song of 0.1.x
-    CHECK(controller->WindowSettings().preset == GuiPreset::kSlate && controller->WindowSettings().keyboard);
+    CHECK(controller->WindowSettings().preset == GuiPreset::kSpiral && controller->WindowSettings().keyboard);
     CHECK(controller->WindowSettings().WavePercent() == 100);
     CHECK(load(2, 1.0, 1, 0, &unknown) == kResultFalse);
     CHECK(load(2, 1.0, 1, 0, nullptr) == kResultFalse); // version 2 without its preset
     CHECK(load(3, 1.0, 1, 0, &plum) == kResultFalse); // version 3 without DETAILS
     CHECK(load(4, 1.0, 1, 0, &plum, 0) == kResultFalse);
-    CHECK(controller->WindowSettings().preset == GuiPreset::kSlate);
-    const std::array<std::int32_t, kGuiPresetCount> accents{0, kPresetAccent, 120, kAccentMaxHue};
+    CHECK(controller->WindowSettings().preset == GuiPreset::kSpiral);
+    // Up to version 8: the hues of the four presets of then; the newer ones keep their own.
+    const std::vector<std::int32_t> accents{0, kPresetAccent, 120, kAccentMaxHue};
+    const auto has = [&](const std::vector<std::int32_t>& hues) {
+        const auto& kept = controller->WindowSettings().accents;
+        for(std::size_t i = 0; i < kept.size(); ++i)
+            if(kept[i] != (i < hues.size() ? hues[i] : kPresetAccent))
+                return false;
+        return true;
+    };
     CHECK(load(4, 1.0, 1, 0, &plum, 0, &accents) == kResultOk);
-    CHECK(controller->WindowSettings().accents == accents && controller->WindowSettings().WavePercent() == 200);
+    CHECK(has(accents) && controller->WindowSettings().WavePercent() == 100);
     auto invalid = accents;
     invalid.back() = kAccentMaxHue + 1;
     CHECK(load(4, 1.0, 1, 0, &plum, 1, &invalid) == kResultFalse);
-    CHECK(controller->WindowSettings().accents == accents && !controller->WindowSettings().details);
+    CHECK(has(accents) && !controller->WindowSettings().details);
     // Version 5 (0.2.5): its trail is read and checked, no longer used (0.2.6: fixed).
     CHECK(load(5, 1.0, 1, 0, &plum, 1, &accents) == kResultFalse);
     CHECK(load(5, 1.0, 1, 0, &plum, 1, &accents, kTrailMaxMs + 1) == kResultFalse);
     CHECK(load(5, 1.0, 1, 0, &plum, 1, &accents, 720) == kResultOk);
-    CHECK(controller->WindowSettings().details && controller->WindowSettings().WavePercent() == 200);
+    CHECK(controller->WindowSettings().details && controller->WindowSettings().WavePercent() == 100);
     // Version 6 (0.2.6): WAVE from 25 to 200 %.
     CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents) == kResultFalse);
     CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents, kWaveMaxPercent + 1) == kResultFalse);
     CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents, kWaveMinPercent - 1) == kResultFalse);
     CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents, kPresetWave) == kResultFalse);
+    // Version 8 (beta 2): GALAXY (1) or WAVE (0), nothing else, and nothing missing.
     CHECK(load(8, 1.0, 1, 0, &plum, 1, &accents, kWaveDefaultPercent) == kResultFalse);
+    CHECK(load(8, 1.0, 1, 0, &plum, 1, &accents, kPresetWave, 2) == kResultFalse);
+    CHECK(load(8, 1.0, 1, 0, &plum, 1, &accents, kPresetWave, 0) == kResultOk);
+    CHECK(!controller->WindowSettings().galaxy);
+    {
+        MemoryStream wave;
+        CHECK(controller->getState(&wave) == kResultOk);
+        CHECK(load(7, 1.0, 1, 0, &plum, 1, &accents, kPresetWave) == kResultOk
+              && controller->WindowSettings().galaxy);
+        wave.seek(0, IBStream::kIBSeekSet, nullptr);
+        CHECK(controller->setState(&wave) == kResultOk && !controller->WindowSettings().galaxy);
+    }
+    // Version 9 (round 3): the accents' count first; hues of presets unknown here are read
+    // and dropped, a count out of range or a missing hue refuses the state.
+    {
+        std::vector<std::int32_t> all(kGuiPresetCount, kPresetAccent);
+        all[kGuiPresetCount - 1] = 240;
+        CHECK(load(9, 1.0, 1, 0, &plum, 1, &all, kPresetWave, 1) == kResultOk && has(all));
+        std::vector<std::int32_t> more = all;
+        more.push_back(17); // a later version's preset
+        CHECK(load(9, 1.0, 1, 0, &plum, 1, &more, kPresetWave, 0) == kResultOk && has(all)
+              && !controller->WindowSettings().galaxy);
+        const std::vector<std::int32_t> two{10, 20};
+        CHECK(load(9, 1.0, 1, 0, &plum, 1, &two, kPresetWave, 1) == kResultOk && has(two));
+        std::vector<std::int32_t> too_many(kMaxStoredAccents + 1, kPresetAccent);
+        CHECK(load(9, 1.0, 1, 0, &plum, 1, &too_many, kPresetWave, 1) == kResultFalse);
+        const std::int32_t galaxy = static_cast<std::int32_t>(GuiPreset::kVioletGalaxy);
+        CHECK(load(9, 1.0, 1, 0, &galaxy, 1, &all, kPresetWave, 1) == kResultOk
+              && controller->WindowSettings().preset == GuiPreset::kVioletGalaxy);
+        // A preset of a later version is refused, as before.
+        const std::int32_t later = kGuiPresetCount;
+        CHECK(load(9, 1.0, 1, 0, &later, 1, &all, kPresetWave, 1) == kResultFalse);
+    }
+    CHECK(load(10, 1.0, 1, 0, &plum, 1, &accents, kPresetWave, 1) == kResultFalse);
     // MS-R62: a zoom out of range refuses the whole state, as every other field does.
     CHECK(load(6, 2.5, 1, 0, &plum, 1, &accents, 100) == kResultFalse);
     CHECK(load(6, 0.25, 1, 0, &plum, 1, &accents, 100) == kResultFalse);
-    CHECK(controller->WindowSettings().WavePercent() == 200 && controller->WindowSettings().zoom == 1.0);
+    CHECK(controller->WindowSettings().WavePercent() == 100 && controller->WindowSettings().zoom == 1.0);
     CHECK(load(6, 2.0, 1, 0, &plum, 1, &accents, 100) == kResultOk && controller->WindowSettings().zoom == 2.0);
     CHECK(load(6, 0.5, 1, 0, &plum, 1, &accents, 100) == kResultOk && controller->WindowSettings().zoom == 0.5);
     CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents, 100) == kResultOk);
     CHECK(controller->WindowSettings().WavePercent() == 100);
     own.seek(0, IBStream::kIBSeekSet, nullptr);
     CHECK(controller->setState(&own) == kResultOk);
-    CHECK(controller->WindowSettings().wave_percent == kPresetWave && controller->WindowSettings().WavePercent() == 200);
+    CHECK(controller->WindowSettings().wave_percent == kPresetWave && controller->WindowSettings().WavePercent() == 100);
     CHECK(load(6, 1.0, 1, 0, &plum, 1, &accents, 160) == kResultOk);
     MemoryStream with_wave;
     CHECK(controller->getState(&with_wave) == kResultOk);
@@ -2462,19 +2780,19 @@ void TestGuiPresets() {
     CHECK(controller->WindowSettings().Accent() == kPresetAccent);
     CHECK(controller->WindowSettings().wave_percent == kPresetWave);
     with_wave.seek(0, IBStream::kIBSeekSet, nullptr);
-    CHECK(controller->setState(&with_wave) == kResultOk && controller->WindowSettings().accents == accents);
+    CHECK(controller->setState(&with_wave) == kResultOk && has(accents));
     CHECK(controller->WindowSettings().wave_percent == 160);
     {
         IPtr<IPlugView> view = owned(controller->createView(ViewType::kEditor));
         auto* editor = dynamic_cast<Editor*>(view.get());
         CHECK(editor && editor->Settings().WavePercent() == 160);
-        editor->SetGuiPreset(GuiPreset::kGold);
+        editor->SetGuiPreset(GuiPreset::kCloud);
         CHECK(editor->Settings().WavePercent() == 160);
         editor->SetWave(kPresetWave);
         CHECK(editor->Settings().WavePercent() == 100);
-        editor->SetGuiPreset(GuiPreset::kPlum);
-        CHECK(editor->Settings().WavePercent() == 200);
-        editor->SetGuiPreset(GuiPreset::kSlate);
+        editor->SetGuiPreset(GuiPreset::kRing); // beta 2: no preset has its own WAVE any more
+        CHECK(editor->Settings().WavePercent() == 100);
+        editor->SetGuiPreset(GuiPreset::kSpiral);
         CHECK(editor->Settings().WavePercent() == 100);
     }
     // F3 of the Fable audit (0.2.9): a change in one window reaches the other window of
@@ -2487,14 +2805,14 @@ void TestGuiPresets() {
         CHECK(one && two);
         controller->editorAttached(one);
         controller->editorAttached(two);
-        one->SetGuiPreset(GuiPreset::kGold);
-        CHECK(controller->WindowSettings().preset == GuiPreset::kGold && two->Settings().preset == GuiPreset::kGold);
+        one->SetGuiPreset(GuiPreset::kCloud);
+        CHECK(controller->WindowSettings().preset == GuiPreset::kCloud && two->Settings().preset == GuiPreset::kCloud);
         controller->editorRemoved(one);
         controller->editorRemoved(two);
         CHECK(load(6, 1.5, 0, 0, &plum, 1, &accents, 100) == kResultOk);
-        CHECK(two->Settings().preset == GuiPreset::kGold); // closed: not told
+        CHECK(two->Settings().preset == GuiPreset::kCloud); // closed: not told
         ViewRect size;
-        CHECK(two->getSize(&size) == kResultOk && two->Settings().preset == GuiPreset::kPlum
+        CHECK(two->getSize(&size) == kResultOk && two->Settings().preset == GuiPreset::kRing
               && two->Settings().zoom == 1.5 && !two->Settings().keyboard);
         // C3 (0.2.9): the menus' controls (tag -1) do not reach the host as an edit.
         CountingHandler handler;
@@ -3608,6 +3926,8 @@ int main() {
     TestKeyboardLatch();
     TestWindowSymbol();
     TestMapEdits();
+    TestLens();
+    TestStarfield();
     TestStopAndBypass();
     TestSwitchesOnTheSample();
     TestScreenAndHostKeys();
@@ -3616,6 +3936,7 @@ int main() {
     TestResizeGrip();
     TestGuiPresets();
     TestCustomSkin();
+    TestHueScale(); // a Skin needs VSTGUI set up, as TestGuiPresets does
     TestWindow021();
     TestWindow022();
     TestState();

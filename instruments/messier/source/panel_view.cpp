@@ -5,6 +5,7 @@
 #include "version.h"
 
 #include "vstgui/lib/cdrawcontext.h"
+#include "vstgui/lib/cgraphicspath.h"
 
 #include <string>
 #include <utility>
@@ -58,16 +59,22 @@ void PanelView::DrawUnchecked(CDrawContext* context) {
         context->drawRect(all, kDrawFilled);
     }
 
-    // Engraved rules (0.2.4): under the header, above the knobs, between the three groups,
-    // on both sides of DETAILS, above the keyboard.
+    // Beta 2: screws in three corners, if delivered (the fourth holds the resize grip).
+    if(const SkinImage& screw = skin.Image(SkinImageId::kScrew)) {
+        for(const CPoint at : {CPoint(all.left + 2, all.top + 2), CPoint(all.right - 16, all.top + 2),
+                               CPoint(all.left + 2, all.bottom - 16)})
+            DrawSkinImage(context, screw, CRect(at.x, at.y, at.x + 14, at.y + 14));
+    }
+
+    // Engraved rules (beta 2: fine ones only): under the header, above the info line, above
+    // DETAILS while open, above the keyboard.
     const CCoord x0 = all.left + L::kMargin, x1 = all.right - L::kMargin;
     DrawRule(context, c, CPoint(x0, all.top + L::kHeaderRule), CPoint(x1, all.top + L::kHeaderRule));
-    DrawRule(context, c, CPoint(x0, all.top + L::kRuleAboveKnobs), CPoint(x1, all.top + L::kRuleAboveKnobs));
-    for(const CCoord x : {L::kGroupRule1, L::kGroupRule2})
-        DrawRule(context, c, CPoint(all.left + x, all.top + L::kNameTop), CPoint(all.left + x, all.top + L::kValueTop + 16));
-    const CCoord bar = all.top + L::kDetailsBarTop + L::kDetailsBarHeight / 2;
-    DrawRule(context, c, CPoint(x0, bar), CPoint(all.left + L::kDetailsLeft - 8, bar));
-    DrawRule(context, c, CPoint(all.left + L::kDetailsRight + 8, bar), CPoint(x1 - 160, bar));
+    const L::BottomRows rows = L::Bottom();
+    DrawRule(context, c, CPoint(x0, all.top + L::kInfoTop - 1), CPoint(x1, all.top + L::kInfoTop - 1));
+    const CCoord bar = all.top + L::kInfoTop + L::kInfoHeight / 2;
+    if(details_)
+        DrawRule(context, c, CPoint(x0, all.top + L::kTopHeight), CPoint(x1, all.top + L::kTopHeight));
     if(keyboard_) {
         const CCoord y = all.top + L::TopHeight(details_) + L::kKeyboardRule;
         DrawRule(context, c, CPoint(x0, y), CPoint(x1, y));
@@ -78,7 +85,8 @@ void PanelView::DrawUnchecked(CDrawContext* context) {
     std::string version = stringCompanyName " " DISPLAY_VERSION_STR;
     if(skin.Overrides() > 0)
         version = "CUSTOM SKIN " + std::to_string(skin.Overrides());
-    DrawTracked(context, version, CRect(x1 - 152, bar - 8, x1, bar + 8), kRightText, 1.4, skin.Caps(10.5), c.dim, &c);
+    DrawTracked(context, version, CRect(all.left + rows.version_left, bar - 8, x1, bar + 8), kRightText, 1.4,
+                skin.Caps(10.5), c.dim, &c);
 
     // The header: the brand and an accent stroke before LOAD. Only when the header is
     // redrawn (the texts cost more than the plate's frame).
@@ -109,6 +117,21 @@ void PanelView::DrawUnchecked(CDrawContext* context) {
                 break;
             case LabelKind::kSmallKnob:
                 DrawTracked(context, label.text, box, kCenterText, 1.5, skin.Sans(12), c.text, &c);
+                break;
+            case LabelKind::kScaleLow:
+            case LabelKind::kScaleHigh:
+                DrawTracked(context, label.text, box, label.kind == LabelKind::kScaleLow ? kRightText : kLeftText, 0.2,
+                            skin.Sans(9.5), WithAlpha(c.dim, 0.85));
+                break;
+            case LabelKind::kValueBox:
+                if(auto path = owned(context->createGraphicsPath())) {
+                    path->addRoundRect(CRect(box).inset(0.5, 0.5), 4);
+                    context->setFillColor(CColor(0, 0, 0, 70));
+                    context->drawGraphicsPath(path, CDrawContext::kPathFilled);
+                    context->setLineWidth(1);
+                    context->setFrameColor(c.rule_light);
+                    context->drawGraphicsPath(path, CDrawContext::kPathStroked);
+                }
                 break;
         }
     }

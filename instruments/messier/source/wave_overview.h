@@ -23,6 +23,8 @@ struct WaveOverview {
     // Column c covers the frames [c * frames / columns, (c + 1) * frames / columns).
     std::int16_t low[kMaxColumns] = {};
     std::int16_t high[kMaxColumns] = {};
+    // Round 4 (WAVE's layers): the column's root mean square over all channels, 0 to 32768.
+    std::uint16_t rms[kMaxColumns] = {};
 };
 
 // The overview of `file`, or null for an empty file or when there is no memory for

@@ -2,6 +2,7 @@
 // source/widgets.cpp; drawn since 0.2.0 with the GUI preset's bitmaps (gui_skin.h).
 #include "widgets.h"
 
+#include "gui_layout.h"
 #include "guard.h"
 
 #include "view_layout.h"
@@ -17,6 +18,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <string>
 #include <utility>
 
@@ -120,6 +122,31 @@ void KeyboardView::DrawUnchecked(CDrawContext* context) {
     const SkinImage* white = skin_ ? &skin_->Image(SkinImageId::kKeyWhite) : nullptr;
     const SkinImage* black = skin_ ? &skin_->Image(SkinImageId::kKeyBlack) : nullptr;
     const CColor pressed = skin_ ? WithAlpha(skin_->Colours().control, 0.85) : kPressed;
+    // Beta 2 (the user's touch-pad keyboard), round 3 one octave: with the delivered pads,
+    // every key a flat pad (view_layout.h): the black notes above, centred between their
+    // white keys, the white notes below; a struck key lights its pad in the accent colour.
+    const SkinImage* pad = skin_ ? &skin_->Image(SkinImageId::kPad) : nullptr;
+    const SkinImage* pad_lit = skin_ ? &skin_->Image(SkinImageId::kPadLit) : nullptr;
+    if(pad && *pad) {
+        for(int note = kKeyboardLowNote; note <= kKeyboardHighNote; ++note) {
+            CRect box = ToCRect(PadRectFor(note, width, height), area);
+            const bool down = note + transpose_ == pressed_;
+            box.inset(2.0, 2.0);
+            if(box.getWidth() < 8 || box.getHeight() < 8)
+                continue;
+            DrawNinePart(context, down && pad_lit && *pad_lit ? *pad_lit : *pad, box, 10);
+            if(down)
+                FillRoundRect(context, CRect(box).inset(2.0, 2.0), 4.0, WithAlpha(skin_->Colours().control, 0.45));
+            if(note % 12 == 0) { // name the Cs
+                context->setFont(skin_->Mono(9));
+                context->setFontColor(WithAlpha(skin_->Colours().dim, 0.8));
+                const std::string name = "C" + std::to_string((note + transpose_) / 12 - 1);
+                context->drawString(name.c_str(), box, kCenterText); // round 5: in the pad's middle
+            }
+        }
+        setDirty(false);
+        return;
+    }
 
     for(int note = kKeyboardLowNote; note <= kKeyboardHighNote; ++note) {
         if(IsBlackKey(note))
@@ -165,8 +192,10 @@ void KeyboardView::DrawUnchecked(CDrawContext* context) {
 
 int KeyboardView::NoteAtPoint(const CPoint& where) const {
     const CRect area = getViewSize();
-    const int note = NoteAt(where.x - area.left, where.y - area.top, area.getWidth(),
-                            area.getHeight());
+    // Round 3: the pads where they are drawn.
+    const bool pads = skin_ && skin_->Image(SkinImageId::kPad);
+    const int note = (pads ? PadNoteAt : NoteAt)(where.x - area.left, where.y - area.top, area.getWidth(),
+                                                 area.getHeight());
     return note < 0 ? -1 : note + transpose_;
 }
 
@@ -385,23 +414,82 @@ void ToggleButton::DrawUnchecked(CDrawContext* context) {
         setDirty(false);
         return;
     }
-    const SkinImage& face = skin_->Image(down ? SkinImageId::kButtonDown : SkinImageId::kButton);
+    // Beta 2 (the user's wish): one face for both states, no change of light; a switch that
+    // is on is a little brighter and shows its text in the controls' light colour.
+    const SkinImage& face = skin_->Image(SkinImageId::kButton);
     if(face) {
         DrawNinePart(context, face, area, 8);
     } else {
-        FillRoundRect(context, area, 3.0, down ? c.stain : c.metal);
+        FillRoundRect(context, area, 3.0, c.metal);
         StrokeRoundRect(context, area, 3.0, c.rule_dark);
     }
-    // 0.2.2: a switch that is on shows its text in the controls' light colour on the pressed
-    // face; the octave keys carry that colour always. Disabled: dimmed.
+    if(down)
+        FillRoundRect(context, CRect(area).inset(1.5, 1.5), 3.0, CColor(255, 255, 255, 14));
+    // 0.2.2: the octave keys carry the light colour always. Disabled: dimmed.
     const CColor lit = down || value_ink_ ? c.value : c.button_text;
     const CColor ink = !getMouseEnabled() ? WithAlpha(value_ink_ ? c.value : c.dim, value_ink_ ? 0.32 : 0.6) : lit;
+    const CFontRef font = skin_->Sans(12);
     if(icon_ == Icon::kNone) {
-        CRect text = area;
-        if(down)
-            text.offset(0, 1); // pressed in
-        // Sans since 0.2.1, regular and spaced since 0.2.2.
-        DrawTracked(context, title_, text, kCenterText, 1.8, skin_->Sans(12), ink);
+        DrawTracked(context, title_, area, kCenterText, 1.8, font, ink);
+        setDirty(false);
+        return;
+    }
+    if(icon_ == Icon::kKeyboard || icon_ == Icon::kFreeze || icon_ == Icon::kReset) {
+        // Beta 2 (the user's wish): a symbol before the text, both centred together.
+        const CCoord word = TrackedWidth(context, title_, 1.2, font);
+        const CCoord symbol = icon_ == Icon::kKeyboard ? kKeyIconWidth : 14;
+        const CCoord gap = icon_ == Icon::kKeyboard ? 5 : 6;
+        const CCoord left = std::round(area.left + (area.getWidth() - word - symbol - gap) / 2);
+        const CCoord mid = std::round(area.top + area.getHeight() / 2);
+        context->setFrameColor(ink);
+        context->setFillColor(ink);
+        context->setLineStyle(CLineStyle(CLineStyle::kLineCapRound, CLineStyle::kLineJoinRound));
+        if(icon_ == Icon::kKeyboard) {
+            // Piano keys (round 2, the user's test; round 5: F to B): white keys of 3 px with
+            // a gap of 1 px, in the ink; the black keys F#, G#, A#, 3 px wide over the gaps
+            // and 8 of the 13 px high, dark. Whole pixels at 1x.
+            const CCoord top = mid - 6;
+            for(const KeyIconRect& key : KeyIconRects()) {
+                context->setFillColor(key.black ? CColor(14, 15, 18, ink.alpha) : ink);
+                context->drawRect(CRect(left + key.left, top + key.top, left + key.right, top + key.bottom), kDrawFilled);
+            }
+        } else if(icon_ == Icon::kFreeze) {
+            // A snowflake: three bars, each end with two small branches.
+            const CPoint c0(left + 7, mid);
+            context->setLineWidth(1.2);
+            for(int k = 0; k < 3; ++k) {
+                const double a = kPi / 2 + k * kPi / 3;
+                const CCoord ax = std::cos(a) * 6.5, ay = std::sin(a) * 6.5;
+                context->drawLine(CPoint(c0.x - ax, c0.y - ay), CPoint(c0.x + ax, c0.y + ay));
+                for(const double end : {-1.0, 1.0}) {
+                    const CPoint tip(c0.x + end * ax * 0.6, c0.y + end * ay * 0.6);
+                    for(const double turn : {-0.7, 0.7}) {
+                        const double b = a + (end < 0 ? kPi : 0.0) + turn;
+                        context->drawLine(tip, CPoint(tip.x + std::cos(b) * 2.4, tip.y + std::sin(b) * 2.4));
+                    }
+                }
+            }
+        } else {
+            // Two circular arrows.
+            const CPoint c0(left + 7, mid);
+            context->setLineWidth(1.3);
+            for(const double start : {200.0, 20.0}) {
+                if(auto path = owned(context->createGraphicsPath())) {
+                    path->addArc(CRect(c0.x - 5.5, c0.y - 5.5, c0.x + 5.5, c0.y + 5.5), start, start + 130.0, true);
+                    context->drawGraphicsPath(path, CDrawContext::kPathStroked);
+                }
+                const double end = (start + 130.0) * kPi / 180.0;
+                const CPoint tip(c0.x + std::cos(end) * 5.5, c0.y + std::sin(end) * 5.5);
+                const double along = end + kPi / 2; // the arrow points along the circle
+                for(const double side : {-0.55, 0.55}) {
+                    const double b = along + kPi + side;
+                    context->drawLine(tip, CPoint(tip.x + std::cos(b) * 3.2, tip.y + std::sin(b) * 3.2));
+                }
+            }
+        }
+        context->setLineStyle(kLineSolid);
+        DrawTracked(context, title_, CRect(left + symbol + gap, area.top, left + symbol + gap + 2 + word, area.bottom),
+                    kLeftText, 1.2, font, ink);
         setDirty(false);
         return;
     }
@@ -418,13 +506,22 @@ void ToggleButton::DrawUnchecked(CDrawContext* context) {
         context->drawLine(CPoint(o.x + 14, o.y + 2), CPoint(o.x + 14, o.y + 6));
         context->drawLine(CPoint(o.x + 14, o.y + 2), CPoint(o.x + 10, o.y + 6));
     } else {
-        // A painter's palette: a round board and three dabs of colour.
-        context->drawEllipse(CRect(o.x + 2, o.y + 2, o.x + 14, o.y + 14), kDrawStroked);
-        for(const CPoint dab : {CPoint(5, 7), CPoint(7.5, 4.8), CPoint(10.6, 5.6)})
-            context->drawEllipse(CRect(o.x + dab.x - 0.9, o.y + dab.y - 0.9, o.x + dab.x + 0.9, o.y + dab.y + 0.9),
-                                 kDrawFilled);
-        context->setFillColor(skin_->Colours().metal);
-        context->drawEllipse(CRect(o.x + 8.5, o.y + 9, o.x + 12, o.y + 12.5), kDrawFilled); // the thumb hole
+        // Beta 2, the nebula menu: a small spiral of two arms.
+        for(const double start : {0.0, kPi}) {
+            auto path = owned(context->createGraphicsPath());
+            if(!path)
+                continue;
+            for(int i = 0; i <= 24; ++i) {
+                const double theta = i * 0.2;
+                const double radius = 1.2 + 1.35 * theta;
+                const CPoint p(o.x + 8 + std::cos(theta + start) * radius, o.y + 8 + std::sin(theta + start) * radius);
+                if(i == 0)
+                    path->beginSubpath(p);
+                else
+                    path->addLine(p);
+            }
+            context->drawGraphicsPath(path, CDrawContext::kPathStroked);
+        }
     }
     setDirty(false);
 }
@@ -480,8 +577,9 @@ void MetalKnob::DrawUnchecked(CDrawContext* context) {
     const double level = std::clamp(static_cast<double>(getValueNormalized()), 0.0, 1.0);
     const double at = first + level * (last - first);
 
-    // The scale.
-    const int ticks = small_ ? 10 : 20;
+    // The scale: beta 2 only on the small knobs (the user's DAW test; on the large ones it
+    // reached into the glass at BLEND).
+    const int ticks = small_ ? 10 : -1;
     for(int i = 0; i <= ticks; ++i) {
         const double a = first + (last - first) * i / ticks;
         const bool major = i % 5 == 0;
@@ -612,6 +710,326 @@ void ResizeGrip::onMouseUpEvent(MouseUpEvent& event) {
 void ResizeGrip::onMouseCancelEvent(MouseCancelEvent& event) {
     Let();
     event.consumed = true;
+}
+
+StartBar::StartBar(const CRect& size, double track_left, double track_right)
+: CView(size), track_left_(track_left), track_right_(track_right) {
+    setMouseEnabled(true);
+}
+
+void StartBar::SetSkin(std::shared_ptr<const Skin> skin) {
+    skin_ = std::move(skin);
+    invalid();
+}
+
+void StartBar::SetStart(double start) noexcept {
+    start = std::clamp(start, 0.0, 1.0);
+    if(start == start_)
+        return;
+    start_ = start;
+    Guarded([&] { invalid(); });
+}
+
+void StartBar::SetSize(double size) noexcept {
+    size = std::isfinite(size) ? std::clamp(size, 0.0, 1.0) : 1.0;
+    if(size == size_)
+        return;
+    size_ = size;
+    Guarded([&] { invalid(); });
+}
+
+void StartBar::SetFile(std::uint32_t frames, double rate) noexcept {
+    if(frames == frames_ && rate == rate_)
+        return;
+    frames_ = frames;
+    rate_ = std::isfinite(rate) && rate > 0 ? rate : 0.0;
+    Guarded([&] { invalid(); });
+}
+
+double StartBar::TrackLeft() const {
+    return track_left_;
+}
+
+double StartBar::TrackRight() const {
+    return std::max(TrackLeft() + 1, std::min(track_right_, getViewSize().getWidth() - layout::kThumbRoom));
+}
+
+double StartBar::FrameX(double frame) const {
+    return frames_ > 0 ? TrackLeft() + (TrackRight() - TrackLeft()) * frame / frames_ : TrackLeft();
+}
+
+double StartBar::StartX() const {
+    // MS-R56 (0.2.5): with a file, START's place as the core clamps the loop's start, to
+    // the last frame; so the thumb stays where the loop begins, also at 100 % of a short file.
+    if(frames_ > 0)
+        return FrameX(std::min(start_ * frames_, frames_ - 1.0));
+    return TrackLeft() + (TrackRight() - TrackLeft()) * start_;
+}
+
+double StartBar::LoopFrames() const {
+    // As the core sets the loop: SIZE squared of the rest after START, at least a frame.
+    const double start = std::min(start_ * frames_, frames_ - 1.0);
+    return std::max(1.0, size_ * size_ * (frames_ - start));
+}
+
+double StartBar::EndX() const {
+    if(frames_ > 0)
+        return FrameX(std::min<double>(frames_, std::min(start_ * frames_, frames_ - 1.0) + LoopFrames()));
+    return TrackLeft() + (TrackRight() - TrackLeft()) * (start_ + size_ * size_ * (1.0 - start_));
+}
+
+double StartBar::SizeAt(double x) const {
+    const double share = Share(x);
+    const double start = frames_ > 0 ? std::min(start_ * frames_, frames_ - 1.0) / frames_ : start_;
+    if(!(start < 1.0))
+        return size_;
+    return std::sqrt(std::clamp((share - start) / (1.0 - start), 0.0, 1.0));
+}
+
+double StartBar::Share(double x) const {
+    return std::clamp((x - TrackLeft()) / (TrackRight() - TrackLeft()), 0.0, 1.0);
+}
+
+bool StartBar::PressAt(double x) {
+    if(frames_ == 0 || !edits_.start || x < TrackLeft() - 10 || x > TrackRight() + 10)
+        return false;
+    // The end thumb when the press is on it and nearer to it than to START's (at the same
+    // place: right of it); anywhere else START, as before.
+    const double to_end = std::abs(x - EndX()), to_start = std::abs(x - StartX());
+    const bool end = edits_.size && to_end <= 12.0 && (to_end < to_start || (to_end == to_start && x > StartX()));
+    try {
+        dragging_ = true;
+        dragging_end_ = end;
+        if(end) {
+            if(edits_.size_begin)
+                edits_.size_begin();
+            edits_.size(SizeAt(x));
+        } else {
+            if(edits_.begin)
+                edits_.begin();
+            edits_.start(Share(x));
+        }
+    } catch(...) {
+    }
+    return true;
+}
+
+void StartBar::DragTo(double x) {
+    if(!dragging_)
+        return;
+    try {
+        if(dragging_end_)
+            edits_.size(SizeAt(x));
+        else
+            edits_.start(Share(x));
+    } catch(...) {
+    }
+}
+
+void StartBar::Release() {
+    if(!dragging_)
+        return;
+    dragging_ = false;
+    const bool end = dragging_end_;
+    dragging_end_ = false;
+    Guarded([&] { invalid(); });
+    try {
+        if(end && edits_.size_end)
+            edits_.size_end();
+        else if(!end && edits_.end)
+            edits_.end();
+    } catch(...) {
+    }
+}
+
+void StartBar::draw(CDrawContext* context) {
+    Guarded([&] { DrawUnchecked(context); }); // MS-R37
+}
+
+void StartBar::DrawUnchecked(CDrawContext* context) {
+    setDirty(false);
+    if(!skin_)
+        return;
+    const SkinColours& c = skin_->Colours();
+    const CRect all = getViewSize();
+    context->setDrawMode(kAntiAliasing | kNonIntegralMode);
+    const CCoord mid = std::round(all.top + all.getHeight() / 2);
+    const CCoord left = all.left + TrackLeft(), right = all.left + TrackRight();
+    // The name.
+    const CFontRef caps = skin_->Sans(12.5);
+    DrawTracked(context, "START", CRect(all.left, all.top, left - 8, all.bottom), kLeftText, 1.4, caps, c.text, &c);
+    // Round 5: and the loop's end thumb's.
+    DrawTracked(context, "END", CRect(right + 8, all.top, all.right, all.bottom), kRightText, 1.4, caps, c.text, &c);
+    // The groove, filled up to the thumb in START's colour (beta 2: HUE's), with a scale.
+    context->setFillColor(c.groove);
+    context->drawRect(CRect(left, mid - 2, right, mid + 2), kDrawFilled);
+    context->setFrameColor(c.rule_light);
+    context->setLineWidth(1);
+    context->drawLine(CPoint(left, mid + 2.5), CPoint(right, mid + 2.5));
+    const CCoord thumb_x = all.left + StartX();
+    const CCoord end_x = all.left + EndX();
+    // Round 2: the loop between the two thumbs filled in START's colour, the file before it
+    // faintly.
+    context->setFillColor(WithAlpha(c.start_fill, 0.35));
+    context->drawRect(CRect(left, mid - 1.5, thumb_x, mid + 1.5), kDrawFilled);
+    context->setFillColor(WithAlpha(c.start_fill, 0.95));
+    context->drawRect(CRect(thumb_x, mid - 2, std::max(end_x, thumb_x + 1), mid + 2), kDrawFilled);
+    context->setFrameColor(WithAlpha(c.text, 0.45));
+    for(int q = 0; q <= 40; ++q) {
+        const CCoord x = std::round(left + q / 40.0 * (right - left - 1)) + 0.5;
+        context->drawLine(CPoint(x, mid + (q % 5 == 0 ? 7 : 9)), CPoint(x, mid + 12));
+    }
+    const SkinImage& thumb = skin_->Image(SkinImageId::kThumb);
+    // Beta 2: the round grip of 24 x 24, or beta 1's of 16 x 28 until it is delivered.
+    const CPoint grip = thumb ? thumb.size : CPoint(16, 28);
+    // The end thumb first, so that START's lies on top where they meet.
+    for(const CCoord x : {end_x, thumb_x}) {
+        const CRect knob(x - grip.x / 2, mid - grip.y / 2, x + grip.x / 2, mid + grip.y / 2);
+        if(thumb) {
+            DrawSkinImage(context, thumb, knob);
+        } else {
+            context->setFillColor(c.dim);
+            context->drawRect(knob, kDrawFilled);
+        }
+    }
+    // Round 4 (the user's wish): no value box; the host shows START's value as text.
+}
+
+void StartBar::onMouseDownEvent(MouseDownEvent& event) {
+    Guarded([&] {
+        if(event.buttonState.isLeft() && PressAt(event.mousePosition.x - getViewSize().left))
+            event.consumed = true;
+    });
+}
+
+void StartBar::onMouseMoveEvent(MouseMoveEvent& event) {
+    Guarded([&] {
+        if(!dragging_)
+            return;
+        DragTo(event.mousePosition.x - getViewSize().left);
+        event.consumed = true;
+    });
+}
+
+void StartBar::onMouseUpEvent(MouseUpEvent& event) {
+    Guarded([&] {
+        if(!dragging_)
+            return;
+        Release();
+        event.consumed = true;
+    });
+}
+
+void StartBar::onMouseCancelEvent(MouseCancelEvent& event) {
+    Guarded([&] { Release(); });
+    event.consumed = true;
+}
+
+ViewSwitch::ViewSwitch(const CRect& size, std::function<void(bool)> chosen)
+: CView(size), chosen_(std::move(chosen)) {
+    setMouseEnabled(true);
+}
+
+void ViewSwitch::SetGalaxy(bool galaxy) {
+    if(galaxy == galaxy_)
+        return;
+    galaxy_ = galaxy;
+    invalid();
+}
+
+void ViewSwitch::SetSkin(std::shared_ptr<const Skin> skin) {
+    skin_ = std::move(skin);
+    invalid();
+}
+
+int ViewSwitch::SideAt(double x, double y) const {
+    // Relative to the BLEND knob's centre, the view's middle: the half-arcs (with a margin
+    // either side of the ring) and the names beside them.
+    const double dx = x - getViewSize().getWidth() / 2, dy = y - getViewSize().getHeight() / 2;
+    const double r = std::hypot(dx, dy);
+    double angle = std::atan2(dx, -dy) * 180.0 / kPi; // clockwise from twelve o'clock
+    if(angle < 0)
+        angle += 360.0;
+    constexpr double slack = 8; // degrees and units
+    const bool on_ring = std::abs(r - layout::kArcRadius) <= layout::kArcWidth / 2 + slack;
+    const double name_from = layout::kArcRadius + layout::kArcWidth / 2;
+    const bool on_name = std::abs(dy) <= 10 && std::abs(dx) >= name_from;
+    if((on_ring && angle >= layout::kGalaxyArcFrom - slack && angle <= layout::kGalaxyArcTo + slack) || (on_name && dx < 0))
+        return -1;
+    if((on_ring && angle >= layout::kWaveArcFrom - slack && angle <= layout::kWaveArcTo + slack) || (on_name && dx > 0))
+        return 1;
+    return 0;
+}
+
+bool ViewSwitch::PressAt(double x, double y) {
+    const int side = SideAt(x, y);
+    if(side == 0)
+        return false;
+    const bool galaxy = side < 0;
+    if(galaxy == galaxy_)
+        return false;
+    galaxy_ = galaxy;
+    if(chosen_)
+        chosen_(galaxy);
+    return true;
+}
+
+bool ViewSwitch::hitTest(const CPoint& where, const Event& event) {
+    if(!CView::hitTest(where, event))
+        return false;
+    const CRect all = getViewSize();
+    return SideAt(where.x - all.left, where.y - all.top) != 0; // the knob in the middle keeps its own
+}
+
+void ViewSwitch::draw(CDrawContext* context) {
+    Guarded([&] { DrawUnchecked(context); }); // MS-R37
+}
+
+void ViewSwitch::DrawUnchecked(CDrawContext* context) {
+    setDirty(false);
+    if(!skin_)
+        return;
+    const SkinColours& c = skin_->Colours();
+    const CRect all = getViewSize();
+    context->setDrawMode(kAntiAliasing | kNonIntegralMode);
+    const CPoint centre(all.left + all.getWidth() / 2, all.top + all.getHeight() / 2);
+    const double r = layout::kArcRadius;
+    const CRect ring(centre.x - r, centre.y - r, centre.x + r, centre.y + r);
+    // VSTGUI's arcs count from three o'clock, clockwise.
+    const auto arc = [&](double from, double to, bool lit) {
+        auto path = owned(context->createGraphicsPath());
+        if(!path)
+            return;
+        path->addArc(ring, from - 90.0, to - 90.0, true);
+        context->setLineStyle(CLineStyle(CLineStyle::kLineCapRound, CLineStyle::kLineJoinRound));
+        context->setLineWidth(lit ? layout::kArcWidth : 2.0);
+        context->setFrameColor(lit ? WithAlpha(c.control, 0.9) : WithAlpha(c.dim, 0.45));
+        context->drawGraphicsPath(path, CDrawContext::kPathStroked);
+        context->setLineStyle(kLineSolid);
+    };
+    arc(layout::kGalaxyArcFrom, layout::kGalaxyArcTo, galaxy_);
+    arc(layout::kWaveArcFrom, layout::kWaveArcTo, !galaxy_);
+    const CFontRef font = skin_->Sans(11);
+    const double inner = r + layout::kArcWidth / 2 + layout::kArcNameGap;
+    DrawTracked(context, "GALAXY", CRect(all.left, centre.y - 8, centre.x - inner, centre.y + 8), kRightText, 1.5,
+                font, galaxy_ ? c.value : c.dim);
+    DrawTracked(context, "WAVE", CRect(centre.x + inner, centre.y - 8, all.right, centre.y + 8), kLeftText, 1.5, font,
+                galaxy_ ? c.dim : c.value);
+}
+
+void ViewSwitch::onMouseDownEvent(MouseDownEvent& event) {
+    if(!event.buttonState.isLeft())
+        return;
+    const CRect all = getViewSize();
+    if(SideAt(event.mousePosition.x - all.left, event.mousePosition.y - all.top) == 0)
+        return;
+    event.consumed = true;
+    event.ignoreFollowUpMoveAndUpEvents(true);
+    // MS-R37: what the switch does runs inside the window's exception boundary.
+    Guarded([&] {
+        if(PressAt(event.mousePosition.x - all.left, event.mousePosition.y - all.top))
+            invalid();
+    });
 }
 
 } // namespace messier

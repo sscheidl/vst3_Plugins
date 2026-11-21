@@ -28,17 +28,50 @@
 namespace messier {
 
 // Saved with the window settings as its number; the numbers do not change.
-enum class GuiPreset : std::int32_t { kSlate = 0, kSilver = 1, kPlum = 2, kGold = 3 };
-constexpr std::int32_t kGuiPresetCount = 4;
+// Round 3 (2026-11-21): the painted galaxies, one preset each; more follow at the end.
+enum class GuiPreset : std::int32_t {
+    kSpiral = 0,
+    kBarred = 1,
+    kRing = 2,
+    kCloud = 3,
+    kBlueGalaxy = 4,
+    kOrangeGalaxy = 5,
+    kRedGalaxy = 6,
+    kVioletGalaxy = 7,
+};
+constexpr std::int32_t kGuiPresetCount = 8;
+// The presets before round 3: the window settings up to version 8 stored HUE for these.
+constexpr std::int32_t kLegacyGuiPresetCount = 4;
 
 constexpr bool IsGuiPreset(std::int32_t value) {
     return value >= 0 && value < kGuiPresetCount;
 }
 
 constexpr std::int32_t kPresetAccent = -1;
-constexpr std::int32_t kAccentMaxHue = 285;
+// HUE is stored as a hue in degrees (0.2.5), or kPresetAccent for the preset's own colours.
+// Beta 2: any hue of the circle is read (beta 1 stored 0 to 285); the slider offers red
+// over violet to blue, 0 (360) down to kAccentBlueHue, and a hue outside that arc is shown
+// at its nearer end.
+constexpr std::int32_t kAccentMaxHue = 359;
+constexpr std::int32_t kAccentBlueHue = 230;
 constexpr bool IsAccent(std::int32_t hue) {
     return hue >= kPresetAccent && hue <= kAccentMaxHue;
+}
+// A stored hue on the slider's arc: itself if on it, else the nearer end (red or blue).
+constexpr std::int32_t AccentOnScale(std::int32_t hue) {
+    if(hue == 0 || hue >= kAccentBlueHue)
+        return hue;
+    return hue < kAccentBlueHue / 2 ? 0 : kAccentBlueHue;
+}
+// The slider's place (0 red, 1 blue) of a stored hue, and the hue of a place.
+constexpr double AccentSliderValue(std::int32_t hue) {
+    hue = AccentOnScale(hue);
+    return hue == 0 ? 0.0 : (360.0 - hue) / (360.0 - kAccentBlueHue);
+}
+inline std::int32_t AccentOfSlider(double value) {
+    const double clamped = value >= 0.0 ? (value <= 1.0 ? value : 1.0) : 0.0; // NaN: red
+    const auto hue = static_cast<std::int32_t>(360.0 - clamped * (360.0 - kAccentBlueHue) + 0.5);
+    return hue >= 360 ? 0 : hue;
 }
 
 VSTGUI::CColor AccentColour(double hue) noexcept;
@@ -65,11 +98,14 @@ struct SkinColours {
     // The controls (0.2.2, the user's design round): knob arcs, the START rail, the WINDOW
     // curve, pressed keys, small ornaments; and the values in it, lighter for reading.
     VSTGUI::CColor control, value;
+    // Beta 2: START's fill, which HUE turns with the nebula.
+    VSTGUI::CColor start_fill;
 };
 
 struct GuiPresetInfo {
-    const char* name;     // as the menu shows it
-    const char* file_key; // in the bitmap names
+    const char* name;       // as the menu shows it
+    const char* file_key;   // in the names of beta 1's bitmaps and colour tables ("slate")
+    const char* nebula_key; // beta 2: in the names of its nebula's two layers
     // Its bitmaps are in the bundle (all four since 0.2.4); a preset without them would
     // show as Slate and be disabled in the menu.
     bool delivered;
@@ -82,34 +118,75 @@ const GuiPresetInfo& PresetInfo(GuiPreset preset);
 // else Slate. The saved setting stays as it is.
 GuiPreset ShownPreset(GuiPreset preset);
 
+// Beta 2 (docs/GRAPHICS_BRIEF_BETA2.md): the bitmaps of the one design. Each is looked
+// for under its new name and size first; for some, then under beta 1's name and size (the
+// bitmaps of Slate, until the delivery). An image found under neither is drawn by code
+// (the ring, the glass, the nebulae) or left out (the dome, the screws, the pads).
 enum class SkinImageId {
     kChassis,
-    kBezel,
-    kPlate,
-    kNebulaA,
-    kNebulaB,
+    kRing,
+    kGlass,
+    kDome,
+    kNebula,     // the nebula variant in colour, standing; HUE turns its hue (the user's wish)
+    kDustWisps,  // dark dust masks over the galaxy (black, the shape in alpha); the
+    kDustVeil,   // experiment of 2026-11-20: one of them turns slowly over the nebula
+    kDustBands,
+    kDustClouds, // the second layer of dark clouds (the user's of 2026-11-20): white, alpha only
+    kNebulaArms, // the nebula variant's two white layers, tinted by the window (first delivery)
+    kNebulaHaze,
     kKnobLarge,
     kKnobSmall,
     kThumb,
     kButton,
     kButtonDown,
+    kScrew,
+    kPad,
+    kPadLit,
     kKeyWhite,
     kKeyBlack,
     kCount
 };
 constexpr std::size_t kSkinImageCount = static_cast<std::size_t>(SkinImageId::kCount);
 
-// The file name of an image of a preset at scale 1 or 2, as the bundle holds it.
+// The file name of an image of a preset (beta 2: its nebula variant) at scale 1 or 2.
 std::string SkinImageFileName(GuiPreset preset, SkinImageId id, int scale);
 // The size of an image in window units (its @1x pixels).
 VSTGUI::CPoint SkinImageSize(SkinImageId id);
+// Beta 1's name and size of an image, taken when the new one is not there; an empty name
+// for an image without one.
+std::string LegacySkinImageFileName(SkinImageId id, int scale);
+VSTGUI::CPoint LegacySkinImageSize(SkinImageId id);
 
-// One image in its two sizes. Either may be missing; both missing: not there.
+// One image in its two sizes. Either may be missing; both missing: not there. `size` is
+// that of the file found (beta 1's for an old one).
 struct SkinImage {
     VSTGUI::SharedPointer<VSTGUI::CBitmap> x1, x2;
     VSTGUI::CPoint size;
     explicit operator bool() const { return x1 || x2; }
 };
+
+// A copy of a white bitmap in `tint`, its alpha kept (beta 2: the nebula layers, again for
+// every HUE). Null if it cannot be made. Never throws.
+SkinImage TintedCopy(const SkinImage& white, VSTGUI::CColor tint) noexcept;
+// The pixels of a bitmap, premultiplied, four bytes each in the platform's order, for
+// turning bitmaps without Direct2D (beta 2: VSTGUI 4 of SDK 3.8 clips a turned bitmap to
+// the box of two of its turned corners, which cut the nebula to wrong rectangles).
+struct PixelBuffer {
+    std::uint32_t width = 0, height = 0;
+    double scale = 1.0; // the bitmap's scale factor
+    std::vector<std::uint8_t> bytes;
+    explicit operator bool() const { return width > 0 && height > 0; }
+};
+bool ReadPixels(VSTGUI::CBitmap* bitmap, PixelBuffer& pixels) noexcept;
+VSTGUI::SharedPointer<VSTGUI::CBitmap> MakeBitmap(const PixelBuffer& pixels) noexcept;
+// `from` turned clockwise by `degrees` about its centre (bilinear), transparent where
+// nothing of it lies.
+void TurnPixels(const PixelBuffer& from, double degrees, PixelBuffer& to);
+
+// A copy of a coloured bitmap with every pixel's hue turned by `degrees`, its saturation,
+// lightness and alpha kept (beta 2: the coloured nebula under HUE). Only the size the
+// context needs (`two`: the 2x one) is made. Empty if it cannot be made. Never throws.
+SkinImage HueTurnedCopy(const SkinImage& image, double degrees, bool two) noexcept;
 
 // Custom skins (0.2.7; in 0.2.6 a test build's switch): the window takes bitmaps and
 // colour tables from two folders named "Messier-Skin" before its own, file by file:
@@ -141,7 +218,7 @@ int SkinFilesDecoded();
 bool OpenUserSkinFolder() noexcept;
 // A preset's colour table as text: one "name = #RRGGBB" or "#RRGGBBAA" per line,
 // "negative = true" or "false"; lines from ";" on are comments.
-std::string ColourTableFileName(GuiPreset preset); // messier_<key>_colours.txt
+std::string ColourTableFileName(GuiPreset preset); // beta 2: messier_colours.txt (beta 1's messier_slate_colours.txt is read first)
 std::string ColourTableText(const SkinColours& colours);
 // Takes the lines it understands onto `colours`; the count of values taken.
 int ApplyColourTable(const std::string& text, SkinColours& colours);
@@ -158,7 +235,9 @@ class Skin {
 
     GuiPreset Preset() const { return preset_; }
     const SkinColours& Colours() const { return colours_; }
-    // Hue changes affect the ink and control accents without reloading the bitmaps.
+    // The preset's colours (with the skin folders' tables), before HUE.
+    const SkinColours& BaseColours() const { return base_colours_; }
+    // HUE turns the nebula and START's fill (beta 2), without reloading the bitmaps.
     void SetAccent(std::int32_t hue) noexcept;
     const SkinImage& Image(SkinImageId id) const { return images_[static_cast<std::size_t>(id)]; }
 

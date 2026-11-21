@@ -64,7 +64,8 @@ foreach ($document in 'README.md', 'CHANGELOG.md', 'UPSTREAM.md', 'components.js
     'docs\CODEX_PRUEFAUFTRAG_0.2.8.md', 'docs\FABLE_AUDIT_0.2.8.md', 'docs\BUILD_REPORT_0.2.9.md',
     'docs\GPT_PRUEFAUFTRAG_0.2.9.md', 'docs\GPT_PRUEFAUFTRAG_0.2.9_B.md', 'docs\GPT_REVIEW_0.2.9.md',
     'docs\BUILD_REPORT_0.2.10.md', 'docs\GPT_PRUEFAUFTRAG_0.2.10.md',
-    'docs\GPT_REVIEW_0.2.10.md', 'docs\RELEASE_NOTES_1.0.0-beta.1.md') {
+    'docs\GPT_REVIEW_0.2.10.md', 'docs\RELEASE_NOTES_1.0.0-beta.1.md',
+    'docs\GRAPHICS_BRIEF_BETA2.md', 'docs\BUILD_REPORT_1.0.0-beta.2.md') {
     $source = Join-Path $plugin $document
     if (Test-Path $source) { Copy-Item $source (Join-Path $Target (Split-Path $document -Leaf)) -Force }
 }

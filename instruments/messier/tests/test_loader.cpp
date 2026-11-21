@@ -415,6 +415,7 @@ bool SameOverview(const WaveOverview& w, const FileData& f) {
         return false;
     for(std::uint32_t c = 0; c < columns; ++c) {
         int low = 99999, high = -99999;
+        double squares = 0;
         const std::uint64_t first = std::uint64_t(c) * f.frames / columns;
         const std::uint64_t last = std::uint64_t(c + 1) * f.frames / columns;
         if(last <= first)
@@ -422,8 +423,13 @@ bool SameOverview(const WaveOverview& w, const FileData& f) {
         for(std::uint64_t i = first * f.channels; i < last * f.channels; ++i) {
             low = std::min<int>(low, f.pcm[i]);
             high = std::max<int>(high, f.pcm[i]);
+            squares += double(f.pcm[i]) * f.pcm[i];
         }
         if(w.low[c] != low || w.high[c] != high)
+            return false;
+        // Round 4: the RMS, to the nearest step.
+        const double rms = std::sqrt(squares / double((last - first) * f.channels));
+        if(std::abs(w.rms[c] - rms) > 0.5 + 1e-9)
             return false;
     }
     return true;
