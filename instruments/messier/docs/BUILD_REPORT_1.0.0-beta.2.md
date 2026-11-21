@@ -132,3 +132,19 @@ Full matrix on the fixed state:
 Measured: `TurnPixels` takes 3.5 ms at 720 × 720 (24 ms before the fix). The review measured
 the other gains on Direct2D's software target; on-screen timings in a host are still to be
 taken (Studio One, GALAXY at 4x).
+
+## The WAVE redesign, steps 0 to 3, and round 6 (2026-11-21)
+
+The WAVE redesign (steps 0 to 3 of the feasibility assessment) and the fixes of the user's
+round 6. The CHANGELOG lists them. The user tested both builds in Studio One and approved
+them (round 6: 18:15 build). The sound engine is unchanged.
+
+| Step | Result |
+|---|---|
+| VS 2026 Release, `ctest -R '^messier\.'` | 6/6 |
+| Validator, Messier2 (side-by-side, VS 2026) | 47/0 |
+| Mutation check of the new tests (wave columns, blur, preset colours) | 5 mutants, all caught |
+
+Not rerun for these GUI-only changes: VS 2026 Debug, VS 2022, ASan. The look is checked in
+previews and by the user in the host; automated tests cover the column list, the blur and
+the preset's HUE reset.

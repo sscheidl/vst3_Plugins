@@ -184,6 +184,10 @@ VSTGUI::SharedPointer<VSTGUI::CBitmap> MakeBitmap(const PixelBuffer& pixels) noe
 // MS-R63: only the disc inscribed in the square is turned, the corners are left clear (the
 // turned layers, nebulae and dust, are clear outside their circle); `to` may be reused.
 void TurnPixels(const PixelBuffer& from, double degrees, PixelBuffer& to);
+// The WAVE redesign, step 2: `pixels` blurred in place by three box passes each way (close
+// to a Gaussian), each box `radius` pixels either side; transparent beyond the edges, so
+// the blur fades out there. A radius below 1 leaves the pixels as they are.
+void BlurPixels(PixelBuffer& pixels, int radius);
 
 // A copy of a coloured bitmap with every pixel's hue turned by `degrees`, its saturation,
 // lightness and alpha kept (beta 2: the coloured nebula under HUE). Only the size the

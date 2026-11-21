@@ -124,6 +124,32 @@ Faster:
 * **MS-R67:** Dragging HUE makes a new nebula or waveform colour at most every 100 ms.
 * **MS-R70:** The dust masks are loaded at 1x only.
 
+### The WAVE redesign, steps 0 to 3 (2026-11-21, round 6)
+
+The waveform in WAVE gets more depth and colour, still drawn once per file, look and
+size, so it costs nothing extra per frame.
+
+* **Step 0:** The waveform's columns are computed once and drawn by three layers in turn:
+  depth, body and detail.
+* **Step 1:** A crisp outline along both peaks, so that transients read clearly.
+* **Step 2:** A soft, blurred halo behind the waveform, somewhat taller than its peaks, in
+  a mix of the wave colour and the nebula's tint. It is made at half resolution and
+  blurred once on the CPU.
+* **Step 3:** The colour changes over the amplitude: a bright, slightly warm core round
+  the middle line, the wave colour half way, and cooler, deeper peaks in the nebula's
+  second tint. It follows the preset and HUE.
+
+### Round 6 (2026-11-21, the user's test of the WAVE redesign)
+
+* **WAVE:**
+  - The waveform is more transparent; the halo stays as it was.
+  - A narrow, bright warm white core along the middle line, as loud as each column.
+* **GALAXY:** BLEND's dark clouds are stronger at the least setting and weaker at the most
+  (0.8 to 1.5 times the dust strength instead of 0.5 to 1.8; growing by 10 % instead of
+  12 %). They turn in fine steps again (0.2 degrees, as the nebula), as before MS-R64.
+* **Fix:** A GUI preset chosen from the menu comes in its own colours. A HUE turned before
+  is set back, also when the same preset is chosen again.
+
 ## 1.0.0-beta.1 (2026-11-20), "1.0 beta 1"
 
 The closed, non-profit beta. The code equals 0.2.10; sound, state format and controls are

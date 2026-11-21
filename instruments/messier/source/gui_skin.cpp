@@ -398,6 +398,38 @@ void TurnPixels(const PixelBuffer& from, double degrees, PixelBuffer& to) {
     }
 }
 
+void BlurPixels(PixelBuffer& pixels, int radius) {
+    if(!pixels || radius < 1 || pixels.bytes.size() < std::size_t(pixels.width) * pixels.height * 4)
+        return;
+    // Premultiplied pixels blur channel by channel, whatever the platform's byte order.
+    const int w = static_cast<int>(pixels.width), h = static_cast<int>(pixels.height);
+    const std::uint32_t box = static_cast<std::uint32_t>(2 * radius + 1);
+    std::vector<std::uint8_t> line(std::size_t(std::max(w, h)) * 4);
+    // One box pass along `n` pixels from `first`, `step` bytes apart; outside counts as clear.
+    const auto pass = [&](std::uint8_t* first, int n, std::size_t step) {
+        for(int i = 0; i < n; ++i)
+            std::memcpy(line.data() + std::size_t(i) * 4, first + std::size_t(i) * step, 4);
+        for(int k = 0; k < 4; ++k) {
+            std::uint32_t sum = 0;
+            for(int i = 0; i < std::min(radius, n); ++i)
+                sum += line[std::size_t(i) * 4 + k];
+            for(int i = 0; i < n; ++i) {
+                if(i + radius < n)
+                    sum += line[std::size_t(i + radius) * 4 + k];
+                if(i - radius - 1 >= 0)
+                    sum -= line[std::size_t(i - radius - 1) * 4 + k];
+                first[std::size_t(i) * step + k] = static_cast<std::uint8_t>((sum + box / 2) / box);
+            }
+        }
+    };
+    for(int round = 0; round < 3; ++round) {
+        for(int y = 0; y < h; ++y)
+            pass(pixels.bytes.data() + std::size_t(y) * w * 4, w, 4);
+        for(int x = 0; x < w; ++x)
+            pass(pixels.bytes.data() + std::size_t(x) * 4, h, std::size_t(w) * 4);
+    }
+}
+
 SkinImage TintedCopy(const SkinImage& white, CColor tint) noexcept {
     SkinImage tinted;
     try {

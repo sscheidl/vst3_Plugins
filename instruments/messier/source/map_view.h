@@ -42,6 +42,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace messier {
 
@@ -190,8 +191,9 @@ class MapView : public VSTGUI::CView {
     };
     static constexpr double kMaxDust = 0.7;
     // Round 5: BLEND sets how strongly the dust darkens, from kDustBlendLeast to
-    // kDustBlendMost times its strength, and grows it by up to kDustBlendGrow.
-    static constexpr double kDustBlendLeast = 0.5, kDustBlendMost = 1.8, kDustBlendGrow = 0.12;
+    // kDustBlendMost times its strength, and grows it by up to kDustBlendGrow. Round 6 (the
+    // user's test: too weak at the least, too strong at the most): a narrower range.
+    static constexpr double kDustBlendLeast = 0.8, kDustBlendMost = 1.5, kDustBlendGrow = 0.1;
     // The choice for windows opened from now on (the preview program). The side-by-side
     // test build also reads the environment variable MESSIER_DUST, e.g. "wisps:20",
     // "bands:30", "veil:10" or "off".
@@ -221,6 +223,17 @@ class MapView : public VSTGUI::CView {
     // a spread of its own of up to kGrainSpread either way, fixed for its number.
     static constexpr double kGrainSpread = 0.4;
     static double GrainDown(const GrainDot& grain);
+    // The WAVE redesign, step 0: the waveform's columns, computed once per cache key and
+    // drawn by every layer. `count` columns over the file; each takes the widest peaks and
+    // the loudest RMS of the overview's columns it covers. Heights in the lens's "down"
+    // units (lens::ToGlass), kWaveHeight for full scale, negative upwards: `top` and
+    // `bottom` the peaks, `body` the RMS half-height (never beyond the peaks).
+    static constexpr double kWaveHeight = 0.84; // as in beta 1: 42 % of the plate either side
+    struct WaveColumn {
+        double share = 0; // the column's middle, as a share of the file
+        double top = 0, bottom = 0, body = 0;
+    };
+    static void WaveColumns(const WaveOverview& wave, int count, std::vector<WaveColumn>& columns);
     static Star StarDirection(std::uint32_t number);                 // a unit vector
     static double StarStart(std::uint32_t number, double tempo);     // its distance at birth (0..1)
     static double StarFly(double reach, double tempo, double seconds); // its distance after flying
@@ -229,6 +242,9 @@ class MapView : public VSTGUI::CView {
     double Ahead(Clock::time_point now) const;
     void DrawDropHighlight(VSTGUI::CDrawContext* context);
     void DrawWave(VSTGUI::CDrawContext* context, const VSTGUI::CRect& glass, Clock::time_point now);
+    // The WAVE redesign: wave_layers_ for the waveform wave_, in `colours`, at the device
+    // scale `scale`, for a glass of `size`; `body` stays null if it cannot be made.
+    void MakeWaveLayers(const SkinColours& colours, double scale, VSTGUI::CPoint size);
     void DrawGalaxy(VSTGUI::CDrawContext* context, const VSTGUI::CRect& glass);
     void DrawDust(VSTGUI::CDrawContext* context, const VSTGUI::CRect& glass);
     double turn_direction_ = 1.0, turn_speed_ = 0.0, turn_rate_ = 0.0, galaxy_angle_ = 0.0;
@@ -241,9 +257,11 @@ class MapView : public VSTGUI::CView {
         VSTGUI::SharedPointer<VSTGUI::CBitmap> drawn;
         double angle = 1e9;
     };
-    // Degrees between two turned copies at full speed, finer while the turn is slow; the dust
-    // masks are soft and turn in coarser steps (MS-R64).
-    static constexpr double kTurnStep = 0.2, kDustTurnStep = 0.6;
+    // Degrees between two turned copies at full speed, finer while the turn is slow. MS-R64
+    // turned the dust in coarser steps (0.6); round 6 (the user's test: the dark clouds
+    // turned less smoothly) takes the nebula's again, which the faster turn and the dust
+    // masks at 1x allow.
+    static constexpr double kTurnStep = 0.2, kDustTurnStep = 0.2;
     VSTGUI::CBitmap* TurnedNow(Turned& layer, VSTGUI::CBitmap* source, double angle,
                                double step = kTurnStep) noexcept;
     std::array<Turned, 2> nebula_turned_{}; // the nebula (or its arms), its haze
@@ -330,12 +348,20 @@ class MapView : public VSTGUI::CView {
     std::string drop_reason_;
     Edits edits_;
     bool dragging_ = false;
-    // The waveform drawn once into a bitmap (0.2.1), for the overview, the skin and the
-    // device scale it was made for.
-    VSTGUI::SharedPointer<VSTGUI::CBitmap> wave_cache_;
+    // The waveform drawn once into bitmaps (0.2.1), for the overview, the skin and the
+    // device scale it was made for. The WAVE redesign: three layers, drawn in this order:
+    // `depth` a soft blurred halo (at a capped resolution), `body` the translucent peaks
+    // and the RMS body, `detail` the crisp peak outline, the equator band and the bulge.
+    struct WaveLayers {
+        VSTGUI::SharedPointer<VSTGUI::CBitmap> depth, body, detail;
+    };
+    WaveLayers wave_layers_;
+    std::vector<WaveColumn> wave_columns_; // reused between rebuilds
     std::shared_ptr<const WaveOverview> cached_wave_; // held, so no other can take its address
     std::shared_ptr<const Skin> cached_skin_;
-    VSTGUI::CColor cached_colour_; // beta 2: HUE turns the waveform's colour
+    // Beta 2: HUE turns the waveform's colour; the WAVE redesign also takes the nebula's two
+    // tints (the depth layer, the colours over amplitude).
+    std::array<VSTGUI::CColor, 3> cached_colours_{};
     double cached_scale_ = 0;
     VSTGUI::CPoint cached_size_;
     bool wave_failed_ = false; // for the key above

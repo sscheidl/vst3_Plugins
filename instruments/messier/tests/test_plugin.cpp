@@ -1895,6 +1895,63 @@ void TestStarfield() {
         const VSTGUI::CRect box = view->GlassBox();
         CHECK(box.getWidth() < 436 && box.getWidth() >= 2 * (view->GlassRadius() + layout::kRingWidth));
     }
+    // The WAVE redesign, step 0: the columns all layers draw. Each covers its share of the
+    // overview, takes its widest peaks and loudest RMS, and the body never exceeds the peaks.
+    {
+        auto wave = std::make_unique<WaveOverview>();
+        wave->columns = 8;
+        for(int k = 0; k < 8; ++k) {
+            wave->high[k] = static_cast<std::int16_t>(1000 * k);
+            wave->low[k] = static_cast<std::int16_t>(-500 * k);
+            wave->rms[k] = static_cast<std::uint16_t>(300 * k);
+        }
+        wave->rms[1] = 30000; // louder than its peaks: held at the peak
+        std::vector<MapView::WaveColumn> columns;
+        MapView::WaveColumns(*wave, 4, columns);
+        CHECK(columns.size() == 4 && std::abs(columns[0].share - 0.125) < 1e-12 && std::abs(columns[3].share - 0.875) < 1e-12);
+        const double unit = MapView::kWaveHeight / 32768.0;
+        CHECK(std::abs(columns[2].top + 5000 * unit) < 1e-12 && std::abs(columns[2].bottom - 2500 * unit) < 1e-12);
+        CHECK(std::abs(columns[2].body - 1500 * unit) < 1e-12);
+        CHECK(std::abs(columns[0].body - 1000 * unit) < 1e-12); // RMS 30000 held at the peak 1000
+        MapView::WaveColumns(*wave, 16, columns); // more columns than the overview: each its own
+        CHECK(columns.size() == 16 && std::abs(columns[15].top + 7000 * unit) < 1e-12);
+        wave->columns = 0;
+        MapView::WaveColumns(*wave, 16, columns);
+        CHECK(columns.empty());
+    }
+    // Step 2: the depth layer's blur. A lone pixel spreads evenly either way and keeps its
+    // light; an even area stays even inside; a radius of 0 changes nothing.
+    {
+        PixelBuffer dot;
+        dot.width = dot.height = 41;
+        dot.bytes.assign(41 * 41 * 4, 0);
+        for(int k = 0; k < 4; ++k)
+            dot.bytes[(20 * 41 + 20) * 4 + k] = 255;
+        PixelBuffer same = dot;
+        BlurPixels(same, 0);
+        CHECK(same.bytes == dot.bytes);
+        // Spread more widely first, so that rounding keeps the sum: a 5 x 5 block.
+        for(int y = 18; y <= 22; ++y)
+            for(int x = 18; x <= 22; ++x)
+                for(int k = 0; k < 4; ++k)
+                    dot.bytes[(y * 41 + x) * 4 + k] = 255;
+        long before = 0, after = 0;
+        for(std::size_t i = 3; i < dot.bytes.size(); i += 4)
+            before += dot.bytes[i];
+        BlurPixels(dot, 2);
+        for(std::size_t i = 3; i < dot.bytes.size(); i += 4)
+            after += dot.bytes[i];
+        const auto alpha = [&](int x, int y) { return dot.bytes[(y * 41 + x) * 4 + 3]; };
+        CHECK(std::abs(after - before) < before / 50);
+        CHECK(alpha(20, 20) < 255 && alpha(20, 20) > alpha(26, 20) && alpha(26, 20) > 0);
+        CHECK(alpha(14, 20) == alpha(26, 20) && alpha(20, 14) == alpha(20, 26) && std::abs(alpha(26, 20) - alpha(20, 26)) <= 1);
+        CHECK(alpha(0, 0) == 0); // beyond three boxes of 2: untouched
+        PixelBuffer even;
+        even.width = even.height = 30;
+        even.bytes.assign(30 * 30 * 4, 120);
+        BlurPixels(even, 3);
+        CHECK(even.bytes[(15 * 30 + 15) * 4] == 120 && even.bytes[3] < 120); // the edges fade
+    }
     std::printf("starfield: out forward, in backward, standing at 0x, faster further out; directions all round\n");
 }
 
@@ -2869,6 +2926,15 @@ void TestGuiPresets() {
         CHECK(editor->Settings().WavePercent() == 100);
         editor->SetGuiPreset(GuiPreset::kSpiral);
         CHECK(editor->Settings().WavePercent() == 100);
+        // Round 6 (the user's test): a preset chosen comes in its own colours, also the same
+        // one again after a turn of HUE.
+        editor->SetAccent(0); // red
+        CHECK(editor->Settings().Accent() == 0);
+        editor->SetGuiPreset(GuiPreset::kOrangeGalaxy);
+        CHECK(editor->Settings().Accent() == kPresetAccent);
+        editor->SetAccent(0);
+        editor->SetGuiPreset(GuiPreset::kOrangeGalaxy);
+        CHECK(editor->Settings().Accent() == kPresetAccent && editor->Settings().preset == GuiPreset::kOrangeGalaxy);
     }
     // F3 of the Fable audit (0.2.9): a change in one window reaches the other window of
     // the instance; a view kept while closed takes the controller's settings when asked.

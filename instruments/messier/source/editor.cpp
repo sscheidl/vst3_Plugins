@@ -966,18 +966,23 @@ void Editor::SetZoom(double zoom) {
 void Editor::SetGuiPreset(GuiPreset preset) {
     if(!IsGuiPreset(static_cast<std::int32_t>(preset)))
         return;
+    // Round 6 (the user's test): a preset chosen comes in its own colours; a HUE turned
+    // before is set back, also when the same preset is chosen again.
+    const bool own_colours = settings_.accents[static_cast<std::size_t>(preset)] == kPresetAccent;
     // The same preset again only redraws if its look is not what the window shows (a
-    // failed change before, MS-R41).
-    if(preset == settings_.preset && (!frame || (skin_ && skin_->Preset() == ShownPreset(preset))))
+    // failed change before, MS-R41) or HUE has turned it.
+    if(preset == settings_.preset && own_colours && (!frame || (skin_ && skin_->Preset() == ShownPreset(preset))))
         return;
     if(frame) {
         // The new look first: if it cannot be made, nothing changes. Then every view gets
         // it; only then the setting (MS-R41).
         auto skin = std::make_shared<Skin>(preset);
-        skin->SetAccent(settings_.accents[static_cast<std::size_t>(preset)]);
+        skin->SetAccent(kPresetAccent);
         skin_ = std::move(skin);
+        settings_.accents[static_cast<std::size_t>(preset)] = kPresetAccent;
         ApplySkin();
     }
+    settings_.accents[static_cast<std::size_t>(preset)] = kPresetAccent;
     settings_.preset = preset;
     ApplyWave();
     UserChanged();
