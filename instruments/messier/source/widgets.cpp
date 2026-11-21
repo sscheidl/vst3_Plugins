@@ -967,7 +967,7 @@ int ViewSwitch::SideAt(double x, double y) const {
     constexpr double slack = 8; // degrees and units
     const bool on_ring = std::abs(r - layout::kArcRadius) <= layout::kArcWidth / 2 + slack;
     const double name_from = layout::kArcRadius + layout::kArcWidth / 2;
-    const bool on_name = std::abs(dy) <= 10 && std::abs(dx) >= name_from;
+    const bool on_name = std::abs(dy) <= layout::kArcKeyHeight / 2 + 1 && std::abs(dx) >= name_from; // its key
     if((on_ring && angle >= layout::kGalaxyArcFrom - slack && angle <= layout::kGalaxyArcTo + slack) || (on_name && dx < 0))
         return -1;
     if((on_ring && angle >= layout::kWaveArcFrom - slack && angle <= layout::kWaveArcTo + slack) || (on_name && dx > 0))
@@ -1023,12 +1023,62 @@ void ViewSwitch::DrawUnchecked(CDrawContext* context) {
     };
     arc(layout::kGalaxyArcFrom, layout::kGalaxyArcTo, galaxy_);
     arc(layout::kWaveArcFrom, layout::kWaveArcTo, !galaxy_);
+    // Round 8 (the user's wish): each name on a flat key let into the chassis, rounded at its
+    // outer end and hollowed along the arc at its inner one; discreet, not a button like the
+    // others. The chosen one is a little lighter in the accent colour.
     const CFontRef font = skin_->Sans(11);
-    const double inner = r + layout::kArcWidth / 2 + layout::kArcNameGap;
-    DrawTracked(context, "GALAXY", CRect(all.left, centre.y - 8, centre.x - inner, centre.y + 8), kRightText, 1.5,
-                font, galaxy_ ? c.value : c.dim);
-    DrawTracked(context, "WAVE", CRect(centre.x + inner, centre.y - 8, all.right, centre.y + 8), kLeftText, 1.5, font,
-                galaxy_ ? c.dim : c.value);
+    const double inner = r + layout::kArcWidth / 2 + layout::kArcKeyGap;
+    const double half = layout::kArcKeyHeight / 2;
+    const double outer = all.getWidth() / 2 - 1; // the key's far end, from the centre
+    const auto key = [&](double side, CCoord down) -> SharedPointer<CGraphicsPath> {
+        auto path = owned(context->createGraphicsPath());
+        if(!path)
+            return nullptr;
+        constexpr int kSteps = 12;
+        // Along the hollow inner end from its top to its bottom, then round the outer end.
+        const double reach = std::asin(half / inner);
+        for(int k = 0; k <= kSteps; ++k) {
+            const double a = -reach + 2 * reach * k / kSteps;
+            const CPoint p(centre.x + side * inner * std::cos(a), centre.y + inner * std::sin(a) + down);
+            if(k == 0)
+                path->beginSubpath(p);
+            else
+                path->addLine(p);
+        }
+        const double cx = outer - half; // the outer end's centre
+        for(int k = 0; k <= kSteps; ++k) {
+            const double a = kPi / 2 - kPi * k / kSteps; // from the bottom round to the top
+            path->addLine(CPoint(centre.x + side * (cx + half * std::cos(a)), centre.y + half * std::sin(a) + down));
+        }
+        path->closeSubpath();
+        return path;
+    };
+    const auto draw_key = [&](double side, bool chosen) {
+        // Let in: a light edge shows below, a dark one above; the bed darker than the chassis.
+        context->setLineWidth(1);
+        if(auto below = key(side, 1)) {
+            context->setFrameColor(c.rule_light);
+            context->drawGraphicsPath(below, CDrawContext::kPathStroked);
+        }
+        if(auto bed = key(side, 0)) {
+            context->setFillColor(CColor(0, 0, 0, chosen ? 46 : 62));
+            context->drawGraphicsPath(bed, CDrawContext::kPathFilled);
+            if(chosen) {
+                context->setFillColor(WithAlpha(c.control, 0.13));
+                context->drawGraphicsPath(bed, CDrawContext::kPathFilled);
+            }
+            context->setFrameColor(c.rule_dark);
+            context->drawGraphicsPath(bed, CDrawContext::kPathStroked);
+        }
+    };
+    draw_key(-1, galaxy_);
+    draw_key(1, !galaxy_);
+    // The names in the middle of their keys' straight part.
+    const double text_from = inner + 2, text_to = outer - half * 0.55;
+    DrawTracked(context, "GALAXY", CRect(centre.x - text_to, centre.y - 8, centre.x - text_from, centre.y + 8),
+                kCenterText, 1.5, font, galaxy_ ? c.value : c.dim);
+    DrawTracked(context, "WAVE", CRect(centre.x + text_from, centre.y - 8, centre.x + text_to, centre.y + 8), kCenterText,
+                1.5, font, galaxy_ ? c.dim : c.value);
 }
 
 void ViewSwitch::onMouseDownEvent(MouseDownEvent& event) {

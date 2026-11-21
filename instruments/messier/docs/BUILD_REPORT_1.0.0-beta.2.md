@@ -148,3 +148,22 @@ them (round 6: 18:15 build). The sound engine is unchanged.
 Not rerun for these GUI-only changes: VS 2026 Debug, VS 2022, ASan. The look is checked in
 previews and by the user in the host; automated tests cover the column list, the blur and
 the preset's HUE reset.
+
+## Rounds 7 and 8 (2026-11-21)
+
+The waveform turning round the glass with the playback (round 7), and the inverted spray
+display, the display gain for quiet files and the flat GALAXY / WAVE keys (round 8). The
+CHANGELOG lists them. The user tested round 7 in Studio One (smooth, STOP and Freeze fine,
+the seam not noticeable); round 8 is built and staged, not yet tested by the user.
+
+| Step | Result |
+|---|---|
+| VS 2026 Release, `ctest -R '^messier\.'` | 6/6 |
+| Validator, Messier2 (side-by-side, VS 2026) | 47/0 |
+| Mutation check of the new tests (turn, remap, click, GALAXY's fixed axis, shades, gain) | 10 mutants, all caught |
+
+Measured: laying the waveform onto the glass takes at most 1.4 ms a frame at 100 % (a
+glass of 360 pixels, a strip without clear pixels; 6.6 ms at 720 pixels, which the window
+does not use: the soft layers are made at one pixel per window unit). The upload of the
+bitmap is not in that number. Not rerun for these GUI-only changes: VS 2026 Debug, VS 2022,
+ASan.

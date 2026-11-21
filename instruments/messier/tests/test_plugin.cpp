@@ -1915,9 +1915,52 @@ void TestStarfield() {
         CHECK(std::abs(columns[0].body - 1000 * unit) < 1e-12); // RMS 30000 held at the peak 1000
         MapView::WaveColumns(*wave, 16, columns); // more columns than the overview: each its own
         CHECK(columns.size() == 16 && std::abs(columns[15].top + 7000 * unit) < 1e-12);
+        // Round 8: a quiet file as tall as a loud one, at most kMaxWaveGain; never beyond
+        // full scale.
+        CHECK(std::abs(MapView::WaveDisplayGain(*wave) - 32768.0 / 7000) < 1e-9);
+        MapView::WaveColumns(*wave, 8, columns, MapView::WaveDisplayGain(*wave));
+        CHECK(std::abs(columns[7].top + MapView::kWaveHeight) < 1e-9); // the highest peak at full scale
+        CHECK(std::abs(columns[4].bottom - MapView::kWaveHeight * 2000 / 7000) < 1e-9);
+        CHECK(std::abs(columns[4].body - MapView::kWaveHeight * 1200 / 7000) < 1e-9); // the body as much taller
+        CHECK(std::abs(columns[1].body - columns[1].bottom * 2) < 1e-9); // held at its peak (1000), also when taller
+        wave->high[3] = 100;
+        for(int k = 0; k < 8; ++k)
+            if(k != 3)
+                wave->high[k] = wave->low[k] = 0, wave->rms[k] = 0;
+        wave->low[3] = -50;
+        CHECK(MapView::WaveDisplayGain(*wave) == MapView::kMaxWaveGain); // near silence stays small
+        wave->high[3] = 32767;
+        CHECK(std::abs(MapView::WaveDisplayGain(*wave) - 1.0) < 1e-4);
         wave->columns = 0;
         MapView::WaveColumns(*wave, 16, columns);
-        CHECK(columns.empty());
+        CHECK(columns.empty() && MapView::WaveDisplayGain(*wave) == 1.0);
+    }
+    // Round 8: where grains can start is clear (0), the rest of the loop lightly shaded (1),
+    // outside both dark (2); the spray range wraps round the file.
+    {
+        using Shades = std::vector<MapView::Shade>;
+        const auto same = [](const Shades& a, std::initializer_list<MapView::Shade> b) {
+            if(a.size() != b.size())
+                return false;
+            std::size_t i = 0;
+            for(const MapView::Shade& s : b) {
+                if(std::abs(a[i].from - s.from) > 1e-9 || std::abs(a[i].to - s.to) > 1e-9 || a[i].level != s.level)
+                    return false;
+                ++i;
+            }
+            return true;
+        };
+        // No spray: the whole loop clear, as before.
+        CHECK(same(MapView::SprayShades(0.2, 0.6, 0.4, 0.0), {{0.0, 0.2, 2}, {0.2, 0.6, 0}, {0.6, 1.0, 2}}));
+        // Spray inside the loop.
+        CHECK(same(MapView::SprayShades(0.2, 0.6, 0.4, 0.05),
+                   {{0.0, 0.2, 2}, {0.2, 0.35, 1}, {0.35, 0.45, 0}, {0.45, 0.6, 1}, {0.6, 1.0, 2}}));
+        // Spray beyond the loop's end: clear there too.
+        CHECK(same(MapView::SprayShades(0.2, 0.6, 0.58, 0.05), {{0.0, 0.2, 2}, {0.2, 0.53, 1}, {0.53, 0.63, 0}, {0.63, 1.0, 2}}));
+        // Round the file's end.
+        CHECK(same(MapView::SprayShades(0.5, 1.0, 0.98, 0.05), {{0.0, 0.03, 0}, {0.03, 0.5, 2}, {0.5, 0.93, 1}, {0.93, 1.0, 0}}));
+        // As wide as the file: all clear.
+        CHECK(same(MapView::SprayShades(0.2, 0.6, 0.4, 0.6), {{0.0, 1.0, 0}}));
     }
     // Step 2: the depth layer's blur. A lone pixel spreads evenly either way and keeps its
     // light; an even area stays even inside; a radius of 0 changes nothing.
@@ -1951,6 +1994,107 @@ void TestStarfield() {
         even.bytes.assign(30 * 30 * 4, 120);
         BlurPixels(even, 3);
         CHECK(even.bytes[(15 * 30 + 15) * 4] == 120 && even.bytes[3] < 120); // the edges fade
+    }
+    // Round 7: the waveform turns with the playback. The strip is laid onto the glass through
+    // the lens, turned by the offset; what runs out at one rim comes in at the other.
+    {
+        MapView::WaveMap map;
+        MapView::MakeWaveMap(101, 200, 50, map);
+        CHECK(map.size == 101 && map.light[0] == 0 && map.light[50 * 101 + 50] == 256); // corner clear, middle full
+        PixelBuffer strip, out;
+        strip.width = 200;
+        strip.height = 50;
+        strip.bytes.assign(200 * 50 * 4, 0);
+        for(std::uint32_t y = 0; y < 50; ++y) // one lit column, at the share 0.5025 of the file
+            for(int k = 0; k < 4; ++k)
+                strip.bytes[(y * 200 + 100) * 4 + k] = 255;
+        // The pixel of the middle row where the strip's lit column shows, and its light.
+        const auto brightest = [&](double offset) {
+            MapView::RemapWave(strip, map, offset, out);
+            int at = -1, most = 0;
+            for(int x = 0; x < 101; ++x)
+                if(out.bytes[(50 * 101 + x) * 4 + 3] > most) {
+                    most = out.bytes[(50 * 101 + x) * 4 + 3];
+                    at = x;
+                }
+            return std::pair{at, most};
+        };
+        const auto expected = [](double screen) {
+            return static_cast<int>(std::floor((lens::ToGlass(screen, 0.0).x + 1.0) / 2.0 * 101));
+        };
+        CHECK(std::abs(brightest(0.0).first - expected(0.5025)) <= 1 && brightest(0.0).second > 100);
+        CHECK(std::abs(brightest(0.25).first - expected(0.2525)) <= 1); // turned forward: it moved left
+        CHECK(std::abs(brightest(0.75).first - expected(0.7525)) <= 1); // round the rim
+        CHECK(std::abs(brightest(1.25).first - expected(0.2525)) <= 1 && std::abs(brightest(-0.75).first - expected(0.2525)) <= 1);
+        CHECK(out.bytes[3] == 0); // outside the disc
+        CHECK(MapView::ScreenFade(0.5) > 0.99 && MapView::ScreenFade(0.0) == 0.0 && MapView::ScreenFade(1.0) == 0.0
+              && MapView::ScreenFade(0.2) < MapView::ScreenFade(0.4));
+        // Its time per frame for the glass at 100 % (360 window units) and at twice that.
+        for(const std::uint32_t size : {360u, 720u}) {
+            MapView::MakeWaveMap(size, size * 3 / 2, size * 3 / 2, map);
+            strip.width = strip.height = size * 3 / 2;
+            strip.bytes.assign(std::size_t(strip.width) * strip.height * 4, 90);
+            MapView::RemapWave(strip, map, 0.1, out);
+            const auto t0 = std::chrono::steady_clock::now();
+            for(int k = 0; k < 10; ++k)
+                MapView::RemapWave(strip, map, 0.1 + 0.01 * k, out);
+            std::printf("waveform laid onto a glass of %u pixels: %.2f ms\n", size,
+                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / 10);
+        }
+    }
+    // The turn follows the playback's tempo and direction, eased; it rests while frozen; the
+    // places on the glass and a click back to the file follow it.
+    {
+        auto view = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 436, 436));
+        view->SetGalaxy(false); // WAVE
+        auto now = MapView::Clock::now();
+        EngineDisplay d;
+        d.sequence = 1;
+        d.frames = 96000;
+        d.loop_length = 96000;
+        d.head_speed = 48000.0f; // half the file a second
+        const auto run = [&](double seconds) {
+            for(int i = 0; i < static_cast<int>(seconds / 0.025); ++i) {
+                now += std::chrono::milliseconds(25);
+                d.rendered += 1;
+                view->ShowAt(d, nullptr, now);
+                view->AdvanceDrift(now);
+            }
+        };
+        view->ShowAt(d, nullptr, now);
+        view->AdvanceDrift(now);
+        CHECK(view->WaveOffset() == 0.0 && view->ScreenShare(0.3) == 0.3);
+        run(0.1);
+        CHECK(view->WaveTurnSpeed() > 0.0 && view->WaveTurnSpeed() < 0.3); // eased, no step
+        run(3.0);
+        CHECK(std::abs(view->WaveTurnSpeed() - 0.5) < 0.005);
+        const double before = view->WaveOffset();
+        run(0.5);
+        const double moved = view->WaveOffset() - before;
+        CHECK(std::abs((moved < 0 ? moved + 1.0 : moved) - 0.25) < 0.01); // half a second at half the file a second
+        // Places follow the turn, and a click finds the file's share again.
+        CHECK(std::abs(view->ScreenShare(view->WaveOffset() + 0.2) - 0.2) < 1e-9);
+        const VSTGUI::CPoint p = view->PlateToView(0.3, 0.2);
+        CHECK(std::abs(view->ShareAt(p.x, p.y) - 0.3) < 1e-6);
+        // In GALAXY the glass shows no turn: the seconds axis and the triangle stay as they were.
+        view->SetGalaxy(true);
+        CHECK(view->ShownTurn() == 0.0 && view->ScreenShare(0.3) == 0.3 && view->WaveOffset() != 0.0);
+        const VSTGUI::CPoint q = view->PlateToView(0.3, 0.2);
+        CHECK(std::abs(view->ShareAt(q.x, q.y) - 0.3) < 1e-6 && std::abs(q.x - p.x) > 1.0);
+        view->SetGalaxy(false);
+        CHECK(view->ShownTurn() == view->WaveOffset());
+        d.head_speed = -48000.0f; // backward: the other way
+        run(3.0);
+        CHECK(std::abs(view->WaveTurnSpeed() + 0.5) < 0.005);
+        d.frozen = true;
+        run(3.0);
+        CHECK(view->WaveTurnSpeed() == 0.0);
+        const double rest = view->WaveOffset();
+        run(12.0); // the galaxy's slower turn has come to rest too
+        CHECK(view->WaveOffset() == rest && !view->Moving(now));
+        d.sequence = 2; // another file starts unturned
+        view->ShowAt(d, nullptr, now);
+        CHECK(view->WaveOffset() == 0.0);
     }
     std::printf("starfield: out forward, in backward, standing at 0x, faster further out; directions all round\n");
 }

@@ -155,14 +155,20 @@ struct Case {
     double dust_strength = 0.5;
     // Round 4: DETAILS in the info line (else in the START row); round 5: neither.
     double blend = 0.0; // round 5: BLEND, which thickens the dark clouds
+    double turn = 0.0;  // round 7: the waveform turned by this share of the file
 };
 
 } // namespace
 
 int main(int argc, char** argv) {
-    UseSkinFolders({}); // 0.2.7: the built-in skin, whatever custom skin this computer holds
+    // 0.2.7: the built-in skin, whatever custom skin this computer holds; round 8: or with
+    // the skin folder named third (to try delivered bitmaps in the real window).
+    if(argc >= 3 && std::string(argv[1]) != "--export-skin")
+        UseSkinFolders({std::filesystem::path(argv[2])});
+    else
+        UseSkinFolders({});
     if(argc < 2) {
-        std::fprintf(stderr, "usage: preview_messier_window <folder> | --export-skin <folder>\n");
+        std::fprintf(stderr, "usage: preview_messier_window <folder> [<skin folder>] | --export-skin <folder>\n");
         return 2;
     }
     // 0.2.6: the four presets' colour tables as text, the start of a skin folder.
@@ -235,6 +241,12 @@ int main(int argc, char** argv) {
          160},
         {"cloud_hue_blue", true, kKeyboardDefaultTranspose, true, false, false, 0.0, false, GuiPreset::kCloud, true, 235,
          50},
+        // Round 7: the waveform turned with the playback, a third and two thirds round.
+        {"wave_turned_third", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kSpiral,
+         false, kPresetAccent, kPresetWave, "down from.wav", false, MapView::Dust::kWisps, 0.5, 0.0, 0.33},
+        {"wave_turned_two_thirds", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false,
+         GuiPreset::kOrangeGalaxy, false, kPresetAccent, kPresetWave, "down from.wav", false, MapView::Dust::kWisps, 0.5,
+         0.0, 0.67},
         // Beta 2: WAVE in the glass.
         {"spiral_wave_closed", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kSpiral, false,
          kPresetAccent, kPresetWave, "down from.wav", false},
@@ -278,6 +290,7 @@ int main(int argc, char** argv) {
         settings.wave_percent = c.wave;
         settings.galaxy = c.galaxy;
         MapView::ChooseDust({c.dust, c.dust_strength});
+        MapView::TurnNewViews(c.turn);
         controller->setParamNormalized(kParamBlend, c.blend);
         IPtr<Editor> editor(new Editor(controller, settings, EditorCallbacks{}), false);
         editor->ShowDisplay(MakeDisplay(c.freeze, c.dense), wave);

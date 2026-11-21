@@ -144,10 +144,12 @@ constexpr BottomRows Bottom() {
 // glass' ring above and of BLEND's scale texts below.
 constexpr double kArcRadius = 50, kArcWidth = 5;
 constexpr double kGalaxyArcFrom = 245, kGalaxyArcTo = 295, kWaveArcFrom = 65, kWaveArcTo = 115;
-constexpr double kArcNameWidth = 58, kArcNameGap = 8;
+// Round 8: each name on a flat key let into the chassis, kArcKeyGap from its arc,
+// kArcKeyWidth long and kArcKeyHeight high.
+constexpr double kArcKeyGap = 4, kArcKeyWidth = 70, kArcKeyHeight = 22;
 constexpr Box ArcSwitchBox() {
     const Centre c = kPrimary[kBelowGlass];
-    const double reach = kArcRadius + kArcWidth / 2 + kArcNameGap + kArcNameWidth;
+    const double reach = kArcRadius + kArcWidth / 2 + kArcKeyGap + kArcKeyWidth + 1;
     return {c.x - reach, c.y - 25, c.x + reach, c.y + 25};
 }
 

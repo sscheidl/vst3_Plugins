@@ -179,7 +179,7 @@ class MapView : public VSTGUI::CView {
     double TurnSpeed() const { return turn_speed_; } // -kMaxTurn .. kMaxTurn
     // Round 5: one step of the turn's speed towards `target` over `dt` seconds, S-shaped
     // (critically damped, time constant kTurnEase); `rate` is the speed's own change.
-    static void EaseTurn(double& speed, double& rate, double target, double dt) noexcept;
+    static void EaseTurn(double& speed, double& rate, double target, double dt, double ease = kTurnEase) noexcept;
     double GalaxyAngle() const { return galaxy_angle_; }
     // The dust experiment (the user's brief of 2026-11-20): one of three black dust masks
     // and the second layer of dark clouds turn over the nebula and only darken it,
@@ -233,7 +233,52 @@ class MapView : public VSTGUI::CView {
         double share = 0; // the column's middle, as a share of the file
         double top = 0, bottom = 0, body = 0;
     };
-    static void WaveColumns(const WaveOverview& wave, int count, std::vector<WaveColumn>& columns);
+    static void WaveColumns(const WaveOverview& wave, int count, std::vector<WaveColumn>& columns,
+                            double gain = 1.0);
+    // Round 8 (the user's wish): a quiet file is shown as tall as a loud one: the heights
+    // times this, which brings the file's highest peak to full scale, at most kMaxWaveGain
+    // (so that near silence stays small). The look only; 1 for an empty overview.
+    static constexpr double kMaxWaveGain = 8.0;
+    static double WaveDisplayGain(const WaveOverview& wave);
+    // Round 8 (the user's wish): where grains can start is clear, the rest is shaded. The
+    // file from 0 to 1 in pieces, each with its shade: 0 clear (the spray range round the
+    // playhead, wrapped round the file as the core wraps it; without spray the whole loop),
+    // 1 light (the loop outside that range), 2 dark (outside both). Shares of the file.
+    struct Shade {
+        double from = 0, to = 0;
+        int level = 0;
+    };
+    static std::vector<Shade> SprayShades(double loop_from, double loop_to, double head, double spray);
+    // Round 7 (the user's wish): the waveform turns round the glass with the playback, at its
+    // tempo and in its direction, so that it glides under the playhead; what runs out at one
+    // rim comes in again at the other. The turn is a share of the file: the file's share s
+    // shows at the glass' share Wrap(s - WaveOffset()). It follows the tempo eased by
+    // kWaveEase and rests at STOP, Freeze and without displays.
+    static constexpr double kWaveEase = 0.3;
+    double WaveOffset() const { return wave_offset_; }
+    // The turn the glass shows: the waveform's in WAVE, none in GALAXY (the user's test of
+    // round 7: the seconds axis stays where it is there).
+    double ShownTurn() const { return galaxy_ ? 0.0 : wave_offset_; }
+    double WaveTurnSpeed() const { return wave_speed_; } // shares of the file a second
+    // The turn windows opened from now on start with (the preview program; 0 otherwise).
+    static void TurnNewViews(double offset) noexcept;
+    static double NewViewTurn() noexcept;
+    double ScreenShare(double share) const; // the glass' share (0..1) a share of the file shows at
+    // The glass' light over its width (round 7): fading out towards both rims, brightest in
+    // the middle; `screen` is the glass' share.
+    static double ScreenFade(double screen);
+    // The waveform is painted on the CPU into a flat strip (`width` columns over the file,
+    // `height` rows from the top to the bottom of the plate), which wraps round at the file's
+    // ends; each frame the strip is laid onto the glass through the lens, turned by the
+    // offset. The map holds, per pixel of a square glass of `size` pixels, where in the strip
+    // it reads (16.16 fixed point) and its light (0..256, 0 outside the disc).
+    struct WaveMap {
+        std::uint32_t size = 0, width = 0, height = 0;
+        std::vector<std::int32_t> u, v;
+        std::vector<std::uint16_t> light;
+    };
+    static void MakeWaveMap(std::uint32_t size, std::uint32_t width, std::uint32_t height, WaveMap& map);
+    static void RemapWave(const PixelBuffer& strip, const WaveMap& map, double offset, PixelBuffer& out);
     static Star StarDirection(std::uint32_t number);                 // a unit vector
     static double StarStart(std::uint32_t number, double tempo);     // its distance at birth (0..1)
     static double StarFly(double reach, double tempo, double seconds); // its distance after flying
@@ -242,9 +287,17 @@ class MapView : public VSTGUI::CView {
     double Ahead(Clock::time_point now) const;
     void DrawDropHighlight(VSTGUI::CDrawContext* context);
     void DrawWave(VSTGUI::CDrawContext* context, const VSTGUI::CRect& glass, Clock::time_point now);
-    // The WAVE redesign: wave_layers_ for the waveform wave_, in `colours`, at the device
-    // scale `scale`, for a glass of `size`; `body` stays null if it cannot be made.
+    // The WAVE redesign: the strip, the map and the still detail for the waveform wave_, in
+    // `colours`, at the device scale `scale`, for a glass of `size`; `soft` stays null if
+    // it cannot be made.
     void MakeWaveLayers(const SkinColours& colours, double scale, VSTGUI::CPoint size);
+    // Round 7: the crisp outline of the peaks, drawn each frame where the turn puts it.
+    void DrawOutline(VSTGUI::CDrawContext* context, const VSTGUI::CRect& glass, double scale);
+    double wave_offset_ = NewViewTurn(), wave_speed_ = 0.0, wave_rate_ = 0.0;
+    // The glass point of the glass' share `screen` (not turned) and `down`.
+    VSTGUI::CPoint GlassPoint(double screen, double down) const;
+    // A region of the plate between two of the glass' shares, from <= to, none round the rim.
+    void FillScreen(VSTGUI::CDrawContext* context, double from, double to, VSTGUI::CColor colour);
     void DrawGalaxy(VSTGUI::CDrawContext* context, const VSTGUI::CRect& glass);
     void DrawDust(VSTGUI::CDrawContext* context, const VSTGUI::CRect& glass);
     double turn_direction_ = 1.0, turn_speed_ = 0.0, turn_rate_ = 0.0, galaxy_angle_ = 0.0;
@@ -352,11 +405,17 @@ class MapView : public VSTGUI::CView {
     // device scale it was made for. The WAVE redesign: three layers, drawn in this order:
     // `depth` a soft blurred halo (at a capped resolution), `body` the translucent peaks
     // and the RMS body, `detail` the crisp peak outline, the equator band and the bulge.
+    // Round 7: `soft` the strip laid onto the glass (halo, peaks, body and core), made again
+    // when the turn moves on; `detail` the still equator band and bulge.
     struct WaveLayers {
-        VSTGUI::SharedPointer<VSTGUI::CBitmap> depth, body, detail;
+        VSTGUI::SharedPointer<VSTGUI::CBitmap> soft, detail;
     };
     WaveLayers wave_layers_;
-    std::vector<WaveColumn> wave_columns_; // reused between rebuilds
+    std::vector<WaveColumn> wave_columns_; // for the outline, at the device's resolution
+    PixelBuffer wave_strip_, wave_glass_;
+    WaveMap wave_map_;
+    double wave_drawn_offset_ = -1.0; // the offset `soft` shows
+    VSTGUI::CColor outline_ink_;
     std::shared_ptr<const WaveOverview> cached_wave_; // held, so no other can take its address
     std::shared_ptr<const Skin> cached_skin_;
     // Beta 2: HUE turns the waveform's colour; the WAVE redesign also takes the nebula's two

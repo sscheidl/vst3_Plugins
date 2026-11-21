@@ -150,6 +150,45 @@ size, so it costs nothing extra per frame.
 * **Fix:** A GUI preset chosen from the menu comes in its own colours. A HUE turned before
   is set back, also when the same preset is chosen again.
 
+### Round 7 (2026-11-21): the waveform turns round the glass
+
+* **WAVE turns with the playback**, at its tempo and in its direction (the other way
+  backward), eased; it rests at STOP and Freeze.
+  - The waveform glides under the playhead, which stands still while it plays and jumps
+    only at the loop's turn, as before.
+  - What runs out at one rim comes in again at the other; a thin seam marks where the
+    file's end meets its start.
+  - The loop's brackets, the spray range, the grains, the grid, the seconds axis on the ring
+    and a click into the glass follow the turn. A new file starts unturned.
+  - In GALAXY the glass shows no turn: the seconds axis stays where it is and the position
+    triangle moves along it as before (the user's test).
+* **How it is drawn:**
+  - The waveform is painted on the CPU into a flat strip, once per file, look and size.
+  - Each frame the strip is laid onto the glass through the lens, turned (measured: at most
+    1.4 ms at 100 %). The soft layers are made at one pixel per window unit and scaled up
+    by the device.
+  - The crisp peak outline is drawn each frame as a few stroked paths.
+  - The equator line and the bulge do not turn.
+* **Look** (towards the user's reference):
+  - softer passages between the layers, with a middle layer between the body and the peaks;
+  - more transparent further from the middle line;
+  - a thin bright equator line from rim to rim;
+  - the waveform fades towards the glass' rims instead of the file's ends.
+
+### Round 8 (2026-11-21, the user's wishes)
+
+* **Spray display inverted (WAVE):** where grains can start is clear, the rest is shaded.
+  - Clear: the spray range round the playhead, also where it reaches beyond the loop and
+    round the file's end.
+  - A light veil over the rest of the loop, the dark veil outside both.
+  - Without spray the whole loop is clear, as before.
+  - The light fill over the spray range is gone; the skin colour `spray_fill` is no longer
+    drawn.
+* **Quiet files are shown as tall as loud ones:** the waveform is scaled so that the file's
+  highest peak reaches full scale, at most 8 times (18 dB). The look only.
+* **GALAXY / WAVE:** each name lies on a flat key let into the chassis, rounded at its outer
+  end and hollowed along its arc; the chosen one is a little lighter in the accent colour.
+
 ## 1.0.0-beta.1 (2026-11-20), "1.0 beta 1"
 
 The closed, non-profit beta. The code equals 0.2.10; sound, state format and controls are

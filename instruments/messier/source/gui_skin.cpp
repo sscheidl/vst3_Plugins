@@ -340,6 +340,51 @@ SharedPointer<CBitmap> MakeBitmap(const PixelBuffer& pixels) noexcept {
     }
 }
 
+bool WritePixels(CBitmap* bitmap, const PixelBuffer& pixels) noexcept {
+    try {
+        if(!bitmap || !pixels || pixels.bytes.size() < std::size_t(pixels.width) * pixels.height * 4)
+            return false;
+        auto access = owned(CBitmapPixelAccess::create(bitmap, true));
+        if(!access || !access->getPlatformBitmapPixelAccess() || access->getBitmapWidth() != pixels.width
+           || access->getBitmapHeight() != pixels.height)
+            return false;
+        auto* target = access->getPlatformBitmapPixelAccess();
+        std::uint8_t* address = target->getAddress();
+        const std::uint32_t row = target->getBytesPerRow();
+        for(std::uint32_t y = 0; y < pixels.height; ++y)
+            std::memcpy(address + std::size_t(y) * row, pixels.bytes.data() + std::size_t(y) * pixels.width * 4,
+                        std::size_t(pixels.width) * 4);
+        return true; // the accessor goes when it returns: only then does the bitmap show them
+    } catch(...) {
+        return false;
+    }
+}
+
+ChannelOrder PlatformChannelOrder() noexcept {
+    static const ChannelOrder order = [] {
+        ChannelOrder o;
+        try {
+            PlatformBitmapPtr platform = getPlatformFactory().createBitmap(CPoint(1, 1));
+            if(!platform)
+                return o;
+            auto bitmap = makeOwned<CBitmap>(platform);
+            auto access = owned(CBitmapPixelAccess::create(bitmap, true));
+            if(!access || !access->getPlatformBitmapPixelAccess())
+                return o;
+            using Format = IPlatformBitmapPixelAccess::PixelFormat;
+            switch(access->getPlatformBitmapPixelAccess()->getPixelFormat()) {
+                case Format::kARGB: return ChannelOrder{1, 2, 3, 0};
+                case Format::kRGBA: return ChannelOrder{0, 1, 2, 3};
+                case Format::kABGR: return ChannelOrder{3, 2, 1, 0};
+                case Format::kBGRA: return ChannelOrder{2, 1, 0, 3};
+            }
+        } catch(...) {
+        }
+        return o;
+    }();
+    return order;
+}
+
 void TurnPixels(const PixelBuffer& from, double degrees, PixelBuffer& to) {
     // MS-R63 (the GUI review of beta 2): bilinear in 16.16 fixed point, stepping along each
     // row, over the inscribed disc only; `to` keeps its buffer from the call before.

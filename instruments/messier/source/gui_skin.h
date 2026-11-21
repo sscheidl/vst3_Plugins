@@ -179,6 +179,14 @@ struct PixelBuffer {
 };
 bool ReadPixels(VSTGUI::CBitmap* bitmap, PixelBuffer& pixels) noexcept;
 VSTGUI::SharedPointer<VSTGUI::CBitmap> MakeBitmap(const PixelBuffer& pixels) noexcept;
+// Round 7: `pixels` into a bitmap of the same pixel size made before (the waveform laid onto
+// the glass, made again as it turns), without a new bitmap. False if it does not fit.
+bool WritePixels(VSTGUI::CBitmap* bitmap, const PixelBuffer& pixels) noexcept;
+// Where red, green, blue and alpha lie in a pixel of the platform's order.
+struct ChannelOrder {
+    int red = 2, green = 1, blue = 0, alpha = 3;
+};
+ChannelOrder PlatformChannelOrder() noexcept;
 // `from` turned clockwise by `degrees` about its centre (bilinear), transparent where
 // nothing of it lies.
 // MS-R63: only the disc inscribed in the square is turned, the corners are left clear (the

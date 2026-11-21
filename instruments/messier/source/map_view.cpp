@@ -15,6 +15,7 @@
 #include "vstgui/lib/platform/platformfactory.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -59,26 +60,28 @@ constexpr double kTileShare = 0.9;
 constexpr double kFarDrift = 0.62;
 // A waveform bitmap that could not be made is tried again after this (MS-R47).
 constexpr auto kWaveRetry = std::chrono::seconds(2);
-// The WAVE redesign, step 2: the depth layer is made at this device scale, whatever the
-// window's (a blurred picture scales up without loss, and it stays cheap at 200 %), blurred
-// by kDepthBlur window units, kDepthTall times as tall as the peaks, at kDepthLayer of the
-// waveform's light.
-constexpr double kDepthScale = 0.5;
-constexpr double kDepthBlur = 9.0;
-constexpr double kDepthTall = 1.3;
-constexpr double kDepthLayer = 0.65;
-// Step 1: the crisp outline of the peaks, at this share of the light.
-constexpr double kOutline = 0.6;
-// Round 6: the waveform's body and detail are drawn at this light (times WAVE).
-constexpr double kWaveLight = 0.5;
-// The detail layer (outline, band, bulge and the core) is drawn at kDetailLight, so that the
-// core can be bright; outline, band and bulge are made kDetailDim fainter in it, which keeps
-// them as they were.
-constexpr double kDetailLight = 0.85;
-constexpr double kDetailDim = kWaveLight / kDetailLight;
-// Round 6 (the user's wish): the warm white core round the middle line, over at most
-// kCoreHalf either side, fading with kCoreWidth, full once the body reaches kCoreFull.
-constexpr double kCoreHalf = 0.09, kCoreWidth = 0.045, kCoreFull = 0.25, kCoreLight = 0.95;
+// Round 7: the waveform is laid onto the glass at kSoftScale pixels per window unit (soft
+// layers; the device scales them up) from a strip kStripDetail times the glass' size (the
+// lens enlarges the middle by 1 + kLens); drawn at kSoftLight times WAVE.
+constexpr double kSoftScale = 1.0;
+constexpr double kStripDetail = 1.0 + lens::kLens;
+constexpr double kSoftLight = 0.85;
+// The strip's layers (round 7, towards the user's reference): the halo, kHaloTall times as
+// tall as the peaks and blurred by a box of kHaloBlur window units; the translucent peaks;
+// a middle layer kMidShare of the way from the body to the peaks; the RMS body; their
+// edges fade over kEdgeSoft of the plate's half height.
+constexpr double kHaloAlpha = 0.6, kHaloTall = 1.3, kHaloBlur = 8.0;
+constexpr double kPeakAlpha = 0.22, kMidAlpha = 0.32, kBodyAlpha = 0.7, kMidShare = 0.5, kEdgeSoft = 0.06;
+// The narrow warm white core round the middle line (round 6, the user's wish), fading with
+// kCoreWidth, full once the body reaches kCoreFull.
+constexpr double kCoreWidth = 0.045, kCoreFull = 0.25, kCoreAlpha = 1.0;
+// Round 8: the veils of glass over the waveform: outside the loop and the spray range, and
+// over the loop outside the spray range.
+constexpr double kOutsideVeil = 0.6, kLoopVeil = 0.2;
+// The file's ends fade over this share: a thin seam where its end meets its start.
+constexpr double kSeam = 0.006;
+// The crisp outline of the peaks, the equator line (and its glow) and the bulge.
+constexpr double kOutlineLight = 0.32, kBandLine = 0.7, kBandGlow = 0.14, kBulge = 0.16;
 const VSTGUI::CColor kCoreInk(255, 238, 214);
 
 double Seconds(MapView::Clock::duration d) {
@@ -139,6 +142,8 @@ void MapView::ShowAt(const EngineDisplay& display, std::shared_ptr<const WaveOve
         ended_count_ = 0;
         stars_ = {}; // B2A.2: no star of the file before flies on
         next_star_ = 0;
+        if(display_.frames != 0) // round 7: another file starts unturned
+            wave_offset_ = wave_speed_ = wave_rate_ = 0.0;
     } else if(!resting_) {
         // MS-R53 (0.2.4): on the audio's own time, the quanta rendered between the two
         // displays, not the time between their arrivals. Each grain of the display before
@@ -274,6 +279,18 @@ void MapView::AdvanceDrift(Clock::time_point now) noexcept {
     EaseTurn(turn_speed_, turn_rate_, turn_target, dt);
     const auto degrees = [](double a) { return a - 360.0 * std::floor(a / 360.0); };
     galaxy_angle_ = degrees(galaxy_angle_ + turn_speed_ * dt * 360.0 / kGalaxyTurn);
+    // Round 7: the waveform turns with the playback, at its tempo and in its direction (a
+    // share of the file a second), so that it glides under the playhead; never the change of
+    // the read position, which jumps at the loop's turn.
+    {
+        const EngineDisplay& d = display_;
+        const bool rest = stopped_ || resting_ || d.frozen || d.frames == 0 || Seconds(now - shown_at_) > kDriftStaleAfter;
+        const double target = rest || !std::isfinite(d.head_speed) ? 0.0 : d.head_speed / d.frames;
+        EaseTurn(wave_speed_, wave_rate_, target, dt, kWaveEase);
+        if(!std::isfinite(wave_speed_) || !std::isfinite(wave_rate_))
+            wave_speed_ = wave_rate_ = 0.0;
+        wave_offset_ = turn(wave_offset_ + wave_speed_ * dt);
+    }
     // Round 2: the dark clouds turn against the galaxy, so that they show by their motion.
     for(std::size_t k = 0; k < dust_layers_.size(); ++k) {
         const double speed = k == 0 ? 1.0 : kSecondDustSpeed;
@@ -281,13 +298,13 @@ void MapView::AdvanceDrift(Clock::time_point now) noexcept {
     }
 }
 
-void MapView::EaseTurn(double& speed, double& rate, double target, double dt) noexcept {
+void MapView::EaseTurn(double& speed, double& rate, double target, double dt, double ease) noexcept {
     // Round 5 (the user's test: FREEZE started and stopped the turn a little jerkily): a
     // critically damped follower, so that the speed leaves and reaches its target along an S
     // without overshoot, and its change of speed has no step either.
     if(!(dt > 0.0) || !std::isfinite(target))
         return;
-    constexpr double omega = 2.0 / kTurnEase;
+    const double omega = 2.0 / ease;
     rate += (omega * omega * (target - speed) - 2.0 * omega * rate) * dt;
     speed += rate * dt;
     if(target == 0.0 && std::abs(speed) < 0.001 && std::abs(rate) < 0.001)
@@ -375,17 +392,48 @@ double MapView::GlassRadius() const {
     return std::max(1.0, std::min(all.getWidth(), all.getHeight()) / 2 - L::kAxisRoom - L::kRingWidth);
 }
 
-CPoint MapView::PlateToView(double share, double down) const {
-    const lens::Point p = lens::ToGlass(share, down);
+namespace {
+std::atomic<double> g_new_view_turn{0.0};
+}
+
+void MapView::TurnNewViews(double offset) noexcept {
+    g_new_view_turn = std::isfinite(offset) ? offset - std::floor(offset) : 0.0;
+}
+
+double MapView::NewViewTurn() noexcept {
+    return g_new_view_turn;
+}
+
+double MapView::ScreenShare(double share) const {
+    return Wrap(share - ShownTurn(), 0.0, 1.0);
+}
+
+double MapView::ScreenFade(double screen) {
+    const auto smooth = [](double x) {
+        x = std::clamp(x, 0.0, 1.0);
+        return x * x * (3 - 2 * x);
+    };
+    const double rims = smooth(screen / 0.12) * smooth((1.0 - screen) / 0.12);
+    return rims * (0.62 + 0.38 * std::exp(-std::pow((screen - 0.5) / 0.28, 2)));
+}
+
+CPoint MapView::GlassPoint(double screen, double down) const {
+    const lens::Point p = lens::ToGlass(screen, down);
     const CPoint c = GlassCentre();
     const double r = GlassRadius();
     return CPoint(c.x + p.x * r, c.y + p.y * r);
 }
 
+CPoint MapView::PlateToView(double share, double down) const {
+    return GlassPoint(ScreenShare(share), down); // round 7: turned with the waveform
+}
+
 double MapView::ShareAt(double x, double y) const {
     const CPoint c = GlassCentre();
     const double r = GlassRadius();
-    return lens::FromGlass((x - c.x) / r, (y - c.y) / r).x;
+    const double screen = lens::FromGlass((x - c.x) / r, (y - c.y) / r).x;
+    const double turn = ShownTurn(); // round 7
+    return turn == 0.0 ? screen : Wrap(screen + turn, 0.0, 1.0);
 }
 
 bool MapView::hitTest(const CPoint& where, const Event& event) {
@@ -470,7 +518,8 @@ void MapView::Tick() noexcept {
 
 bool MapView::Moving(Clock::time_point now) const {
     const EngineDisplay& d = display_;
-    if(turn_speed_ != 0.0 || turn_rate_ != 0.0 || drift_speed_ != 0.0 || recolour_pending_)
+    if(turn_speed_ != 0.0 || turn_rate_ != 0.0 || drift_speed_ != 0.0 || recolour_pending_ || wave_speed_ != 0.0
+       || wave_rate_ != 0.0)
         return true;
     if(start_known_ && size_known_ && now - loop_changed_at_ < kPreview + kFrameInterval)
         return true;
@@ -1113,7 +1162,51 @@ void MapView::DrawStarfield(CDrawContext* context, CPoint centre, double radius,
     }
 }
 
-void MapView::WaveColumns(const WaveOverview& w, int count, std::vector<WaveColumn>& columns) {
+double MapView::WaveDisplayGain(const WaveOverview& w) {
+    int peak = 0;
+    for(std::uint32_t j = 0; j < std::min<std::uint32_t>(w.columns, WaveOverview::kMaxColumns); ++j)
+        peak = std::max({peak, static_cast<int>(w.high[j]), -static_cast<int>(w.low[j])});
+    return peak > 0 ? std::clamp(32768.0 / peak, 1.0, kMaxWaveGain) : 1.0;
+}
+
+std::vector<MapView::Shade> MapView::SprayShades(double loop_from, double loop_to, double head, double spray) {
+    loop_from = std::clamp(loop_from, 0.0, 1.0);
+    loop_to = std::clamp(loop_to, loop_from, 1.0);
+    const bool sprayed = spray > 0.0 && std::isfinite(spray) && std::isfinite(head);
+    const double from = sprayed ? head - spray : 0.0, to = sprayed ? head + spray : 0.0;
+    const auto in_spray = [&](double share) {
+        if(!sprayed)
+            return false;
+        if(to - from >= 1.0)
+            return true;
+        for(const double shift : {-1.0, 0.0, 1.0})
+            if(share >= from + shift && share <= to + shift)
+                return true;
+        return false;
+    };
+    std::vector<double> cuts{0.0, 1.0, loop_from, loop_to};
+    if(sprayed && to - from < 1.0)
+        for(const double edge : {from, to})
+            cuts.push_back(edge - std::floor(edge));
+    std::sort(cuts.begin(), cuts.end());
+    std::vector<Shade> shades;
+    for(std::size_t k = 1; k < cuts.size(); ++k) {
+        const double a = cuts[k - 1], b = cuts[k];
+        if(!(b > a))
+            continue;
+        const double middle = (a + b) / 2;
+        const bool in_loop = middle >= loop_from && middle <= loop_to;
+        // Without spray the grains start at the playhead, anywhere in the loop: all of it clear.
+        const int level = in_spray(middle) || (!sprayed && in_loop) ? 0 : in_loop ? 1 : 2;
+        if(!shades.empty() && shades.back().level == level)
+            shades.back().to = b;
+        else
+            shades.push_back({a, b, level});
+    }
+    return shades;
+}
+
+void MapView::WaveColumns(const WaveOverview& w, int count, std::vector<WaveColumn>& columns, double gain) {
     columns.clear();
     if(w.columns == 0 || count < 1)
         return;
@@ -1131,9 +1224,11 @@ void MapView::WaveColumns(const WaveOverview& w, int count, std::vector<WaveColu
         }
         WaveColumn column;
         column.share = (k + 0.5) / count;
-        column.top = -kWaveHeight * high / 32768.0;
-        column.bottom = -kWaveHeight * low / 32768.0;
-        column.body = std::clamp(kWaveHeight * body / 32768.0, 0.0, kWaveHeight * std::max(high, -low) / 32768.0);
+        // Round 8: `gain` times as tall, never beyond full scale.
+        const auto tall = [&](double value) { return std::clamp(kWaveHeight * gain * value / 32768.0, -kWaveHeight, kWaveHeight); };
+        column.top = -tall(high);
+        column.bottom = -tall(low);
+        column.body = std::clamp(tall(body), 0.0, tall(std::max(high, -low)));
         columns.push_back(column);
     }
 }
@@ -1149,8 +1244,8 @@ void MapView::DrawWave(CDrawContext* context, const CRect& glass, Clock::time_po
                            && cached_size_ == size;
     const bool same_key = same_rest && cached_colours_ == colours;
     // MS-R67: a new colour alone (HUE) is made at most every kRecolourEvery.
-    bool rebuild = !wave_layers_.body || !same_key;
-    if(rebuild && wave_layers_.body && same_rest && !Recolour(now))
+    bool rebuild = !wave_layers_.soft || !same_key;
+    if(rebuild && wave_layers_.soft && same_rest && !Recolour(now))
         rebuild = false;
     if(rebuild) {
         // MS-R47: bitmaps that could not be made for this key are not tried on every
@@ -1165,182 +1260,336 @@ void MapView::DrawWave(CDrawContext* context, const CRect& glass, Clock::time_po
         cached_size_ = size;
         wave_failed_at_ = now;
         MakeWaveLayers(c, scale, size);
-        wave_failed_ = !wave_layers_.body;
+        wave_failed_ = !wave_layers_.soft;
     }
-    if(!wave_layers_.body)
+    if(!wave_layers_.soft)
         return;
+    // Round 7: laid onto the glass again where the turn has moved it.
+    if(wave_drawn_offset_ != wave_offset_) {
+        RemapWave(wave_strip_, wave_map_, wave_offset_, wave_glass_);
+        if(WritePixels(wave_layers_.soft, wave_glass_))
+            wave_drawn_offset_ = wave_offset_;
+    }
     // 0.2.6: WAVE scales it (at most fully opaque). Clearer inside the loop: the veil
     // outside it follows in DrawUnchecked.
-    // Round 3: drawn stronger, as its ends and peaks are darkened in the bitmap.
-    // Round 6 (the user's test): more transparent (was 0.62).
-    const float light = static_cast<float>(std::min(1.0, kWaveLight * wave_gain_));
-    if(wave_layers_.depth)
-        context->drawBitmap(wave_layers_.depth, glass, CPoint(0, 0),
-                            static_cast<float>(std::min(1.0, kDepthLayer * wave_gain_)));
-    context->drawBitmap(wave_layers_.body, glass, CPoint(0, 0), light);
+    context->drawBitmap(wave_layers_.soft, glass, CPoint(0, 0), static_cast<float>(std::min(1.0, kSoftLight * wave_gain_)));
     if(wave_layers_.detail)
-        context->drawBitmap(wave_layers_.detail, glass, CPoint(0, 0),
-                            static_cast<float>(std::min(1.0, kDetailLight * wave_gain_)));
+        context->drawBitmap(wave_layers_.detail, glass, CPoint(0, 0), static_cast<float>(std::min(1.0, wave_gain_)));
+    DrawOutline(context, glass, scale);
+}
+
+namespace {
+
+double Smooth(double x) {
+    x = std::clamp(x, 0.0, 1.0);
+    return x * x * (3 - 2 * x);
+}
+
+// Round 3: brighter along the middle line, darker towards the peaks.
+double Across(double down) {
+    return 0.3 + 0.7 * std::exp(-std::pow(down / 0.42, 2));
+}
+
+struct WaveInks {
+    CColor warm, plate, cool, haze, white, core;
+    ChannelOrder order;
+};
+
+// Round 7: the waveform painted flat, one column per strip column, rows from the top of the
+// plate (-1) to its bottom (1), premultiplied, in the platform's order. Layers, from behind:
+// a blurred halo, the translucent peaks, a softer middle layer half way to the peaks, the
+// RMS body and the narrow warm white core; each fades softly at its edges, more
+// transparent further from the middle line (the user's reference of round 6).
+void PaintWaveStrip(const std::vector<MapView::WaveColumn>& columns, std::uint32_t height, const WaveInks& ink,
+                    int blur, PixelBuffer& strip) {
+    const std::uint32_t width = static_cast<std::uint32_t>(columns.size());
+    strip.width = width;
+    strip.height = height;
+    strip.scale = 1.0;
+    strip.bytes.assign(std::size_t(width) * height * 4, 0);
+    if(width == 0 || height == 0)
+        return;
+    // The halo has `pad` more columns at either end, copies from the other end of the file,
+    // so that its blur runs round the seam as the strip does.
+    const std::uint32_t pad = std::min<std::uint32_t>(width, static_cast<std::uint32_t>(3 * std::max(blur, 0) + 1));
+    PixelBuffer halo;
+    halo.width = width + 2 * pad;
+    halo.height = height;
+    halo.bytes.assign(std::size_t(halo.width) * height * 4, 0);
+    const double dy = 2.0 / height;
+    std::vector<double> down(height), across(height), near(height);
+    std::vector<std::array<double, 3>> colour(height);
+    const auto rgb = [](CColor c) { return std::array<double, 3>{c.red / 255.0, c.green / 255.0, c.blue / 255.0}; };
+    const auto mix = [](std::array<double, 3> a, std::array<double, 3> b, double k) {
+        return std::array<double, 3>{a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k};
+    };
+    const auto warm = rgb(ink.warm), plate = rgb(ink.plate), cool = rgb(ink.cool), haze = rgb(ink.haze),
+               white = rgb(ink.white), core = rgb(ink.core);
+    for(std::uint32_t y = 0; y < height; ++y) {
+        down[y] = (y + 0.5) * dy - 1.0;
+        across[y] = Across(down[y]);
+        near[y] = std::exp(-std::pow(down[y] / kCoreWidth, 2));
+        // Step 3: a bright, slightly warm core, the wave colour half way, cooler and deeper
+        // towards the peaks.
+        const double t = std::clamp(std::abs(down[y]) / MapView::kWaveHeight, 0.0, 1.0);
+        colour[y] = t < 0.5 ? mix(warm, plate, t / 0.5) : mix(plate, cool, (t - 0.5) / 0.5);
+    }
+    // How much of the pixel round `d` lies in [lo, hi]; and the same with edges kEdgeSoft wide.
+    const auto cover = [&](double lo, double hi, double d) {
+        return std::clamp((std::min(hi, d + dy / 2) - std::max(lo, d - dy / 2)) / dy, 0.0, 1.0);
+    };
+    const auto soft = [&](double lo, double hi, double d) {
+        if(!(hi > lo))
+            return 0.0;
+        return Smooth((d - lo) / kEdgeSoft + 0.5) * Smooth((hi - d) / kEdgeSoft + 0.5);
+    };
+    const ChannelOrder& o = ink.order;
+    const auto put = [&](std::uint8_t* px, const std::array<double, 3>& c, double a) {
+        a = std::clamp(a, 0.0, 1.0);
+        px[o.red] = static_cast<std::uint8_t>(std::lround(std::clamp(c[0], 0.0, 1.0) * a * 255));
+        px[o.green] = static_cast<std::uint8_t>(std::lround(std::clamp(c[1], 0.0, 1.0) * a * 255));
+        px[o.blue] = static_cast<std::uint8_t>(std::lround(std::clamp(c[2], 0.0, 1.0) * a * 255));
+        px[o.alpha] = static_cast<std::uint8_t>(std::lround(a * 255));
+    };
+    for(std::uint32_t x = 0; x < width; ++x) {
+        const MapView::WaveColumn& col = columns[x];
+        // The file's ends fade over kSeam: a thin seam where the end meets the start.
+        const double seam = Smooth(col.share / kSeam) * Smooth((1.0 - col.share) / kSeam);
+        const double t = col.top, b = col.bottom, m = col.body;
+        const double mid_top = -(m + std::max(0.0, -t - m) * kMidShare);
+        const double mid_bottom = m + std::max(0.0, b - m) * kMidShare;
+        const double loud = std::min(1.0, m / kCoreFull);
+        const double halo_top = std::max(-0.98, t * kHaloTall), halo_bottom = std::min(0.98, b * kHaloTall);
+        for(std::uint32_t y = 0; y < height; ++y) {
+            const double d = down[y];
+            const double ah = kHaloAlpha * cover(halo_top, halo_bottom, d) * (0.2 + 0.8 * across[y]);
+            if(ah > 0.0)
+                put(&halo.bytes[(std::size_t(y) * halo.width + pad + x) * 4], haze, ah);
+            const double peak = cover(t, b, d);
+            if(!(peak > 0.0))
+                continue;
+            const double body = soft(-m, m, d);
+            const double ap = kPeakAlpha * peak, am = kMidAlpha * soft(mid_top, mid_bottom, d), ab = kBodyAlpha * body;
+            const double a = (1.0 - (1.0 - ap) * (1.0 - am) * (1.0 - ab)) * across[y] * seam;
+            const double ac = kCoreAlpha * near[y] * loud * body * seam;
+            const auto lit = mix(colour[y], white, 0.18 * body);
+            // The core over the waveform (premultiplied "over").
+            const double alpha = a * (1.0 - ac) + ac;
+            if(!(alpha > 0.0))
+                continue;
+            const std::array<double, 3> c{(lit[0] * a * (1.0 - ac) + core[0] * ac) / alpha,
+                                          (lit[1] * a * (1.0 - ac) + core[1] * ac) / alpha,
+                                          (lit[2] * a * (1.0 - ac) + core[2] * ac) / alpha};
+            put(&strip.bytes[(std::size_t(y) * width + x) * 4], c, alpha);
+        }
+    }
+    // The halo blurred, then the waveform over it; the strip wraps round at the file's
+    // ends, the blur's own edges fade (they lie at the seam).
+    for(std::uint32_t y = 0; y < height; ++y) {
+        std::uint8_t* row = &halo.bytes[std::size_t(y) * halo.width * 4];
+        std::memcpy(row, row + std::size_t(width) * 4, std::size_t(pad) * 4);                   // the file's end
+        std::memcpy(row + std::size_t(pad + width) * 4, row + std::size_t(pad) * 4, std::size_t(pad) * 4); // its start
+    }
+    BlurPixels(halo, blur);
+    for(std::uint32_t y = 0; y < height; ++y)
+        for(std::uint32_t x = 0; x < width; ++x) {
+            std::uint8_t* to = &strip.bytes[(std::size_t(y) * width + x) * 4];
+            const std::uint8_t* from = &halo.bytes[(std::size_t(y) * halo.width + pad + x) * 4];
+            const std::uint32_t keep = 255 - to[o.alpha];
+            for(int k = 0; k < 4; ++k)
+                to[k] = static_cast<std::uint8_t>(std::min<std::uint32_t>(255, to[k] + (from[k] * keep + 127) / 255));
+        }
+}
+
+} // namespace
+
+void MapView::MakeWaveMap(std::uint32_t size, std::uint32_t width, std::uint32_t height, WaveMap& map) {
+    map.size = size;
+    map.width = width;
+    map.height = height;
+    const std::size_t count = std::size_t(size) * size;
+    map.u.assign(count, 0);
+    map.v.assign(count, 0);
+    map.light.assign(count, 0);
+    if(size == 0 || width == 0 || height == 0)
+        return;
+    for(std::uint32_t py = 0; py < size; ++py)
+        for(std::uint32_t px = 0; px < size; ++px) {
+            const double gx = (px + 0.5) / size * 2.0 - 1.0, gy = (py + 0.5) / size * 2.0 - 1.0;
+            const double rho = std::hypot(gx, gy);
+            if(rho >= 1.0)
+                continue;
+            const lens::Point plate = lens::FromGlass(gx, gy);
+            const std::size_t i = std::size_t(py) * size + px;
+            map.u[i] = static_cast<std::int32_t>(std::llround((plate.x * width - 0.5) * 65536.0));
+            map.v[i] = static_cast<std::int32_t>(std::llround(((plate.y + 1.0) / 2.0 * height - 0.5) * 65536.0));
+            const double rim = std::clamp((1.0 - rho) * size / 2.0, 0.0, 1.0); // a soft rim
+            map.light[i] = static_cast<std::uint16_t>(std::lround(256.0 * ScreenFade(plate.x) * rim));
+        }
+}
+
+void MapView::RemapWave(const PixelBuffer& strip, const WaveMap& map, double offset, PixelBuffer& out) {
+    const std::size_t count = std::size_t(map.size) * map.size;
+    // Pixels outside the disc are never written: cleared once per size.
+    if(out.width != map.size || out.height != map.size || out.bytes.size() != count * 4)
+        out.bytes.assign(count * 4, 0);
+    out.width = out.height = map.size;
+    if(!strip || strip.width != map.width || strip.height != map.height || map.light.size() != count
+       || strip.bytes.size() < std::size_t(strip.width) * strip.height * 4 || strip.width > 16384) {
+        std::fill(out.bytes.begin(), out.bytes.end(), std::uint8_t{0});
+        return;
+    }
+    const std::int32_t w = static_cast<std::int32_t>(strip.width), h = static_cast<std::int32_t>(strip.height);
+    const std::int32_t span = w << 16; // below 2^30: a sum of two stays an int32
+    const double turn = std::isfinite(offset) ? offset - std::floor(offset) : 0.0;
+    const std::int32_t shift = static_cast<std::int32_t>(std::llround(turn * span)) % span;
+    const std::int32_t v_max = (h - 1) << 16;
+    const std::uint8_t* src = strip.bytes.data();
+    const std::size_t row = std::size_t(w) * 4;
+    const std::int32_t* us = map.u.data();
+    const std::int32_t* vs = map.v.data();
+    const std::uint16_t* lights = map.light.data();
+    std::uint8_t* to = out.bytes.data();
+    for(std::size_t i = 0; i < count; ++i, to += 4) {
+        const std::uint32_t light = lights[i];
+        if(light == 0)
+            continue;
+        std::int32_t u = us[i] + shift; // us: from -0.5 to the width, in 16.16
+        if(u >= span)
+            u -= span;
+        else if(u < 0)
+            u += span;
+        const std::int32_t v = std::clamp(vs[i], 0, v_max);
+        const std::int32_t x0 = u >> 16, y0 = v >> 16;
+        const std::uint8_t* p00 = src + std::size_t(y0) * row + std::size_t(x0) * 4;
+        const std::uint8_t* p10 = x0 + 1 == w ? p00 - std::size_t(x0) * 4 : p00 + 4; // round the seam
+        const std::size_t below = y0 + 1 < h ? row : 0;
+        const std::uint8_t* p01 = p00 + below;
+        const std::uint8_t* p11 = p10 + below;
+        if((p00[3] | p10[3] | p01[3] | p11[3] | p00[0] | p10[0] | p01[0] | p11[0]) == 0
+           && (p00[1] | p10[1] | p01[1] | p11[1] | p00[2] | p10[2] | p01[2] | p11[2]) == 0) {
+            to[0] = to[1] = to[2] = to[3] = 0; // clear (premultiplied): most of the strip
+            continue;
+        }
+        const std::uint32_t wx = static_cast<std::uint32_t>((u >> 8) & 0xFF), wy = static_cast<std::uint32_t>((v >> 8) & 0xFF);
+        for(int k = 0; k < 4; ++k) {
+            const std::uint32_t top = p00[k] * (256 - wx) + p10[k] * wx;
+            const std::uint32_t bottom = p01[k] * (256 - wx) + p11[k] * wx;
+            const std::uint32_t value = (top * (256 - wy) + bottom * wy + 32768) >> 16;
+            to[k] = static_cast<std::uint8_t>((value * light + 128) >> 8);
+        }
+    }
 }
 
 void MapView::MakeWaveLayers(const SkinColours& c, double scale, CPoint size) {
-    // Once per file, look and size: the waveform as lines into bitmaps, each column of the
-    // file bent by the lens (beta 2). The WAVE redesign: in three layers, from one list of
-    // columns per resolution.
+    // Round 7: the waveform painted once per file, look and size into a flat strip, which
+    // each frame lays onto the glass through the lens, turned (the soft layers); its crisp
+    // outline is drawn each frame (DrawOutline); the equator band and the bulge do not turn.
     const WaveOverview& w = *wave_;
-    const double r = size.x / 2;
     const CColor white(255, 255, 255);
-    const auto at = [&](double share, double down) {
-        const lens::Point p = lens::ToGlass(share, down);
-        return CPoint(r + p.x * r, r + p.y * r);
-    };
-    // Round 3 (the user's wish): like a galaxy seen edge-on. The waveform sinks softly into
-    // the dark glass at both ends and towards its peaks; it is brightest in the middle of
-    // the file and along the middle line, with a thin bright band there and a glowing
-    // bulge in the centre.
-    const auto smooth = [](double x) {
-        x = std::clamp(x, 0.0, 1.0);
-        return x * x * (3 - 2 * x);
-    };
-    const auto along = [&](double share) {
-        const double ends = smooth(share / 0.14) * smooth((1.0 - share) / 0.14);
-        const double bulge = 0.55 + 0.45 * std::exp(-std::pow(share - 0.5, 2) / (0.24 * 0.24));
-        return ends * bulge;
-    };
-    const auto across = [](double down) { return 0.28 + 0.72 * std::exp(-std::pow(down / 0.4, 2)); };
-    // Step 3: the colour over the amplitude, in the preset's tints (and HUE's): a bright,
-    // slightly warm core round the middle line, the wave colour half way, cooler and
-    // deeper towards the peaks (the nebula's second tint).
-    const CColor warm = Mix(Mix(c.plate_wave, white, 0.42), CColor(255, 214, 172), 0.2);
-    const CColor cool = Mix(c.plate_wave, c.nebula_b, 0.65);
-    const auto ink = [&](double down) {
-        const double t = std::clamp(std::abs(down) / kWaveHeight, 0.0, 1.0);
-        return t < 0.5 ? Mix(warm, c.plate_wave, t / 0.5) : Mix(c.plate_wave, cool, (t - 0.5) / 0.5);
-    };
-    // One column's span from `top` to `bottom` in pieces, each as bright as its height
-    // allows; `lift` mixes in white.
-    const auto span = [&](COffscreenContext& into, double pixel, double share, double top, double bottom,
-                          double strength, double lift, bool coloured, CColor plain) {
-        bottom += 0.5 * pixel / r;
-        const int pieces = std::clamp(static_cast<int>(std::ceil((bottom - top) / 0.08)), 1, 24);
-        for(int p = 0; p < pieces; ++p) {
-            const double d0 = top + (bottom - top) * p / pieces, d1 = top + (bottom - top) * (p + 1) / pieces;
-            const double middle = (d0 + d1) / 2;
-            const CColor colour = coloured ? Mix(ink(middle), white, lift) : plain;
-            into.setFrameColor(WithAlpha(colour, strength * across(middle)));
-            into.drawLine(at(share, d0), at(share, d1));
-        }
-    };
+    const auto pixels = [](double units) { return std::max<std::uint32_t>(16, static_cast<std::uint32_t>(std::lround(units))); };
+    const std::uint32_t glass_px = pixels(size.x * kSoftScale);
+    const std::uint32_t strip_w = pixels(size.x * kSoftScale * kStripDetail);
+    const std::uint32_t strip_h = pixels(size.y * kSoftScale * kStripDetail);
+    WaveInks inks;
+    inks.warm = Mix(Mix(c.plate_wave, white, 0.45), CColor(255, 214, 172), 0.2);
+    inks.plate = c.plate_wave;
+    inks.cool = Mix(c.plate_wave, c.nebula_b, 0.65);
+    inks.haze = Mix(c.plate_wave, c.nebula_a, 0.5);
+    inks.white = white;
+    inks.core = kCoreInk;
+    inks.order = PlatformChannelOrder();
+    const double tall = WaveDisplayGain(w); // round 8: a quiet file as tall as a loud one
+    std::vector<WaveColumn> columns;
+    WaveColumns(w, static_cast<int>(strip_w), columns, tall);
+    PaintWaveStrip(columns, strip_h, inks, std::max(1, static_cast<int>(std::lround(kHaloBlur * kSoftScale * kStripDetail))),
+                   wave_strip_);
+    if(wave_map_.size != glass_px || wave_map_.width != strip_w || wave_map_.height != strip_h)
+        MakeWaveMap(glass_px, strip_w, strip_h, wave_map_);
+    RemapWave(wave_strip_, wave_map_, wave_offset_, wave_glass_);
+    wave_glass_.scale = glass_px / size.x; // its pixels span the whole glass
+    wave_layers_.soft = MakeBitmap(wave_glass_);
+    if(!wave_layers_.soft)
+        return;
+    wave_drawn_offset_ = wave_offset_;
+    // The outline's columns, at the device's resolution (the lens enlarges the middle).
+    WaveColumns(w, std::max(64, static_cast<int>(size.x * scale * kStripDetail)), wave_columns_, tall);
+    outline_ink_ = Mix(c.plate_wave, white, 0.55);
 
-    // The body: the translucent peaks and, over them, the dense RMS body (round 4, the
-    // user's experiment with layers), now coloured over the amplitude (step 3).
-    // The middle of the glass is enlarged by the lens: as many columns as it needs.
-    WaveColumns(w, std::max(64, static_cast<int>(size.x * scale * (1.0 + lens::kLens))), wave_columns_);
-    {
-        auto offscreen = COffscreenContext::create(size, scale);
-        if(!offscreen)
-            return;
-        offscreen->beginDraw();
-        offscreen->setDrawMode(kAntiAliasing | kNonIntegralMode);
-        offscreen->setLineWidth(1.0 / scale);
-        for(const WaveColumn& column : wave_columns_) {
-            const double light = along(column.share);
-            if(!(light > 0.01))
-                continue;
-            span(*offscreen, 1.0 / scale, column.share, column.top, column.bottom, kPeakLayer * light, 0.0, true,
-                 white);
-            if(column.body > 0.0)
-                span(*offscreen, 1.0 / scale, column.share, -column.body, column.body, light, 0.18, true, white);
-        }
-        offscreen->endDraw();
-        wave_layers_.body = offscreen->getBitmap();
-        if(!wave_layers_.body)
-            return;
-    }
-
-    // Step 1: the detail: a crisp outline along both peaks, so that transients read
-    // clearly; then the bright band along the middle line and the bulge (round 3).
+    // The still detail: a thin bright equator line from rim to rim with a soft glow round it,
+    // and the bulge in the middle.
     if(auto offscreen = COffscreenContext::create(size, scale)) {
+        const double r = size.x / 2;
+        const auto at = [&](double share, double down) {
+            const lens::Point p = lens::ToGlass(share, down);
+            return CPoint(r + p.x * r, r + p.y * r);
+        };
         offscreen->beginDraw();
         offscreen->setDrawMode(kAntiAliasing | kNonIntegralMode);
-        offscreen->setLineWidth(std::max(0.6, 1.0 / scale));
-        const CColor edge = Mix(c.plate_wave, white, 0.55);
-        for(std::size_t k = 1; k < wave_columns_.size(); ++k) {
-            const WaveColumn& a = wave_columns_[k - 1];
-            const WaveColumn& b = wave_columns_[k];
-            const double light = along((a.share + b.share) / 2);
-            if(!(light > 0.01))
-                continue;
-            for(const auto& [from, to] : {std::pair{a.top, b.top}, std::pair{a.bottom, b.bottom}}) {
-                offscreen->setFrameColor(
-                    WithAlpha(edge, kOutline * kDetailDim * light * (0.5 + 0.5 * across((from + to) / 2))));
-                offscreen->drawLine(at(a.share, from), at(b.share, to));
-            }
-        }
-        // Round 6 (the user's wish, "the kick"): in the innermost part of the body a narrow
-        // passage into a bright, warm white core, as loud as its column.
-        for(const WaveColumn& column : wave_columns_) {
-            const double light = along(column.share);
-            const double core = std::min(column.body, kCoreHalf);
-            if(!(light > 0.01) || !(core > 0.0))
-                continue;
-            const double loud = std::min(1.0, column.body / kCoreFull);
-            const int pieces = std::max(2, static_cast<int>(std::ceil(2 * core / 0.008)));
-            offscreen->setLineWidth(1.0 / scale);
-            for(int p = 0; p < pieces; ++p) {
-                const double d0 = -core + 2 * core * p / pieces, d1 = -core + 2 * core * (p + 1) / pieces;
-                const double near = std::exp(-std::pow((d0 + d1) / 2 / kCoreWidth, 2));
-                offscreen->setFrameColor(WithAlpha(kCoreInk, kCoreLight * light * loud * near));
-                offscreen->drawLine(at(column.share, d0), at(column.share, d1 + 0.5 / (r * scale)));
-            }
-        }
-        const CColor band = Mix(c.plate_wave, white, 0.35);
+        const CColor band = Mix(c.plate_wave, white, 0.6);
         constexpr int kBand = 96;
-        for(const auto& [width, strength] : {std::pair{4.0, 0.16 * kDetailDim}, std::pair{1.2, 0.5 * kDetailDim}}) {
+        for(const auto& [width, strength] : {std::pair{3.5, kBandGlow}, std::pair{1.0, kBandLine}}) {
             offscreen->setLineWidth(width);
             for(int k = 0; k < kBand; ++k) {
                 const double s0 = static_cast<double>(k) / kBand, s1 = static_cast<double>(k + 1) / kBand;
-                offscreen->setFrameColor(WithAlpha(band, strength * along((s0 + s1) / 2)));
+                const double middle = (s0 + s1) / 2;
+                const double rims = Smooth(middle / 0.05) * Smooth((1.0 - middle) / 0.05);
+                offscreen->setFrameColor(WithAlpha(band, strength * rims * (0.7 + 0.3 * ScreenFade(middle))));
                 offscreen->drawLine(at(s0, 0.0), at(s1, 0.0));
             }
         }
-        Blob(offscreen, CPoint(r, r), r * 0.34, band, 0.22 * kDetailDim); // the bulge
+        Blob(offscreen, CPoint(r, r), r * 0.3, band, kBulge);
         offscreen->endDraw();
         wave_layers_.detail = offscreen->getBitmap();
     }
+}
 
-    // Step 2: the depth: the peaks, somewhat taller, in a mix of the wave colour and the
-    // nebula's first tint, blurred into a soft halo. Made at kDepthScale and blurred on the
-    // CPU once per key, so it costs nothing per frame and little at 200 %.
-    // An offscreen context below scale 1 does not shrink what it draws (Direct2D), so it is
-    // made at scale 1 and kDepthScale of the size, and drawn into through an axis-aligned
-    // scale, which the turned-bitmap clip issue does not touch.
-    const CPoint small(std::max(1.0, std::ceil(size.x * kDepthScale)), std::max(1.0, std::ceil(size.y * kDepthScale)));
-    if(auto offscreen = COffscreenContext::create(small, 1.0)) {
-        std::vector<WaveColumn> columns;
-        WaveColumns(w, std::max(32, static_cast<int>(size.x * kDepthScale * (1.0 + lens::kLens))), columns);
-        offscreen->beginDraw();
-        {
-            CDrawContext::Transform shrink(*offscreen, CGraphicsTransform().scale(kDepthScale, kDepthScale));
-            offscreen->setDrawMode(kAntiAliasing | kNonIntegralMode);
-            offscreen->setLineWidth(1.0 / kDepthScale);
-            const CColor haze = Mix(c.plate_wave, c.nebula_a, 0.5);
-            for(const WaveColumn& column : columns) {
-                const double light = along(column.share);
-                if(!(light > 0.01))
-                    continue;
-                span(*offscreen, 1.0 / kDepthScale, column.share, std::max(-0.97, column.top * kDepthTall),
-                     std::min(0.97, column.bottom * kDepthTall), light, 0.0, false, haze);
+void MapView::DrawOutline(CDrawContext* context, const CRect& glass, double scale) {
+    // Step 1, round 7: the crisp outline along both peaks, drawn each frame where the turn
+    // puts it, as paths Direct2D strokes; a few paths, one per step of light.
+    if(wave_columns_.size() < 2)
+        return;
+    const double light = std::min(1.0, kOutlineLight * wave_gain_);
+    if(!(light > 0.0))
+        return;
+    constexpr int kSteps = 6;
+    std::array<SharedPointer<CGraphicsPath>, kSteps> paths;
+    const double r = glass.getWidth() / 2;
+    const auto at = [&](double screen, double down) {
+        const lens::Point p = lens::ToGlass(screen, down);
+        return CPoint(glass.left + r + p.x * r, glass.top + r + p.y * r);
+    };
+    for(int side = 0; side < 2; ++side) {
+        int last_step = -1; // the path the last piece went into, if it goes on from there
+        for(std::size_t k = 1; k < wave_columns_.size(); ++k) {
+            const WaveColumn& a = wave_columns_[k - 1];
+            const WaveColumn& b = wave_columns_[k];
+            const double xa = ScreenShare(a.share), xb = ScreenShare(b.share);
+            const double da = side == 0 ? a.top : a.bottom, db = side == 0 ? b.top : b.bottom;
+            const double seam = Smooth(a.share / kSeam) * Smooth((1.0 - b.share) / kSeam);
+            const double alpha = ScreenFade((xa + xb) / 2) * (0.5 + 0.5 * Across((da + db) / 2)) * seam;
+            if(std::abs(xb - xa) > 0.5 || alpha < 0.04) {
+                last_step = -1;
+                continue;
             }
-        }
-        offscreen->endDraw();
-        PixelBuffer pixels;
-        if(auto bitmap = offscreen->getBitmap(); bitmap && ReadPixels(bitmap, pixels)) {
-            BlurPixels(pixels, std::max(1, static_cast<int>(std::lround(kDepthBlur * kDepthScale))));
-            pixels.scale = pixels.width / size.x; // its pixels span the whole glass
-            wave_layers_.depth = MakeBitmap(pixels);
+            const int step = std::min(kSteps - 1, static_cast<int>(alpha * kSteps));
+            if(!paths[step])
+                paths[step] = owned(context->createGraphicsPath());
+            if(!paths[step])
+                return;
+            if(step != last_step)
+                paths[step]->beginSubpath(at(xa, da));
+            paths[step]->addLine(at(xb, db));
+            last_step = step;
         }
     }
+    context->setLineWidth(std::max(0.6, 1.0 / scale));
+    context->setLineStyle(kLineSolid);
+    for(int step = 0; step < kSteps; ++step)
+        if(paths[step]) {
+            context->setFrameColor(WithAlpha(outline_ink_, light * (step + 0.5) / kSteps));
+            context->drawGraphicsPath(paths[step], CDrawContext::kPathStroked);
+        }
 }
 
 void MapView::FillShares(CDrawContext* context, double from, double to, CColor colour) {
@@ -1348,12 +1597,22 @@ void MapView::FillShares(CDrawContext* context, double from, double to, CColor c
     to = std::clamp(to, from, 1.0);
     if(!(to > from))
         return;
+    // Round 7: on the turned glass; a region over the rim is drawn in two parts.
+    const double a = ScreenShare(from), b = a + (to - from);
+    FillScreen(context, a, std::min(b, 1.0), colour);
+    if(b > 1.0)
+        FillScreen(context, 0.0, b - 1.0, colour);
+}
+
+void MapView::FillScreen(CDrawContext* context, double from, double to, CColor colour) {
+    if(!(to > from))
+        return;
     auto path = owned(context->createGraphicsPath());
     if(!path)
         return;
     const CRect all = getViewSize();
     const auto at = [&](double share, double down) {
-        const CPoint p = PlateToView(share, down);
+        const CPoint p = GlassPoint(share, down);
         return CPoint(all.left + p.x, all.top + p.y);
     };
     constexpr int kDown = 16;
@@ -1415,11 +1674,12 @@ void MapView::DrawTrail(CDrawContext* context, double share, double down, double
     context->setLineWidth(thickness);
     for(int k = 0; k < pieces; ++k) {
         const double f0 = static_cast<double>(k) / pieces, f1 = static_cast<double>(k + 1) / pieces;
-        const double s0 = Wrap(share + behind * length * f0, 0.0, 1.0);
-        const double s1 = Wrap(share + behind * length * f1, 0.0, 1.0);
+        // Round 7: on the turned glass; round its rim the next piece goes on at the other rim.
+        const double s0 = ScreenShare(share + behind * length * f0);
+        const double s1 = ScreenShare(share + behind * length * f1);
         if(std::abs(s1 - s0) > 0.5)
-            continue; // round the file's end: the next piece goes on at its other end
-        const CPoint p0 = PlateToView(s0, down), p1 = PlateToView(s1, down);
+            continue;
+        const CPoint p0 = GlassPoint(s0, down), p1 = GlassPoint(s1, down);
         context->setFrameColor(WithAlpha(tail_ink_, glow(since + (f0 + f1) / 2 * (far - since))));
         context->drawLine(CPoint(all.left + p0.x, all.top + p0.y), CPoint(all.left + p1.x, all.top + p1.y));
     }
@@ -1473,10 +1733,13 @@ void MapView::DrawUnchecked(CDrawContext* context) {
     } else {
         if(file) {
             DrawWave(context, glass, now);
-            // 0.2.2: clearer inside the loop; beta 2: a veil of glass outside it.
-            const CColor veil = WithAlpha(c.glass, 0.6);
-            FillShares(context, 0.0, loop_from, veil);
-            FillShares(context, loop_to, 1.0, veil);
+            // 0.2.2: clearer inside the loop; beta 2: a veil of glass outside it. Round 8 (the
+            // user's wish): clear where grains can start, the spray range round the playhead;
+            // a light veil over the rest of the loop, the dark one outside both.
+            for(const Shade& shade :
+                SprayShades(loop_from, loop_to, HeadAt(now) / frames, d.spray > 0 ? d.spray / frames : 0.0))
+                if(shade.level > 0)
+                    FillShares(context, shade.from, shade.to, WithAlpha(c.glass, shade.level == 1 ? kLoopVeil : kOutsideVeil));
         }
         // The grid: faint lines at the axis' labels, crosses between them at each quarter
         // of the panorama.
@@ -1519,18 +1782,7 @@ void MapView::DrawUnchecked(CDrawContext* context) {
         // The loop, faintly, with its edges in the accent colour; the spray range around
         // the playhead, wrapped around the file as the core wraps it.
         FillShares(context, loop_from, std::max(loop_to, loop_from + 0.5 / (radius * 2)), c.loop_fill);
-        if(d.spray > 0) {
-            const double from = (d.playhead - d.spray) / frames, to = (d.playhead + d.spray) / frames;
-            if(to - from >= 1.0) {
-                FillShares(context, 0.0, 1.0, c.spray_fill);
-            } else {
-                for(const double shift : {-1.0, 0.0, 1.0}) {
-                    const double a = std::max(0.0, from + shift), b = std::min(1.0, to + shift);
-                    if(b > a)
-                        FillShares(context, a, b, c.spray_fill);
-                }
-            }
-        }
+        // Round 8: no light fill over the spray range any more; it is the clear part (above).
         context->setLineWidth(1.5);
         for(const double share : {loop_from, loop_to}) {
             context->setFrameColor(WithAlpha(c.marker, 0.5));
@@ -1641,10 +1893,18 @@ void MapView::DrawUnchecked(CDrawContext* context) {
         const CFontRef font = skin.Sans(10.5);
         for(long k = 0; k * minor <= seconds + 1e-9; ++k) {
             const double t = k * minor;
+            // Round 7: turned with the waveform; the file's end is its start once it turns,
+            // and the marks fade out towards the arc's ends.
+            if(ShownTurn() != 0.0 && t >= seconds - minor * 0.01)
+                break;
             const bool major = std::abs(std::remainder(t, step)) < minor * 0.01;
-            const lens::Point rim = lens::ToGlass(t / seconds, -1.0);
+            const double screen = ScreenShare(t / seconds);
+            const double fade = ShownTurn() == 0.0 ? 1.0 : std::clamp(std::min(screen, 1.0 - screen) / 0.04, 0.0, 1.0);
+            if(!(fade > 0.0))
+                continue;
+            const lens::Point rim = lens::ToGlass(screen, -1.0);
             const double reach = major ? L::kRingWidth - 3 : L::kRingWidth * 0.45;
-            context->setFrameColor(WithAlpha(c.text, major ? 0.8 : 0.4));
+            context->setFrameColor(WithAlpha(c.text, (major ? 0.8 : 0.4) * fade));
             context->drawLine(CPoint(centre.x + rim.x * (radius + 2), centre.y + rim.y * (radius + 2)),
                               CPoint(centre.x + rim.x * (radius + reach), centre.y + rim.y * (radius + reach)));
             if(!major)
@@ -1654,7 +1914,7 @@ void MapView::DrawUnchecked(CDrawContext* context) {
             const double out = radius + L::kRingWidth + 9;
             const CPoint p(centre.x + rim.x * out, centre.y + rim.y * out);
             DrawTracked(context, label, CRect(p.x - w / 2 - 1, p.y - 7, p.x + w / 2 + 1, p.y + 7), kCenterText, 0.3,
-                        font, c.text, &c);
+                        font, WithAlpha(c.text, fade), fade < 1.0 ? nullptr : &c);
         }
     }
 
@@ -1679,7 +1939,7 @@ void MapView::DrawUnchecked(CDrawContext* context) {
         }
         // The position triangle on the ring (beta 2), pointing at the glass.
         if(auto path = owned(context->createGraphicsPath())) {
-            const lens::Point rim = lens::ToGlass(share, -1.0);
+            const lens::Point rim = lens::ToGlass(ScreenShare(share), -1.0);
             const CPoint tip(centre.x + rim.x * (radius + 1), centre.y + rim.y * (radius + 1));
             const CPoint base(centre.x + rim.x * (radius + 11), centre.y + rim.y * (radius + 11));
             const CPoint across(-rim.y * 5.5, rim.x * 5.5);
