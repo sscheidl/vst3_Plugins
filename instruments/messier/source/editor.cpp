@@ -77,8 +77,9 @@ class AccentSlider : public CSlider {
               int32_t(rect.getWidth() - 2 * kTrackInset + 1), nullptr, nullptr),
       restore_(std::move(restore)) {
         setSliderMode(CSliderMode::FreeClick);
-        setWheelInc(1.0f / (360 - kAccentBlueHue));
-        setTooltipText("Colour of the nebula and the START bar: red, violet, blue. Double-click: the preset's colour.");
+        setWheelInc(static_cast<float>((1.0 - 2.0 * kAccentOff) / 360.0));
+        setTooltipText("Colour of the nebula and the accents, all round the colour circle. At either end, or "
+                       "double-click: the preset's own colours.");
     }
 
     CMouseEventResult onMouseDown(CPoint& point, const CButtonState& buttons) override {
@@ -115,8 +116,14 @@ class AccentSlider : public CSlider {
             // Beta 2 (the user's wish): neutral, not a rainbow; the colour shows on the nebula.
             context->setFillColor(CColor(0, 0, 0, 120));
             context->drawRect(CRect(left, y - 2, right, y + 2), kDrawFilled);
+            // Round 10: the track over the colour circle; the short stretches at either end,
+            // where nothing turns, stay dark, parted by a small notch.
+            const double off_left = left + (right - left) * kAccentOff, off_right = right - (right - left) * kAccentOff;
             context->setFillColor(CColor(200, 200, 206, 140));
-            context->drawRect(CRect(left, y - 1, right, y + 1), kDrawFilled);
+            context->drawRect(CRect(off_left + 1.5, y - 1, off_right - 1.5, y + 1), kDrawFilled);
+            context->setFillColor(CColor(200, 200, 206, 45));
+            context->drawRect(CRect(left, y - 1, off_left - 1.5, y + 1), kDrawFilled);
+            context->drawRect(CRect(off_right + 1.5, y - 1, right, y + 1), kDrawFilled);
             const CRect thumb(x - 4, y - 6, x + 4, y + 6);
             context->setFillColor(CColor(232, 232, 236));
             context->setFrameColor(kBlackCColor);
@@ -682,14 +689,8 @@ void Editor::ApplySkin() noexcept {
     const SkinColours colours = skin_->Colours();
     Guarded([&] {
         if(accent_slider_) {
-            // Beta 2: the place of HUE, or of the preset's own nebula colour.
-            std::int32_t hue = settings_.Accent();
-            if(hue == kPresetAccent) {
-                double h = 0, saturation = 0, lightness = 0;
-                skin_->BaseColours().nebula_a.toHSL(h, saturation, lightness);
-                hue = static_cast<std::int32_t>(std::lround(h)) % 360;
-            }
-            accent_slider_->setValueNormalized(static_cast<float>(AccentSliderValue(hue)));
+            // Beta 2: the place of HUE; round 10: the preset's own colours at the left end.
+            accent_slider_->setValueNormalized(static_cast<float>(AccentSliderValue(settings_.Accent())));
             accent_slider_->invalid();
         }
     });
@@ -1381,7 +1382,7 @@ void Editor::valueChanged(CControl* control) {
         if(!control)
             return;
         if(control == accent_slider_) {
-            SetAccent(AccentOfSlider(control->getValueNormalized())); // beta 2: red, violet, blue
+            SetAccent(AccentOfSlider(control->getValueNormalized())); // round 10: the whole circle
             return;
         }
         if(control == wave_slider_) {

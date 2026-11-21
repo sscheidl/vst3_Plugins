@@ -1,10 +1,18 @@
 # Changes
 
-## 1.0.0-beta.2 (in progress), "1.0 beta 2"
+## 1.0.0-beta.2 (2026-11-21), "1.0 beta 2"
 
-A new window, after the user's render and design decisions of 2026-11-20. The sound, the
-parameters, MIDI and automation are unchanged. Not yet released: the user's DAW test
-findings of beta 1 and the bitmaps of `docs/GRAPHICS_BRIEF_BETA2.md` are still to come.
+A new window, after the user's render and design decisions of 2026-11-20, finished in ten
+test rounds with the user in Studio One. The sound, the parameters, MIDI and automation are
+unchanged. Released as a GitHub pre-release with
+[release notes](docs/RELEASE_NOTES_1.0.0-beta.2.md).
+
+In short, the window as released: a round glass with GALAXY (five painted galaxies and four
+white nebulae, turning with the playback, dark clouds, grains as flying stars) and WAVE (the
+waveform laid onto the glass like a globe and turning with the playback); HUE all round
+the colour circle with the preset's own colours at either end; START and LOOP END on one
+slider; a one-octave keyboard of touch pads. The sections below follow the work step by
+step; later ones supersede earlier ones where they differ.
 
 * The round window: a round glass in the middle, the nine primary knobs on two arcs
   beside it (PITCH, SPEED, LOOP SIZE, DENSITY on the left; SPRAY, OVERLAP, WINDOW, VOLUME
@@ -205,6 +213,22 @@ size, so it costs nothing extra per frame.
   `crimson_ring`, `amber_starburst` and `andromeda`; the files of blue, orange, red and
   violet are gone. A custom skin folder uses the new names.
 * The preview program takes a skin folder as its second argument.
+
+### Round 10 (2026-11-21, the user's test of round 9)
+
+* **Fix: HUE turned many times ruined the nebula.** VSTGUI's Direct2D pixel access without
+  premultiplied alpha converts a bitmap in place and back on release, dividing by 256
+  instead of 255; each turn of HUE read the skin's own galaxy (or the white nebula layers)
+  that way and darkened it by about one step per channel. The tinted and hue-turned copies
+  now read the skin's bitmaps premultiplied only and convert in their own buffer. Tested:
+  24 turns leave the skin's bitmaps unchanged; the test fails on the old code.
+* **HUE all round the colour circle:** red over violet, blue, cyan, green, yellow and orange
+  back to red. A short stretch at either end of the slider turns nothing: the preset's own
+  colours (for paintings and, later, photographs as they are); the slider shows them darker.
+  A preset in its own colours puts the thumb at the left end. Every stored hue is shown
+  where it is (no nearest end any more).
+* **Blue Barred Spiral:** its core widened across the bar (axis ratio about 2.8 instead of
+  4.7), the arms unchanged; 1x made from the reworked 2x, its alpha kept.
 
 ## 1.0.0-beta.1 (2026-11-20), "1.0 beta 1"
 

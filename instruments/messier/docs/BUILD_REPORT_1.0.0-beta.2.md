@@ -1,12 +1,12 @@
-# Messier 1.0.0-beta.2 build report (interim)
+# Messier 1.0.0-beta.2 build report
 
 Base: 1.0.0-beta.1, commit `a6823d6` (tag `messier-v1.0.0-beta.1`), branch
 `claude/messier-beta2-117e35`. The order: a new, more innovative window after the user's
 render and decisions of 2026-11-20, and the findings of the user's Studio One tests of beta
-1. This is an interim state: the user's DAW findings, the bitmaps of
-[GRAPHICS_BRIEF_BETA2.md](GRAPHICS_BRIEF_BETA2.md) and a possible touch-pad keyboard are
-still to come. The sound, the parameters, MIDI, automation and the processor's state are
-unchanged; the engine is 0.1.8.
+1. The first sections describe the first build; the window was then finished in ten test
+rounds with the user in Studio One and reviewed (sections below, and the release at the
+end). The sound, the parameters, MIDI, automation and the processor's state are unchanged;
+the engine is 0.1.8.
 
 ## What changed
 
@@ -184,3 +184,33 @@ nebulae stay. The CHANGELOG lists the change. Not yet tested by the user in the 
 Known and left as it is (the user's decision): the checker reports `dust_clouds` at 1x and
 2x, which has up to 7.5 % alpha between r 176 and 179. The window clears the dust masks
 beyond r 176 itself, so nothing of it is drawn. Not rerun: VS 2026 Debug, VS 2022, ASan.
+
+## Round 10 (2026-11-21)
+
+The user's test of round 9 in Studio One. The CHANGELOG lists the changes:
+- the fix of HUE darkening the skin's bitmaps;
+- HUE all round the colour circle, with the preset's own colours at either end;
+- the Blue Barred Spiral's wider core.
+
+The user tested the 21:20 build in Studio One with all nine presets, both views and HUE:
+"sieht alles sehr gut aus".
+
+## Release 1.0.0-beta.2 (2026-11-21)
+
+The full matrix on the release state (rounds 1 to 10 and the review fixes):
+
+| Step | Result |
+|---|---|
+| VS 2026 Release, `ctest -R '^messier\.'` | 6/6 |
+| VS 2026 Debug, ctest | 6/6 |
+| VS 2022 Release, build of all four plug-ins and ctest | 6/6 |
+| AddressSanitizer (VS 2026 Release), ctest | 6/6 |
+| Validator, VS 2022 Release: Messier, Kekule, Mendelejew, Toy Piano Classic | 47/0 each |
+| Validator, Messier2 (side-by-side, VS 2026) | 47/0 |
+| Firmware comparison (`messier.engine`), five runs | 0 of 1,152,000 samples differ in each |
+| Mutation checks of the tests added since the review fixes | 19 mutants, all caught |
+
+Known and left as it is (the user's decision): `tools/check_gui_bitmaps.py` reports
+`dust_clouds` (faint alpha between r 176 and 179, cleared by the window itself). Not
+covered by automated tests: the look and the motion, which the user checked in Studio One
+in each round; on-screen frame times in a host (measured offscreen only).

@@ -170,25 +170,23 @@ CCoord SnapY(CDrawContext* context, CCoord y) {
 }
 
 // A copy of a white bitmap in `tint`, its alpha kept.
+// Round 10 (the user's bug: HUE turned many times ruined the nebula): the skin's bitmaps are
+// only ever read premultiplied. VSTGUI's Direct2D pixel access without premultiplied alpha
+// converts the bitmap itself in place and back on release, dividing by 256 instead of 255,
+// so each such read darkened the original by about one step per channel.
 SharedPointer<CBitmap> TintedBitmap(CBitmap* white, CColor tint) {
-    if(!white || !white->getPlatformBitmap())
+    PixelBuffer pixels;
+    if(!ReadPixels(white, pixels))
         return nullptr;
-    const PlatformBitmapPtr& source = white->getPlatformBitmap();
-    PlatformBitmapPtr copy = getPlatformFactory().createBitmap(source->getSize());
-    if(!copy)
-        return nullptr;
-    copy->setScaleFactor(source->getScaleFactor());
-    auto result = makeOwned<CBitmap>(copy);
-    auto from = owned(CBitmapPixelAccess::create(white, false));
-    auto to = owned(CBitmapPixelAccess::create(result, false));
-    if(!from || !to)
-        return nullptr;
-    CColor c;
-    do {
-        from->getColor(c);
-        to->setColor(CColor(tint.red, tint.green, tint.blue, c.alpha));
-    } while(++(*from) && ++(*to));
-    return result;
+    const ChannelOrder o = PlatformChannelOrder();
+    for(std::size_t i = 0; i + 3 < pixels.bytes.size(); i += 4) {
+        std::uint8_t* px = &pixels.bytes[i];
+        const std::uint32_t alpha = px[o.alpha];
+        px[o.red] = static_cast<std::uint8_t>((tint.red * alpha + 127) / 255);
+        px[o.green] = static_cast<std::uint8_t>((tint.green * alpha + 127) / 255);
+        px[o.blue] = static_cast<std::uint8_t>((tint.blue * alpha + 127) / 255);
+    }
+    return MakeBitmap(pixels);
 }
 
 // The UTF-8 characters of a text, one string each.
@@ -249,31 +247,27 @@ CPoint LegacySkinImageSize(SkinImageId id) {
 
 namespace {
 SharedPointer<CBitmap> HueTurnedBitmap(CBitmap* image, double degrees) {
-    if(!image || !image->getPlatformBitmap())
+    PixelBuffer pixels;
+    if(!ReadPixels(image, pixels)) // premultiplied: the skin's bitmap stays as it is (round 10)
         return nullptr;
-    const PlatformBitmapPtr& source = image->getPlatformBitmap();
-    PlatformBitmapPtr copy = getPlatformFactory().createBitmap(source->getSize());
-    if(!copy)
-        return nullptr;
-    copy->setScaleFactor(source->getScaleFactor());
-    auto result = makeOwned<CBitmap>(copy);
-    auto from = owned(CBitmapPixelAccess::create(image, false));
-    auto to = owned(CBitmapPixelAccess::create(result, false));
-    if(!from || !to)
-        return nullptr;
-    CColor c;
-    do {
-        from->getColor(c);
-        if(c.alpha > 0) {
-            double h = 0, s = 0, l = 0;
-            c.toHSL(h, s, l);
-            const uint8_t alpha = c.alpha;
-            c.fromHSL(std::fmod(h + degrees + 720.0, 360.0), s, l);
-            c.alpha = alpha;
-        }
-        to->setColor(c);
-    } while(++(*from) && ++(*to));
-    return result;
+    const ChannelOrder o = PlatformChannelOrder();
+    const auto straight = [](std::uint32_t value, std::uint32_t alpha) {
+        return static_cast<std::uint8_t>(std::min<std::uint32_t>(255, (value * 255 + alpha / 2) / alpha));
+    };
+    for(std::size_t i = 0; i + 3 < pixels.bytes.size(); i += 4) {
+        std::uint8_t* px = &pixels.bytes[i];
+        const std::uint32_t alpha = px[o.alpha];
+        if(alpha == 0)
+            continue;
+        CColor c(straight(px[o.red], alpha), straight(px[o.green], alpha), straight(px[o.blue], alpha), 255);
+        double h = 0, s = 0, l = 0;
+        c.toHSL(h, s, l);
+        c.fromHSL(std::fmod(h + degrees + 720.0, 360.0), s, l);
+        px[o.red] = static_cast<std::uint8_t>((c.red * alpha + 127) / 255);
+        px[o.green] = static_cast<std::uint8_t>((c.green * alpha + 127) / 255);
+        px[o.blue] = static_cast<std::uint8_t>((c.blue * alpha + 127) / 255);
+    }
+    return MakeBitmap(pixels);
 }
 } // namespace
 
@@ -883,7 +877,7 @@ void Skin::SetAccent(std::int32_t hue) noexcept {
     colours_ = original;
     // 0.2.6 (the user's wish): only the hue turns. Each colour keeps its own lightness and
     // saturation, so contrast and brightness stay as the design made them. Beta 2 (the
-    // user's wishes of 2026-11-20): HUE, from red over violet to blue, colours the nebula
+    // user's wishes of 2026-11-20): HUE (round 10: the whole circle) colours the nebula
     // and the accents (START's fill, the knobs' arcs, lit switches); the labels stay neutral.
     // Without a HUE of its own the accents take the nebula's hue. Round 5 (the user's wish):
     // the value texts follow too, at their own lightness, so they stay as readable.
@@ -900,7 +894,7 @@ void Skin::SetAccent(std::int32_t hue) noexcept {
         double saturation = 0, lightness = 0;
         original.nebula_a.toHSL(to, saturation, lightness);
     } else {
-        to = AccentOnScale(hue);
+        to = hue; // round 10: the whole circle
         colours_.nebula_a = turned(original.nebula_a, to);
         colours_.nebula_b = turned(original.nebula_b, to);
     }

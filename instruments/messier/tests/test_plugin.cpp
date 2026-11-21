@@ -2102,11 +2102,18 @@ void TestStarfield() {
 // Beta 2: HUE from red over violet to blue; a hue of beta 1 outside that arc is shown at
 // its nearer end; HUE turns the nebula and the accents, not the labels and values.
 void TestHueScale() {
-    CHECK(AccentOfSlider(0.0) == 0 && AccentOfSlider(1.0) == kAccentBlueHue && AccentOfSlider(0.5) == 295);
-    CHECK(AccentSliderValue(0) == 0.0 && AccentSliderValue(kAccentBlueHue) == 1.0 && AccentSliderValue(295) == 0.5);
-    for(const double value : {0.0, 0.1, 0.33, 0.5, 0.9, 1.0})
-        CHECK(std::abs(AccentSliderValue(AccentOfSlider(value)) - value) < 0.5 / (360 - kAccentBlueHue));
-    CHECK(AccentOnScale(30) == 0 && AccentOnScale(120) == kAccentBlueHue && AccentOnScale(285) == 285);
+    // Round 10: the whole colour circle, red at both ends of the scale; at either end of the
+    // slider a stretch for the preset's own colours.
+    const double inside = 1.0 - 2.0 * kAccentOff;
+    CHECK(AccentOfSlider(0.0) == kPresetAccent && AccentOfSlider(1.0) == kPresetAccent
+          && AccentOfSlider(kAccentOff * 0.9) == kPresetAccent && AccentOfSlider(1.0 - kAccentOff * 0.9) == kPresetAccent);
+    CHECK(AccentOfSlider(kAccentOff) == 0 && AccentOfSlider(0.5) == 180 && AccentOfSlider(kAccentOff + inside / 4) == 270
+          && AccentOfSlider(kAccentOff + inside * 3 / 4) == 90 && AccentOfSlider(1.0 - kAccentOff) == 0);
+    CHECK(AccentOfSlider(std::nan("")) == kPresetAccent);
+    CHECK(AccentSliderValue(kPresetAccent) == 0.0 && AccentSliderValue(0) == kAccentOff
+          && std::abs(AccentSliderValue(180) - 0.5) < 1e-12 && std::abs(AccentSliderValue(30) - (kAccentOff + inside * 330 / 360)) < 1e-12);
+    for(const std::int32_t hue : {1, 30, 90, 120, 200, kAccentBlueHue, 285, 359}) // every hue reachable, none moved
+        CHECK(AccentOfSlider(AccentSliderValue(hue)) == hue);
     CHECK(IsAccent(359) && !IsAccent(360) && IsAccent(kPresetAccent));
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED); // as TestCustomSkin
     VSTGUI::init(GetModuleHandleW(nullptr));
@@ -2127,6 +2134,32 @@ void TestHueScale() {
     after.nebula_a.toHSL(h, sat, light);
     CHECK(std::lround(h) % 360 == 0 && after.nebula_a != before.nebula_a && after.start_fill != before.start_fill);
     }
+    // Round 10 (the user's bug): HUE turned many times leaves the skin's own bitmaps as they
+    // are, the painted galaxy and the white nebula layers alike; a turned copy keeps alpha.
+    {
+        Skin galaxy(GuiPreset::kAmberStarburst, {});
+        Skin white(GuiPreset::kSpiral, {});
+        const SkinImage& painting = galaxy.Image(SkinImageId::kNebula);
+        const SkinImage& arms = white.Image(SkinImageId::kNebulaArms);
+        CHECK(painting && painting.x1 && painting.x2 && arms && arms.x1);
+        PixelBuffer one_before, two_before, arms_before;
+        CHECK(ReadPixels(painting.x1, one_before) && ReadPixels(painting.x2, two_before) && ReadPixels(arms.x1, arms_before));
+        SkinImage turned;
+        for(int k = 0; k < 24; ++k) {
+            turned = HueTurnedCopy(painting, 15.0 * k - 170.0, k % 2 == 0);
+            (void)TintedCopy(arms, VSTGUI::CColor(200, 80, 40));
+        }
+        PixelBuffer one_after, two_after, arms_after, copy;
+        CHECK(ReadPixels(painting.x1, one_after) && ReadPixels(painting.x2, two_after) && ReadPixels(arms.x1, arms_after));
+        CHECK(one_after.bytes == one_before.bytes && two_after.bytes == two_before.bytes
+              && arms_after.bytes == arms_before.bytes);
+        CHECK(turned.x1 && ReadPixels(turned.x1, copy) && copy.width == one_before.width);
+        const ChannelOrder o = PlatformChannelOrder();
+        int alpha_changed = 0;
+        for(std::size_t i = 0; i < copy.bytes.size(); i += 4)
+            alpha_changed += copy.bytes[i + o.alpha] != one_before.bytes[i + o.alpha];
+        CHECK(alpha_changed == 0 && copy.bytes != one_before.bytes);
+    }
     // MS-R69 (needs VSTGUI, as the skin above): a knob takes the mouse on its round cap only, not in its box's corners.
     {
         auto knob = VSTGUI::makeOwned<MetalKnob>(VSTGUI::CRect(10, 10, 82, 82), nullptr, 0, false, false);
@@ -2138,7 +2171,7 @@ void TestHueScale() {
     VSTGUI::exit();
     if(SUCCEEDED(com))
         CoUninitialize();
-    std::printf("HUE: red to violet to blue, old hues at the nearer end; only the nebula and START's fill\n");
+    std::printf("HUE: the whole colour circle, the preset's own colours at either end; only the nebula and the accents\n");
 }
 
 // Beta 2: the round window's layout. Every primary knob, its name, value and scale stay

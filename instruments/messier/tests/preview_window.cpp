@@ -228,6 +228,11 @@ int main(int argc, char** argv) {
          false},
         {"galaxy_violet", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kVioletSpiral,
          false},
+        // Round 10: HUE all round the circle: the violet spiral turned to orange and to green.
+        {"violet_hue_orange", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kVioletSpiral,
+         false, 30},
+        {"violet_hue_green", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kVioletSpiral,
+         false, 130},
         {"andromeda_wave", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false, GuiPreset::kAndromeda, false,
          kPresetAccent, kPresetWave, "down from.wav", false},
         {"galaxy_violet_hue_blue", false, kKeyboardDefaultTranspose, false, false, false, 0.0, false,

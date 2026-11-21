@@ -53,28 +53,26 @@ constexpr bool IsGuiPreset(std::int32_t value) {
 
 constexpr std::int32_t kPresetAccent = -1;
 // HUE is stored as a hue in degrees (0.2.5), or kPresetAccent for the preset's own colours.
-// Beta 2: any hue of the circle is read (beta 1 stored 0 to 285); the slider offers red
-// over violet to blue, 0 (360) down to kAccentBlueHue, and a hue outside that arc is shown
-// at its nearer end.
+// Round 10 (the user's wish): the slider offers the whole colour circle, from red over
+// violet, blue, cyan, green, yellow and orange back to red; at either end a short stretch
+// of kAccentOff turns nothing: the preset's own colours (for paintings and photographs as
+// they are). Any stored hue is shown where it is.
 constexpr std::int32_t kAccentMaxHue = 359;
 constexpr std::int32_t kAccentBlueHue = 230;
+constexpr double kAccentOff = 0.05;
 constexpr bool IsAccent(std::int32_t hue) {
     return hue >= kPresetAccent && hue <= kAccentMaxHue;
 }
-// A stored hue on the slider's arc: itself if on it, else the nearer end (red or blue).
-constexpr std::int32_t AccentOnScale(std::int32_t hue) {
-    if(hue == 0 || hue >= kAccentBlueHue)
-        return hue;
-    return hue < kAccentBlueHue / 2 ? 0 : kAccentBlueHue;
-}
-// The slider's place (0 red, 1 blue) of a stored hue, and the hue of a place.
+// The slider's place of a stored hue (0 for the preset's own colours), and the hue of a place.
 constexpr double AccentSliderValue(std::int32_t hue) {
-    hue = AccentOnScale(hue);
-    return hue == 0 ? 0.0 : (360.0 - hue) / (360.0 - kAccentBlueHue);
+    if(!IsAccent(hue) || hue == kPresetAccent)
+        return 0.0;
+    return kAccentOff + (1.0 - 2.0 * kAccentOff) * ((360 - hue) % 360) / 360.0;
 }
 inline std::int32_t AccentOfSlider(double value) {
-    const double clamped = value >= 0.0 ? (value <= 1.0 ? value : 1.0) : 0.0; // NaN: red
-    const auto hue = static_cast<std::int32_t>(360.0 - clamped * (360.0 - kAccentBlueHue) + 0.5);
+    if(!(value >= kAccentOff) || value > 1.0 - kAccentOff) // NaN too: the preset's own
+        return kPresetAccent;
+    const auto hue = static_cast<std::int32_t>(360.0 - (value - kAccentOff) / (1.0 - 2.0 * kAccentOff) * 360.0 + 0.5);
     return hue >= 360 ? 0 : hue;
 }
 

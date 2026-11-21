@@ -9,26 +9,36 @@ Electronix' Nebulae v2.1.2. Native C++ on the Steinberg VST3 SDK and VSTGUI; no 
 no other library.
 
 Named after Charles Messier and his catalogue of nebulae. Manufacturer TAUREON,
-version 1.0 beta 2 in progress (`1.0.0-beta.2`; the last release is 1.0 beta 1), bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
+version 1.0 beta 2 (`1.0.0-beta.2`), bundle `Messier.vst3`. Nothing in this repository is made, endorsed or
 supported by Qu-Bit Electronix; their name and the product name of the original appear
 only where origin and license require it (this file, [UPSTREAM.md](UPSTREAM.md),
 [licenses/](licenses/)).
 
-## Beta 1
+## Beta 2
 
-Messier 1.0 beta 1 is a closed beta: free, non-profit, for testers. Its code is that of
-0.2.10; the beta adds the version and the release texts
-([release notes](docs/RELEASE_NOTES_1.0.0-beta.1.md)). It comes without warranty, as the
+![Messier 1.0 beta 2: the round glass with the Violet Spiral](docs/images/messier-beta2-galaxy.webp)
+
+Messier 1.0 beta 2 is a beta: free, non-profit, for testers. It brings a new window: a
+round glass with turning galaxies (GALAXY) or the waveform laid onto it like a globe and
+turning with the playback (WAVE), nine looks, HUE all round the colour circle and a
+one-octave keyboard. The sound, the parameters, MIDI and automation are those of beta 1
+([release notes](docs/RELEASE_NOTES_1.0.0-beta.2.md); beta 1's:
+[release notes](docs/RELEASE_NOTES_1.0.0-beta.1.md)). It comes without warranty, as the
 MIT and LGPL licenses say ([License](#license)).
+
+![Nine views of the glass](docs/images/messier-beta2-views.webp)
 
 **Made with AI.** AI coding was essential to this plug-in. It was written largely with
 Claude Code (Anthropic) and reviewed with Codex (OpenAI) and other AI reviewers (Claude
-and ChatGPT), directed and tested by the author. The reviews and their fixes are in
-[docs/](docs/).
+and ChatGPT), directed and tested by the author. Beta 2's window was reviewed by an
+independent Claude session and by ChatGPT; its galaxy pictures are original illustrations
+made with AI, not photographs. The reviews and their fixes are in [docs/](docs/).
 
 **Known limitations:**
 
 * Windows x64 only. So far tested in Studio One only.
+* The window's animation runs on the GUI thread: laying the turning waveform onto the
+  glass takes about 1.4 ms a frame at 100 %, the turning galaxy is of the same order.
 * High load at 192 kHz with very small host buffers: a block that contains a vocoder
   step can take longer than the block itself (see [Timing and level](#timing-and-level)).
 * After a restart (activation, loading a project) the secondary controls glide up from 0
@@ -91,23 +101,37 @@ findings of the first full audit, by five Fable reviewers while Codex was away
 the four findings of a ChatGPT review of 0.2.9 that held up
 ([review](docs/GPT_REVIEW_0.2.9.md), [report](docs/BUILD_REPORT_0.2.10.md)); a final ChatGPT
 check of 0.2.10 found no P1 or P2 ([review](docs/GPT_REVIEW_0.2.10.md)), and 1.0 beta 1
-carries the code of 0.2.10. The user
+carries the code of 0.2.10. Beta 2's window was built in ten test rounds with the user in
+Studio One; an independent Claude session and ChatGPT reviewed it
+([brief](docs/GUI_PRUEFAUFTRAG_1.0.0-beta.2.md), [Claude](docs/CLAUDE_REVIEW_1.0.0-beta.2_GUI.md),
+[ChatGPT](docs/GPT_REVIEW_1.0.0-beta.2_GUI.md), [verdicts](docs/GUI_REVIEW_1.0.0-beta.2_VERDICTS.md),
+[fixes](docs/GUI_REVIEW_1.0.0-beta.2_UMSETZUNG.md), [report](docs/BUILD_REPORT_1.0.0-beta.2.md)). The user
 has tried 0.1.7, 0.1.8 and 0.2.0 in Studio One
 (operation and sound). The [DAW test list](docs/DAW_TEST_0.1.0.md) is
 open.
 
-**The window of 1.0 beta 2** (the user's round window of 2026-11-20; in progress, see the
-[CHANGELOG](CHANGELOG.md)): a round glass in the middle, the nine primary knobs on two arcs
-beside it and BLEND below it, the START row with FREEZE and RESET, and an info line with
-DETAILS, the file's format, the position and the mode. GALAXY / WAVE switches the glass
-between a slowly turning nebula (four to choose from: a spiral galaxy, a barred spiral, a
-ring nebula, a diffuse nebula) and beta 1's plate laid onto the glass through a fish-eye
-lens (`source/fisheye.h`), with the grains as shooting stars in both. HUE colours the
-nebula and the accents, from red over violet to blue; the GUI presets Slate, Silver, Plum
-and Gold are gone. The bitmaps come after [the graphics brief](docs/GRAPHICS_BRIEF_BETA2.md);
-until then the window uses beta 1's bitmaps of Slate where they fit and draws the rest.
-The text below describes the window of beta 1, of which the plate's data, timing and
-mouse are kept.
+**The window of 1.0 beta 2** (the user's round window of 2026-11-20, finished in ten test
+rounds; details in the [CHANGELOG](CHANGELOG.md)): a round glass in the middle, the knobs on
+two arcs beside it and BLEND below it, the START row (START and LOOP END on one slider) with
+FREEZE and RESET, and an info line with DETAILS, the file's format, the position and the
+mode. GALAXY / WAVE, two flat keys beside BLEND, switch the glass:
+
+* **GALAXY:** a galaxy or nebula turning with the playback's tempo and direction (resting
+  at STOP and Freeze), dark clouds turning against it (BLEND thickens them), and the grains
+  as stars flying out from the centre. The preset menu offers five painted galaxies in full
+  colour (Violet Spiral, Blue Barred Spiral, Crimson Ring, Amber Starburst, Andromeda) and
+  four white nebulae (spiral galaxy, barred spiral, ring nebula, diffuse nebula).
+* **WAVE:** beta 1's plate laid onto the glass through a fish-eye lens
+  (`source/fisheye.h`): the waveform with a soft halo, a bright core and a crisp outline,
+  turning round the glass with the playback so that it glides under the playhead; the
+  grains as shooting stars; clear where grains can start, shaded elsewhere; quiet files
+  shown as tall as loud ones.
+
+![WAVE](docs/images/messier-beta2-wave.webp)
+
+HUE (in DETAILS) turns the galaxy's and the accents' colour all round the colour circle; at
+either end of its slider the preset keeps its own colours. The text below describes the
+window of beta 1, of which the plate's data, timing and mouse are kept.
 
 **The window** (since 0.2.0, after the window study the user settled on 2026-11-18):
 old metal with patina, a measuring plate of dark glass in a milled bezel, and below it
@@ -287,23 +311,33 @@ folders again without reopening the window. **Open skin folder** creates
 file name and size. At the right end of the DETAILS bar, `CUSTOM SKIN n` replaces the
 version while n bitmaps and colour values come from the folders.
 
-| File (`<preset>`: slate, silver, plum, gold) | @1x pixels | @2x pixels |
+Since beta 2 one design; the names below (`Messier skin files.txt` in the opened folder
+lists them all). `<key>` names a preset's picture: `violet_spiral`, `blue_barred`,
+`crimson_ring`, `amber_starburst`, `andromeda` (full colour) and `spiral`, `barred`,
+`ring`, `cloud` (the white nebulae, as `_arms` and `_haze` layers).
+
+| File | @1x pixels | @2x pixels |
 | --- | --- | --- |
-| `messier_<preset>_chassis@1x.png` | 880 × 724 | 1760 × 1448 |
-| `messier_<preset>_plate@1x.png` | 840 × 186 | 1680 × 372 |
-| `messier_<preset>_bezel@1x.png` (nine-part frame, edge 12) | 64 × 64 | 128 × 128 |
-| `messier_<preset>_knob_l@1x.png` | 72 × 72 | 144 × 144 |
-| `messier_<preset>_knob_s@1x.png` | 48 × 48 | 96 × 96 |
-| `messier_<preset>_thumb@1x.png` (START handle) | 16 × 28 | 32 × 56 |
-| `messier_<preset>_button@1x.png`, `_button_down@1x.png` (edge 8) | 48 × 28 | 96 × 56 |
-| `messier_nebula_a@1x.png`, `messier_nebula_b@1x.png` (white; tinted) | 1000 × 260 | 2000 × 520 |
+| `messier_chassis@1x.png` | 880 × 804 | 1760 × 1608 |
+| `messier_ring@1x.png` | 432 × 432 | 864 × 864 |
+| `messier_glass@1x.png`, `messier_dome@1x.png` | 360 × 360 | 720 × 720 |
+| `messier_nebula_<key>@1x.png` (full colour) | 360 × 360 | 720 × 720 |
+| `messier_nebula_<key>_arms@1x.png`, `_haze@1x.png` (white; tinted) | 360 × 360 | 720 × 720 |
+| `messier_dust_wisps_dark@1x.png`, `_veil_dark`, `_bands_dark`, `messier_dust_clouds@1x.png` | 360 × 360 | 720 × 720 |
+| `messier_knob_l@1x.png` | 72 × 72 | 144 × 144 |
+| `messier_knob_s@1x.png` | 48 × 48 | 96 × 96 |
+| `messier_thumb@1x.png` (START handle) | 24 × 24 | 48 × 48 |
+| `messier_button@1x.png`, `messier_button_down@1x.png` | 48 × 28 | 96 × 56 |
+| `messier_screw@1x.png` | 14 × 14 | 28 × 28 |
+| `messier_pad@1x.png`, `messier_pad_lit@1x.png` | 40 × 40 | 80 × 80 |
 | `messier_keys_white@1x.png` | 36 × 66 | 72 × 132 |
 | `messier_keys_black@1x.png` | 22 × 40 | 44 × 80 |
 
 The `@2x` files carry the same names with `@2x.png`. The chassis is drawn at the height of
 the fully open window (KEYS and DETAILS) and cut off below when sections are closed.
 
-Colour tables are named `messier_<preset>_colours.txt`. Each line reads
+The colour table is named `messier_colours.txt` (beta 1's `messier_slate_colours.txt` is still
+read, under the spiral preset only). Each line reads
 `name = #RRGGBB` or `#RRGGBBAA` (AA is the opacity), and comments start at `;`. A line left out
 keeps the built-in colour. Where both folders set a colour, the one in Documents wins.
 The names are `metal`, `stain`, `glass`, `text`, `dim`, `marker`, `engrave_light`,
@@ -311,18 +345,19 @@ The names are `metal`, `stain`, `glass`, `text`, `dim`, `marker`, `engrave_light
 `nebula_a`, `nebula_b` and the others listed in `Messier skin files.txt`. `negative`,
 `wave`, `wave_outside` and `loop_edge` are read but have no effect so far. A table saved
 with a byte-order mark is read too (since 0.2.9). The built-in tables to start from:
-`preview_messier_window --export-skin <folder>` writes all four. The built-in bitmaps are
+`preview_messier_window --export-skin <folder>` writes it. The built-in bitmaps are
 in `resource/gui/`.
 
-**Accent colour:** open DETAILS and drag the HUE slider to turn the hue of the knob arcs,
-values, START fill and held key (since 0.2.6 only the hue: each colour keeps its
-lightness and saturation, so near-grey labels hardly change). Double-click it to restore
-the preset's colour. The project remembers each preset's accent.
+**Accent colour:** open DETAILS and drag the HUE slider to turn the hue of the galaxy, the
+knob arcs, values, START fill and held key (only the hue: each colour keeps its lightness
+and saturation). Since beta 2 it runs all round the colour circle; at either end, or with a
+double-click, the preset keeps its own colours. Choosing a preset brings its own colours
+back.
 
 **Waveform brightness:** the WAVE slider on the right of DETAILS (since 0.2.6) makes the
 waveform on the glass dimmer or brighter, 25 to 200 %, inside and outside the loop alike.
-Double-click restores the preset default: 200 % for Plum, 100 % for the other presets.
-A project can store its own WAVE value. The grains' paths glow for a fixed 0.45 s.
+Double-click restores the default, 100 %. A project can store its own WAVE value. Since
+beta 2 the same slider sets the galaxy's brightness in GALAXY. The grains' paths glow for a fixed 0.45 s.
 
 **LATCH** (in the keyboard row since 0.2.4; hidden with the keyboard): a key struck on the screen keyboard stays held after the mouse
 is let go, so the pitch stays changed. Clicking another key moves the hold there;
