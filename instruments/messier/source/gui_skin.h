@@ -181,6 +181,8 @@ bool ReadPixels(VSTGUI::CBitmap* bitmap, PixelBuffer& pixels) noexcept;
 VSTGUI::SharedPointer<VSTGUI::CBitmap> MakeBitmap(const PixelBuffer& pixels) noexcept;
 // `from` turned clockwise by `degrees` about its centre (bilinear), transparent where
 // nothing of it lies.
+// MS-R63: only the disc inscribed in the square is turned, the corners are left clear (the
+// turned layers, nebulae and dust, are clear outside their circle); `to` may be reused.
 void TurnPixels(const PixelBuffer& from, double degrees, PixelBuffer& to);
 
 // A copy of a coloured bitmap with every pixel's hue turned by `degrees`, its saturation,

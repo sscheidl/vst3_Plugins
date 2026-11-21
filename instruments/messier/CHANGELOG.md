@@ -82,6 +82,48 @@ These supersede the points above where they differ.
 * Keyboard: one octave of 13 touch pads, moved over C2 to C8 by the octave keys. KEYS
   shows or hides it, also when the host keeps the window size.
 
+### The GUI review of beta 2 (2026-11-21)
+
+The review of commit 768cea1 (part 0 by an independent Claude session standing in for
+Codex, parts A to C by GPT). The verdicts are in the session notes.
+
+Fixed:
+
+* **B2B.2:** Loading a project or another window's change of KEYS, DETAILS or zoom lays
+  the content into the current window while the host's resize is still pending. This was
+  the cause of round 4's KEYS fault.
+* **B2B.1:** The keyboard hidden that way releases a key that LATCH holds.
+* **MS-R68:** The galaxy's and the dust's caches hold their skin, so a new skin at a freed
+  address cannot show an old nebula.
+* **MS-R69:** The knobs take the mouse on their round cap only; BLEND no longer takes
+  clicks on the glass' ring.
+* **B2A.3:** GALAXY's afterglows survive a long gap between displays.
+* **B2A.8:** A failed pixel read is retried.
+* **B2B.4:** The octave keys' tooltips name the one-octave range.
+* **B2C.2:** The custom-skin guide names the painted galaxies' files right and lists all
+  eight nebula keys.
+* **B2A.1:** New stars are born where the playback is heading, also while the tempo eases
+  in.
+* **B2A.2:** Another file clears the star positions.
+* **B2B.6:** The START bar does not send a value twice in a row.
+* **B2C.3 (the user's decision):** Beta 1's colour table `messier_slate_colours.txt` now
+  applies only under the spiral preset.
+
+Faster:
+
+* **MS-R66:** The glass is drawn again only while something on it moves, and only the
+  glass with its ring.
+* **MS-R63, MS-R64:**
+  - The nebula is turned at the size the device needs (1x at 100 %).
+  - The turn itself is about 7 times faster: fixed point, the disc only, its buffer
+    reused; 3.5 ms instead of 24 ms at 720 × 720.
+  - The dust turns in coarser steps.
+  - It is still a CPU turn: Direct2D in VSTGUI clips turned bitmaps wrongly.
+* **MS-R65:** Each star's halo, glow and rays are small bitmaps made once per colour, with
+  no paths or gradients per star and frame.
+* **MS-R67:** Dragging HUE makes a new nebula or waveform colour at most every 100 ms.
+* **MS-R70:** The dust masks are loaded at 1x only.
+
 ## 1.0.0-beta.1 (2026-11-20), "1.0 beta 1"
 
 The closed, non-profit beta. The code equals 0.2.10; sound, state format and controls are

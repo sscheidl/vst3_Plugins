@@ -86,6 +86,11 @@ class MapView : public VSTGUI::CView {
     // The window's timer and the user's edits: the plate is drawn again, about as often
     // as displays come, so that nebula, playhead and grains move on.
     void Tick() noexcept;
+    // MS-R66 (the GUI review of beta 2): whether anything on the glass moves at `now` (turn,
+    // drift, playhead, grains, afterglows, a loop preview, a pending recolour); only then does
+    // Tick draw again, and only the glass with its ring (GlassBox, relative to the view).
+    bool Moving(Clock::time_point now) const;
+    VSTGUI::CRect GlassBox() const;
 
     void draw(VSTGUI::CDrawContext* context) override;
     void DrawUnchecked(VSTGUI::CDrawContext* context);
@@ -231,13 +236,16 @@ class MapView : public VSTGUI::CView {
     // A layer drawn turned: its pixels and its turned bitmap, made again when the angle has
     // moved on by kTurnStep or the source changed.
     struct Turned {
-        const void* source = nullptr;
-        PixelBuffer pixels;
+        const void* source = nullptr; // taken only once its pixels are read (B2A.8)
+        PixelBuffer pixels, turned; // the source, and the turned copy (reused, MS-R63)
         VSTGUI::SharedPointer<VSTGUI::CBitmap> drawn;
         double angle = 1e9;
     };
-    static constexpr double kTurnStep = 0.2; // degrees
-    VSTGUI::CBitmap* TurnedNow(Turned& layer, VSTGUI::CBitmap* source, double angle) noexcept;
+    // Degrees between two turned copies at full speed, finer while the turn is slow; the dust
+    // masks are soft and turn in coarser steps (MS-R64).
+    static constexpr double kTurnStep = 0.2, kDustTurnStep = 0.6;
+    VSTGUI::CBitmap* TurnedNow(Turned& layer, VSTGUI::CBitmap* source, double angle,
+                               double step = kTurnStep) noexcept;
     std::array<Turned, 2> nebula_turned_{}; // the nebula (or its arms), its haze
     DustChoice dust_ = CurrentDust();
     // Two layers: the chosen mask, and the second layer of dark clouds (dust_clouds),
@@ -245,7 +253,7 @@ class MapView : public VSTGUI::CView {
     // centre and rim in its alpha (made for this skin), and its turned bitmap.
     struct DustLayer {
         double angle = 0;
-        const Skin* skin = nullptr;
+        std::shared_ptr<const Skin> skin; // MS-R68: held, so no new skin takes its address
         VSTGUI::SharedPointer<VSTGUI::CBitmap> mask;
         Turned turned;
     };
@@ -254,6 +262,17 @@ class MapView : public VSTGUI::CView {
     void DrawDustLayer(VSTGUI::CDrawContext* context, const VSTGUI::CRect& glass, DustLayer& layer,
                        SkinImageId id);
     void DrawStarfield(VSTGUI::CDrawContext* context, VSTGUI::CPoint centre, double radius, Clock::time_point now);
+    // MS-R65: the stars' halo, glow and rays as small bitmaps, for the tints and the device
+    // scale they were made for.
+    struct Sprites {
+        VSTGUI::CColor halo_ink, glow_ink, ray_ink;
+        double scale = 0;
+        VSTGUI::SharedPointer<VSTGUI::CBitmap> halo, glow, across, down;
+    };
+    Sprites sprites_;
+    void UpdateSprites(VSTGUI::CDrawContext* context, VSTGUI::CColor core_ink) noexcept;
+    void DrawRays(VSTGUI::CDrawContext* context, VSTGUI::CCoord x, VSTGUI::CCoord y, VSTGUI::CCoord reach,
+                  double glow) const;
     // Each star's distance, flown on frame by frame with the tempo of the moment.
     struct StarState {
         std::uint32_t number = 0;
@@ -263,7 +282,9 @@ class MapView : public VSTGUI::CView {
     };
     std::array<StarState, 160> stars_{};
     std::size_t next_star_ = 0;
-    StarState& StarOf(std::uint32_t number, double age, double tempo, Clock::time_point now) noexcept;
+    // `heading`: the tempo the playback heads for (B2A.1), which decides where a new star is
+    // born; `tempo`: the eased one it flies with.
+    StarState& StarOf(std::uint32_t number, double age, double tempo, double heading, Clock::time_point now) noexcept;
     // A grain's glowing path (beta 2: along its line of the plate, bent by the lens): its
     // head at `share` of the file (where it was `since` seconds ago, 0 for a sounding
     // grain) moving `speed` shares a second; the path glows back to where it was `reach`
@@ -326,10 +347,16 @@ class MapView : public VSTGUI::CView {
     SkinImage tinted_arms_, tinted_haze_;
     // The coloured nebula with HUE's turn of its hue, for the skin, the turn and the size.
     SkinImage turned_nebula_;
-    const Skin* turned_skin_ = nullptr;
+    std::shared_ptr<const Skin> turned_skin_; // MS-R68: held, as cached_skin_
     double turned_by_ = 0;
     bool turned_two_ = false;
-    const Skin* tinted_skin_ = nullptr;
+    std::shared_ptr<const Skin> tinted_skin_;
+    // MS-R67: a new colour (HUE) is made at most every kRecolourEvery; meanwhile the last one
+    // is drawn, and the pending one follows (Moving).
+    static constexpr std::chrono::milliseconds kRecolourEvery{100};
+    Clock::time_point recoloured_at_{};
+    bool recolour_pending_ = false;
+    bool Recolour(Clock::time_point now) noexcept; // true: make the new colour now
     VSTGUI::CColor tinted_a_, tinted_b_;
     VSTGUI::CColor galaxy_tint_a_, galaxy_tint_b_;
     double galaxy_scale_ = 0;

@@ -154,6 +154,9 @@ class MetalKnob : public VSTGUI::CKnob {
     MetalKnob(const VSTGUI::CRect& size, VSTGUI::IControlListener* listener, int32_t tag, bool small,
               bool bipolar);
     void SetSkin(std::shared_ptr<const Skin> skin);
+    // MS-R69 (the GUI review of beta 2): only the round knob takes the mouse, not the
+    // corners of its box (BLEND's reach over the glass' ring).
+    bool hitTest(const VSTGUI::CPoint& where, const VSTGUI::Event& event) override;
     void draw(VSTGUI::CDrawContext* context) override;
     void DrawUnchecked(VSTGUI::CDrawContext* context);
 
@@ -254,6 +257,7 @@ class StartBar : public VSTGUI::CView {
     std::uint32_t frames_ = 0;
     double rate_ = 0.0;
     bool dragging_ = false, dragging_end_ = false;
+    double sent_ = -1.0; // the value sent last while dragging
 };
 
 // GALAXY / WAVE (beta 2; round 5 round the BLEND knob, layout::ArcSwitchBox): two half-arcs

@@ -110,3 +110,25 @@ State of this commit (round 5, staged as Messier2, binary 14:10):
   is due before a release.
 * Not built: the WAVE redesign after GPT's "Orbital Scope" concept. It is only assessed,
   in the session notes.
+
+## The GUI review fixes and the full matrix (2026-11-21)
+
+These are the fixes from the GUI review of 768cea1. The CHANGELOG lists them; the session
+notes hold the verdicts and how each was done.
+
+Full matrix on the fixed state:
+
+| Step | Result |
+|---|---|
+| VS 2026 Release, `ctest -R '^messier\.'` | 6/6 |
+| VS 2026 Debug, ctest | 6/6 |
+| VS 2022 Release, build of all four plug-ins and ctest | 6/6 |
+| AddressSanitizer (VS 2026 Release), ctest | 6/6 |
+| Validator, VS 2022 Release: Messier, Kekule, Mendelejew, Toy Piano Classic | 47/0 each |
+| Validator, Messier2 (side-by-side, VS 2026) | 47/0 |
+| Firmware comparison (`messier.engine`) | 0 differing samples in every run of 1,152,000 |
+| Mutation check of the new tests | 6 mutants, all caught |
+
+Measured: `TurnPixels` takes 3.5 ms at 720 × 720 (24 ms before the fix). The review measured
+the other gains on Direct2D's software target; on-screen timings in a host are still to be
+taken (Studio One, GALAXY at 4x).

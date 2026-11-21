@@ -17,6 +17,7 @@
 #include "gui_layout.h"
 #include "gui_skin.h"
 #include "map_view.h"
+#include "vstgui/lib/events.h"
 #include "message_text.h"
 #include "parameters.h"
 #include "plugin_ids.h"
@@ -1841,6 +1842,59 @@ void TestStarfield() {
         CHECK(arcs->SideAt(cx, cy) == 0 && arcs->SideAt(cx + 20, cy + 5) == 0); // the knob
         CHECK(arcs->PressAt(cx + layout::kArcRadius, cy) && !arcs->Galaxy() && !arcs->PressAt(cx, cy));
     }
+    // MS-R63: the fast turn. A disc turned by 0 degrees stays itself; by 90 degrees each
+    // pixel lands where an exact quarter turn puts it; the corners outside the disc stay clear,
+    // also when the buffer is reused.
+    {
+        PixelBuffer from;
+        from.width = from.height = 40;
+        from.bytes.assign(40 * 40 * 4, 0);
+        for(std::uint32_t y = 0; y < 40; ++y)
+            for(std::uint32_t x = 0; x < 40; ++x)
+                if(std::hypot(x + 0.5 - 20, y + 0.5 - 20) < 18)
+                    for(int k = 0; k < 4; ++k)
+                        from.bytes[(y * 40 + x) * 4 + k] = static_cast<std::uint8_t>((x * 7 + y * 13 + k * 31) % 256);
+        PixelBuffer to;
+        TurnPixels(from, 0.0, to);
+        CHECK(to.bytes == from.bytes);
+        TurnPixels(from, 90.0, to); // reused
+        int wrong = 0;
+        for(std::uint32_t y = 0; y < 40; ++y)
+            for(std::uint32_t x = 0; x < 40; ++x)
+                for(int k = 0; k < 4; ++k) // clockwise: the source of (x, y) is (y, 39 - x)
+                    wrong += std::abs(to.bytes[(y * 40 + x) * 4 + k] - from.bytes[((39 - x) * 40 + y) * 4 + k]) > 1;
+        CHECK(wrong == 0);
+        CHECK(to.bytes[0] == 0 && to.bytes[3] == 0 && to.bytes[(40 * 40 - 1) * 4 + 3] == 0);
+        // Its time for the painted nebula at 2x (720 x 720; MS-R63 measured 24 ms before).
+        PixelBuffer big, turned;
+        big.width = big.height = 720;
+        big.bytes.assign(720 * 720 * 4, 200);
+        TurnPixels(big, 1.0, turned);
+        const auto t0 = std::chrono::steady_clock::now();
+        for(int k = 0; k < 10; ++k)
+            TurnPixels(big, 10.0 + k, turned);
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / 10;
+        std::printf("turn of 720 x 720 pixels: %.1f ms\n", ms);
+    }
+    // MS-R66: the glass is drawn again only while something on it moves.
+    {
+        auto view = VSTGUI::makeOwned<MapView>(VSTGUI::CRect(0, 0, 436, 436));
+        const auto now = MapView::Clock::now();
+        CHECK(!view->Moving(now)); // no file
+        EngineDisplay d;
+        d.sequence = 1;
+        d.frames = 48000;
+        d.loop_length = 48000;
+        view->ShowAt(d, nullptr, now);
+        CHECK(!view->Moving(now)); // a file at rest: no grains, no playhead speed
+        d.grain_count = 1;
+        d.grains[0] = {100.0f, 0.5f, 0.2f, 48000.0f, 10.0f, 7};
+        d.rendered = 2;
+        view->ShowAt(d, nullptr, now);
+        CHECK(view->Moving(now));
+        const VSTGUI::CRect box = view->GlassBox();
+        CHECK(box.getWidth() < 436 && box.getWidth() >= 2 * (view->GlassRadius() + layout::kRingWidth));
+    }
     std::printf("starfield: out forward, in backward, standing at 0x, faster further out; directions all round\n");
 }
 
@@ -1872,6 +1926,14 @@ void TestHueScale() {
     after.nebula_a.toHSL(h, sat, light);
     CHECK(std::lround(h) % 360 == 0 && after.nebula_a != before.nebula_a && after.start_fill != before.start_fill);
     }
+    // MS-R69 (needs VSTGUI, as the skin above): a knob takes the mouse on its round cap only, not in its box's corners.
+    {
+        auto knob = VSTGUI::makeOwned<MetalKnob>(VSTGUI::CRect(10, 10, 82, 82), nullptr, 0, false, false);
+        VSTGUI::MouseDownEvent event;
+        CHECK(knob->hitTest(VSTGUI::CPoint(46, 46), event) && knob->hitTest(VSTGUI::CPoint(46, 12), event));
+        CHECK(!knob->hitTest(VSTGUI::CPoint(13, 13), event) && !knob->hitTest(VSTGUI::CPoint(80, 80), event));
+    }
+
     VSTGUI::exit();
     if(SUCCEEDED(com))
         CoUninitialize();
@@ -2494,8 +2556,11 @@ void TestCustomSkin() {
             if(!fs::exists(gui / SkinImageFileName(skin.Preset(), id, 1)) && (legacy.empty() || !fs::exists(gui / legacy)))
                 continue; // not delivered: drawn by code or left out
             const SkinImage& image = skin.Image(id);
-            all = all && image.x1 && image.x2 && image.x1->getWidth() == image.size.x
-                  && image.x1->getHeight() == image.size.y;
+            // MS-R70: the dust masks at 1x only.
+            const bool dust = id == SkinImageId::kDustWisps || id == SkinImageId::kDustVeil
+                              || id == SkinImageId::kDustBands || id == SkinImageId::kDustClouds;
+            all = all && image.x1 && (dust ? !image.x2 : static_cast<bool>(image.x2))
+                  && image.x1->getWidth() == image.size.x && image.x1->getHeight() == image.size.y;
         }
         return all;
     };
@@ -2506,9 +2571,14 @@ void TestCustomSkin() {
     const Skin built_in(GuiPreset::kCloud, {});
     CHECK(png(plain.Image(SkinImageId::kChassis).x1) == png(built_in.Image(SkinImageId::kChassis).x1));
     const int decoded_before = SkinFilesDecoded();
-    const Skin custom(GuiPreset::kCloud, {user, none, shared});
+    // B2C.3 (the user's decision): beta 1's colour table only under the spiral, Slate's successor.
+    const Skin custom(GuiPreset::kSpiral, {user, none, shared});
     CHECK(custom.Overrides() == 2 + 3 && complete(custom)); // two bitmaps, three colour values
     CHECK(SkinFilesDecoded() - decoded_before == 2); // only the two that are taken were decoded
+    {
+        const Skin other(GuiPreset::kCloud, {user, none, shared});
+        CHECK(other.Overrides() == 2 && other.Colours().glass == gold.glass); // the table left out
+    }
     for(const SkinImageId id : {SkinImageId::kThumb, SkinImageId::kButton, SkinImageId::kButtonDown})
         CHECK(png(custom.Image(id).x1) == png(built_in.Image(id).x1));
     // MS-R61: a colour table of more than 64 KiB is refused whole; one of exactly 64 KiB
@@ -2519,10 +2589,10 @@ void TestCustomSkin() {
         std::string table = "marker = #040506\n";
         table.resize(kMaxSkinTableBytes, ';');
         std::ofstream(big / "messier_slate_colours.txt", std::ios::binary) << table;
-        const Skin exact(GuiPreset::kCloud, {big});
+        const Skin exact(GuiPreset::kSpiral, {big});
         CHECK(exact.Overrides() == 1 && exact.Colours().marker == CColor(4, 5, 6));
         std::ofstream(big / "messier_slate_colours.txt", std::ios::binary) << table << ';';
-        const Skin larger(GuiPreset::kCloud, {big});
+        const Skin larger(GuiPreset::kSpiral, {big});
         CHECK(larger.Overrides() == 0 && larger.Colours().marker == gold.marker);
     }
     // C7 (0.2.9): a PNG with a valid header but its pixel data zeroed is decoded once in
@@ -2637,6 +2707,11 @@ void TestGuiPresets() {
         CHECK(guide.find("messier_chassis@1x.png") != std::string::npos && guide.find("880 x 804") != std::string::npos
               && guide.find("1760 x 1608") != std::string::npos && guide.find("messier_keys_black@1x.png") != std::string::npos
               && guide.find("messier_nebula_<nebula>_arms@1x.png") != std::string::npos);
+        // B2C.2: the painted galaxy's name as the skin looks for it, and every preset's key.
+        CHECK(guide.find("messier_nebula_<nebula>@1x.png") != std::string::npos
+              && guide.find("_@1x.png") == std::string::npos);
+        for(std::int32_t p = 0; p < kGuiPresetCount; ++p)
+            CHECK(guide.find(std::string(" ") + PresetInfo(static_cast<GuiPreset>(p)).nebula_key) != std::string::npos);
         std::istringstream table(ColourTableText(PresetInfo(GuiPreset::kSpiral).colours));
         std::string line;
         while(std::getline(table, line))

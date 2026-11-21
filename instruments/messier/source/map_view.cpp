@@ -116,6 +116,8 @@ void MapView::ShowAt(const EngineDisplay& display, std::shared_ptr<const WaveOve
     // another file clears them all (its grains read elsewhere).
     if(display.sequence != display_.sequence || display.frames != display_.frames) {
         ended_count_ = 0;
+        stars_ = {}; // B2A.2: no star of the file before flies on
+        next_star_ = 0;
     } else if(!resting_) {
         // MS-R53 (0.2.4): on the audio's own time, the quanta rendered between the two
         // displays, not the time between their arrivals. Each grain of the display before
@@ -172,7 +174,10 @@ void MapView::ShowAt(const EngineDisplay& display, std::shared_ptr<const WaveOve
                 continue;
             const double left = (1.0 - g.phase) / g.phase_rate; // audio seconds it still sounded
             // Compared in seconds before a time point is made (MS-R52).
-            if(!(left <= audio) || audio - left >= kTrail)
+            // B2A.3: kept as long as either view shows it (GALAXY's stars glow longer than
+            // WAVE's trail, which DrawTrail cuts at kTrail itself).
+            constexpr double keep = std::max(kTrail, kStarMinLife + kStarGlow);
+            if(!(left <= audio) || audio - left >= keep)
                 continue; // sounds on in the new display, or its glow is gone
             if(take(g, g.phase + g.phase_rate * audio))
                 continue; // the new display was made just before its end
@@ -433,8 +438,44 @@ void MapView::SetSize(double size) noexcept {
 }
 
 void MapView::Tick() noexcept {
-    if(Clock::now() - drawn_at_ >= kFrameInterval)
-        Guarded([&] { invalid(); });
+    const Clock::time_point now = Clock::now();
+    if(now - drawn_at_ >= kFrameInterval && Moving(now))
+        Guarded([&] {
+            CRect box = GlassBox();
+            box.offset(getViewSize().getTopLeft());
+            invalidRect(box);
+        });
+}
+
+bool MapView::Moving(Clock::time_point now) const {
+    const EngineDisplay& d = display_;
+    if(turn_speed_ != 0.0 || turn_rate_ != 0.0 || drift_speed_ != 0.0 || recolour_pending_)
+        return true;
+    if(start_known_ && size_known_ && now - loop_changed_at_ < kPreview + kFrameInterval)
+        return true;
+    if(d.frames > 0 && !resting_ && (d.grain_count > 0 || (!d.frozen && d.head_speed != 0.0f)))
+        return true; // grains, and the playhead between displays
+    for(std::size_t i = 0; i < ended_count_; ++i)
+        if(now >= ended_[i].at && Seconds(now - ended_[i].at) < kStarMinLife + kStarGlow)
+            return true; // an afterglow
+    // The turn and drift come to rest on the next frame after their target fell to 0.
+    return d.frames > 0 && DriftTarget() != 0.0;
+}
+
+CRect MapView::GlassBox() const {
+    const CPoint c = GlassCentre();
+    const double reach = GlassRadius() + L::kRingWidth + 2; // the ring and the position triangle
+    return CRect(c.x - reach, c.y - reach, c.x + reach, c.y + reach);
+}
+
+bool MapView::Recolour(Clock::time_point now) noexcept {
+    if(now - recoloured_at_ < kRecolourEvery) {
+        recolour_pending_ = true;
+        return false;
+    }
+    recoloured_at_ = now;
+    recolour_pending_ = false;
+    return true;
 }
 
 void MapView::draw(CDrawContext* context) {
@@ -581,19 +622,25 @@ void MapView::DrawGalaxy(CDrawContext* context, const CRect& glass) {
         c.nebula_a.toHSL(now_hue, saturation, lightness);
         const double by = std::remainder(now_hue - design, 360.0);
         const bool two = DeviceScale(context) > 1.01;
-        if(turned_skin_ != skin_.get() || turned_by_ != by || turned_two_ != two || !turned_nebula_) {
-            turned_skin_ = skin_.get();
+        // MS-R67: a new HUE alone waits for Recolour; another skin or size is made at once.
+        const bool other = turned_skin_ != skin_ || turned_two_ != two || !turned_nebula_;
+        if(other || (turned_by_ != by && Recolour(Clock::now()))) {
+            turned_skin_ = skin_;
             turned_by_ = by;
             turned_two_ = two;
             turned_nebula_ = std::abs(by) < 0.5 ? coloured : HueTurnedCopy(coloured, by, two);
         }
-        CBitmap* source = turned_nebula_.x2 ? turned_nebula_.x2.get() : turned_nebula_.x1.get();
+        // MS-R63: the size the device needs (HueTurnedCopy makes only that one).
+        CBitmap* source = two && turned_nebula_.x2 ? turned_nebula_.x2.get()
+                          : turned_nebula_.x1   ? turned_nebula_.x1.get()
+                                                : turned_nebula_.x2.get();
         paint(TurnedNow(nebula_turned_[0], source, galaxy_angle_));
     } else if(arms || haze) {
         // The white layers of the first delivery, in the nebula's colours; tinted again
         // only for another skin or HUE.
-        if(tinted_skin_ != skin_.get() || tinted_a_ != c.nebula_a || tinted_b_ != c.nebula_b) {
-            tinted_skin_ = skin_.get();
+        const bool other = tinted_skin_ != skin_ || (!tinted_arms_ && !tinted_haze_);
+        if(other || ((tinted_a_ != c.nebula_a || tinted_b_ != c.nebula_b) && Recolour(Clock::now()))) {
+            tinted_skin_ = skin_;
             tinted_a_ = c.nebula_a;
             tinted_b_ = c.nebula_b;
             tinted_arms_ = arms ? TintedCopy(arms, c.nebula_a) : SkinImage{};
@@ -672,25 +719,28 @@ MapView::DustChoice MapView::CurrentDust() noexcept {
     return choice;
 }
 
-CBitmap* MapView::TurnedNow(Turned& layer, CBitmap* source, double angle) noexcept {
+CBitmap* MapView::TurnedNow(Turned& layer, CBitmap* source, double angle, double step) noexcept {
     if(!source)
         return nullptr;
     try {
         if(layer.source != source) {
+            // B2A.8: the source is taken only once its pixels are read; a failed read is
+            // tried again on the next frame.
+            PixelBuffer pixels;
+            if(!ReadPixels(source, pixels))
+                return nullptr;
+            layer.pixels = std::move(pixels);
             layer.source = source;
             layer.drawn = nullptr;
             layer.angle = 1e9;
-            if(!ReadPixels(source, layer.pixels))
-                return nullptr;
         }
         const double moved = std::abs(std::remainder(angle - layer.angle, 360.0));
         // Round 5: finer steps while the turn is slow (easing in and out), so that it never
         // moves in visible jumps; about as many new bitmaps a second as at full speed.
-        const double step = kTurnStep * std::clamp(std::abs(turn_speed_), 0.25, 1.0);
+        step *= std::clamp(std::abs(turn_speed_), 0.25, 1.0);
         if(!layer.drawn || moved >= step) {
-            PixelBuffer turned;
-            TurnPixels(layer.pixels, angle, turned);
-            if(auto bitmap = MakeBitmap(turned)) {
+            TurnPixels(layer.pixels, angle, layer.turned); // MS-R63: its buffer kept
+            if(auto bitmap = MakeBitmap(layer.turned)) {
                 layer.drawn = bitmap;
                 layer.angle = angle;
             }
@@ -715,13 +765,13 @@ void MapView::DrawDustLayer(CDrawContext* context, const CRect& glass, DustLayer
     CBitmap* source = mask.x1 ? mask.x1.get() : mask.x2.get();
     if(!source)
         return;
-    if(layer.skin != skin_.get()) {
+    if(layer.skin != skin_) {
         // The mask made black (only its alpha counts), scaled so that its darkest place
         // darkens by the strength (round 2: with firmer edges, its faint parts left out),
         // limited towards its centre (5 % within 50 units, the
         // full strength from 110 on) and cleared from 172 to 176 units, so that nothing of
         // its square shows. A soft mask: its 1x size serves at every zoom.
-        layer.skin = skin_.get();
+        // B2A.8: the skin is taken only once the mask is made (an empty mask counts).
         layer.mask = nullptr;
         layer.turned = {};
         PixelBuffer pixels;
@@ -730,8 +780,10 @@ void MapView::DrawDustLayer(CDrawContext* context, const CRect& glass, DustLayer
         double darkest = 0;
         for(std::size_t i = 3; i < pixels.bytes.size(); i += 4)
             darkest = std::max(darkest, pixels.bytes[i] / 255.0);
-        if(!(darkest > 0))
+        if(!(darkest > 0)) {
+            layer.skin = skin_;
             return;
+        }
         const double units = mask.size.x / pixels.width;
         const auto smooth = [](double x) {
             x = std::clamp(x, 0.0, 1.0);
@@ -748,8 +800,10 @@ void MapView::DrawDustLayer(CDrawContext* context, const CRect& glass, DustLayer
                 px[3] = static_cast<std::uint8_t>(std::lround(alpha * 255.0));
             }
         layer.mask = MakeBitmap(pixels);
+        if(layer.mask)
+            layer.skin = skin_;
     }
-    if(CBitmap* drawn = TurnedNow(layer.turned, layer.mask, layer.angle)) {
+    if(CBitmap* drawn = TurnedNow(layer.turned, layer.mask, layer.angle, kDustTurnStep)) {
         // Round 5: BLEND towards Granular thickens the dust: darker (the mask is made for
         // the strongest, drawn fainter at BLEND 0: kDustBlendLeast / kDustBlendMost of it)
         // and a little larger, round the glass' centre (its rim then lies under the ring).
@@ -782,25 +836,63 @@ double StarHash(std::uint32_t number, std::uint32_t salt) {
 // The flight: the distance grows (or shrinks backward) as k x tempo x (c + distance).
 constexpr double kStarRate = 1.39, kStarNear = 0.12;
 
-// Four diffraction rays of a grain's head (0.2.3 point 13; round 2: clearer), across and
-// down from (x, y), `reach` long, `glow` the alpha at the head, fading outwards.
-void DrawRays(CDrawContext* context, CCoord x, CCoord y, CCoord reach, double glow, CColor ink) {
-    if(!(glow > 0.01) || !(reach > 1.0))
-        return;
-    constexpr CCoord half = 0.6;
-    const auto ray = [&](CPoint to, CRect bar) {
-        auto path = owned(context->createGraphicsPath());
-        auto gradient = owned(CGradient::create(0.0, 1.0, WithAlpha(ink, glow), WithAlpha(ink, 0.0)));
+// MS-R65 (the GUI review of beta 2): the soft parts of a star (halo, glow, rays) drawn once
+// per colour into small bitmaps, then only scaled and faded per star: no paths or gradients
+// per frame. A round sprite of kSpriteSize units, white at its middle (alpha 1), `stop_alpha`
+// at `stop_at` of its radius, clear at its rim.
+constexpr double kSpriteSize = 32, kRayLength = 64, kRayThickness = 2;
+SharedPointer<CBitmap> MakeGlowSprite(double scale, CColor ink, double stop_at, double stop_alpha) {
+    auto offscreen = COffscreenContext::create(CPoint(kSpriteSize, kSpriteSize), scale);
+    if(!offscreen)
+        return nullptr;
+    offscreen->beginDraw();
+    offscreen->setDrawMode(kAntiAliasing | kNonIntegralMode);
+    const double r = kSpriteSize / 2;
+    if(auto path = owned(offscreen->createGraphicsPath())) {
+        path->addEllipse(CRect(0, 0, kSpriteSize, kSpriteSize));
+        if(auto gradient = owned(CGradient::create(0.0, 1.0, WithAlpha(ink, 1.0), WithAlpha(ink, 0.0)))) {
+            gradient->addColorStop(stop_at, WithAlpha(ink, stop_alpha));
+            offscreen->fillRadialGradient(path, *gradient, CPoint(r, r), r);
+        }
+    }
+    offscreen->endDraw();
+    return offscreen->getBitmap();
+}
+
+// Two diffraction rays through the middle, across or down, fading from it to both ends as
+// beta 2's rays did (0.45 at 0.3 of their reach); kRayThickness thick, drawn 1.2 units.
+SharedPointer<CBitmap> MakeRaySprite(double scale, CColor ink, bool across) {
+    const CPoint size = across ? CPoint(kRayLength, kRayThickness) : CPoint(kRayThickness, kRayLength);
+    auto offscreen = COffscreenContext::create(size, scale);
+    if(!offscreen)
+        return nullptr;
+    offscreen->beginDraw();
+    offscreen->setDrawMode(kAntiAliasing | kNonIntegralMode);
+    const CPoint middle(size.x / 2, size.y / 2);
+    for(const double side : {-1.0, 1.0}) {
+        auto path = owned(offscreen->createGraphicsPath());
+        auto gradient = owned(CGradient::create(0.0, 1.0, WithAlpha(ink, 1.0), WithAlpha(ink, 0.0)));
         if(!path || !gradient)
-            return;
-        gradient->addColorStop(0.3, WithAlpha(ink, glow * 0.45));
-        path->addRect(bar);
-        context->fillLinearGradient(path, *gradient, CPoint(x, y), to);
-    };
-    ray(CPoint(x + reach, y), CRect(x, y - half, x + reach, y + half));
-    ray(CPoint(x - reach, y), CRect(x - reach, y - half, x, y + half));
-    ray(CPoint(x, y + reach), CRect(x - half, y, x + half, y + reach));
-    ray(CPoint(x, y - reach), CRect(x - half, y - reach, x + half, y));
+            continue;
+        gradient->addColorStop(0.3, WithAlpha(ink, 0.45));
+        const CPoint end = across ? CPoint(side < 0 ? 0 : size.x, middle.y) : CPoint(middle.x, side < 0 ? 0 : size.y);
+        path->addRect(across ? CRect(std::min(middle.x, end.x), 0, std::max(middle.x, end.x), size.y)
+                             : CRect(0, std::min(middle.y, end.y), size.x, std::max(middle.y, end.y)));
+        offscreen->fillLinearGradient(path, *gradient, middle, end);
+    }
+    offscreen->endDraw();
+    return offscreen->getBitmap();
+}
+
+// A sprite scaled into `dest` (axis-aligned: Direct2D's clip of a turned bitmap is not
+// involved) and faded to `alpha`.
+void DrawSprite(CDrawContext* context, CBitmap* sprite, const CRect& dest, double alpha) {
+    if(!sprite || !(alpha > 0.004) || !(dest.getWidth() > 0) || !(dest.getHeight() > 0))
+        return;
+    const double sx = dest.getWidth() / sprite->getWidth(), sy = dest.getHeight() / sprite->getHeight();
+    CDrawContext::Transform scaled(*context, CGraphicsTransform(sx, 0, 0, sy, dest.left, dest.top));
+    context->drawBitmap(sprite, CRect(0, 0, sprite->getWidth(), sprite->getHeight()), CPoint(0, 0),
+                        static_cast<float>(std::min(1.0, alpha)));
 }
 
 // Many grains at once (round 2): shorter and fainter rays, so that the plate and the
@@ -837,7 +929,8 @@ double MapView::StarFly(double reach, double tempo, double seconds) {
     return std::clamp((kStarNear + reach) * std::exp(kStarRate * tempo * seconds) - kStarNear, 0.0, 1.2);
 }
 
-MapView::StarState& MapView::StarOf(std::uint32_t number, double age, double tempo, Clock::time_point now) noexcept {
+MapView::StarState& MapView::StarOf(std::uint32_t number, double age, double tempo, double heading,
+                                    Clock::time_point now) noexcept {
     for(StarState& star : stars_)
         if(star.used && star.number == number) {
             const double dt = std::clamp(Seconds(now - star.at), 0.0, 0.25);
@@ -848,8 +941,41 @@ MapView::StarState& MapView::StarOf(std::uint32_t number, double age, double tem
     // A new one: where it would be had it flown at this tempo since its birth.
     StarState& star = stars_[next_star_];
     next_star_ = (next_star_ + 1) % stars_.size();
-    star = {number, StarFly(StarStart(number, tempo), tempo, std::clamp(age, 0.0, 3.0)), now, true};
+    star = {number, StarFly(StarStart(number, heading), tempo, std::clamp(age, 0.0, 3.0)), now, true};
     return star;
+}
+
+void MapView::UpdateSprites(CDrawContext* context, CColor core_ink) noexcept {
+    // MS-R65: made again only for another tint (PITCH, HUE) or device scale.
+    const double scale = DeviceScale(context);
+    const CColor white(255, 255, 255);
+    const CColor halo = tail_ink_, glow = Mix(core_ink, white, 0.6), rays = Mix(core_ink, white, 0.45);
+    if(sprites_.halo && sprites_.scale == scale && sprites_.halo_ink == halo && sprites_.glow_ink == glow
+       && sprites_.ray_ink == rays)
+        return;
+    try {
+        sprites_ = {};
+        sprites_.scale = scale;
+        sprites_.halo_ink = halo;
+        sprites_.glow_ink = glow;
+        sprites_.ray_ink = rays;
+        sprites_.halo = MakeGlowSprite(scale, halo, 0.35, 0.42);
+        sprites_.glow = MakeGlowSprite(scale, glow, 0.4, 0.37);
+        sprites_.across = MakeRaySprite(scale, rays, true);
+        sprites_.down = MakeRaySprite(scale, rays, false);
+    } catch(...) {
+        sprites_ = {};
+    }
+}
+
+void MapView::DrawRays(CDrawContext* context, CCoord x, CCoord y, CCoord reach, double glow) const {
+    // Four diffraction rays of a grain's head (0.2.3 point 13; round 2: clearer), across
+    // and down from (x, y), `reach` long, `glow` the alpha at the head, fading outwards.
+    if(!(glow > 0.01) || !(reach > 1.0))
+        return;
+    constexpr CCoord half = 0.6;
+    DrawSprite(context, sprites_.across, CRect(x - reach, y - half, x + reach, y + half), glow);
+    DrawSprite(context, sprites_.down, CRect(x - half, y - reach, x + half, y + reach), glow);
 }
 
 MapView::StarLight MapView::StarLook(double age, double life) {
@@ -877,9 +1003,12 @@ void MapView::DrawStarfield(CDrawContext* context, CPoint centre, double radius,
     // The Doppler shift of PITCH: streaks, halo and core, red down, blue up.
     tail_ink_ = PitchTint(c.tail, pitch_);
     const CColor core_ink = PitchTint(c.grain, pitch_);
+    UpdateSprites(context, core_ink);
     const double alpha = 0.85 + 0.15 * blend_;
-    // The tempo of the moment, eased as the drift is (0 at STOP, Freeze and rest).
+    // The tempo of the moment, eased as the drift is (0 at STOP, Freeze and rest), and the
+    // one it heads for (B2A.1: where new stars are born, also while the tempo eases in).
     const double tempo = drift_speed_ / kDriftPerTempo;
+    const double heading = DriftTarget() / kDriftPerTempo;
     const auto smooth = [](double x) {
         x = std::clamp(x, 0.0, 1.0);
         return x * x * (3 - 2 * x);
@@ -914,7 +1043,7 @@ void MapView::DrawStarfield(CDrawContext* context, CPoint centre, double radius,
     const double calm = Calm(static_cast<std::uint32_t>(count));
     // One star: `age` seconds after its birth, `bright` 0..1, its rays 0..1.
     const auto star = [&](std::uint32_t number, double age, double bright, double rays) {
-        StarState& state = StarOf(number, age, tempo, now);
+        StarState& state = StarOf(number, age, tempo, heading, now);
         const double reach = state.reach;
         if(!(reach > 0.015) || reach >= 1.0 || !(bright > 0.0))
             return;
@@ -941,30 +1070,16 @@ void MapView::DrawStarfield(CDrawContext* context, CPoint centre, double radius,
         // (beta 2, the user's second look: clearly larger, as in the original).
         const double size = 0.8 + 6.5 * out;
         const CCoord halo = size * (2.2 + 2.5 * out);
-        if(auto path = owned(context->createGraphicsPath())) {
-            path->addEllipse(CRect(h.x - halo, h.y - halo, h.x + halo, h.y + halo));
-            if(auto gradient = owned(CGradient::create(0.0, 1.0, WithAlpha(tail_ink_, light * (0.6 - 0.25 * out)),
-                                                       WithAlpha(tail_ink_, 0.0)))) {
-                gradient->addColorStop(0.35, WithAlpha(tail_ink_, light * (0.24 - 0.08 * out)));
-                context->fillRadialGradient(path, *gradient, h, halo);
-            }
-        }
+        DrawSprite(context, sprites_.halo, CRect(h.x - halo, h.y - halo, h.x + halo, h.y + halo),
+                   light * (0.6 - 0.25 * out));
         // Round 4 (the user's test: the dark seam of round 3 read as a black outline on the
         // painted galaxies): none; instead a soft light glow round a larger, brighter core,
         // which lightens whatever lies behind it.
         const CCoord core = 1.25 * size * (1.0 - 0.5 * out);
         const CCoord glow = core * 2.6 + 2.0;
-        if(auto path = owned(context->createGraphicsPath())) {
-            path->addEllipse(CRect(h.x - glow, h.y - glow, h.x + glow, h.y + glow));
-            const CColor light_ink = Mix(core_ink, white, 0.6);
-            if(auto gradient = owned(CGradient::create(0.0, 1.0, WithAlpha(light_ink, std::min(1.0, light * 0.75)),
-                                                       WithAlpha(light_ink, 0.0)))) {
-                gradient->addColorStop(0.4, WithAlpha(light_ink, light * 0.28));
-                context->fillRadialGradient(path, *gradient, h, glow);
-            }
-        }
+        DrawSprite(context, sprites_.glow, CRect(h.x - glow, h.y - glow, h.x + glow, h.y + glow), light * 0.75);
         DrawRays(context, h.x, h.y, (core * 2.5 + 6.0 + 16.0 * rays) * (0.5 + 0.5 * calm),
-                 light * rays * (0.4 + 0.6 * calm), Mix(core_ink, white, 0.45));
+                 light * rays * (0.4 + 0.6 * calm));
         context->setFillColor(WithAlpha(Mix(core_ink, white, 0.7), std::min(1.0, light * 1.1)));
         context->drawEllipse(CRect(h.x - core, h.y - core, h.x + core, h.y + core), kDrawFilled);
         const CCoord hot = core * 0.55;
@@ -983,9 +1098,14 @@ void MapView::DrawWave(CDrawContext* context, const CRect& glass, Clock::time_po
     const SkinColours& c = skin_->Colours();
     const double scale = DeviceScale(context);
     const CPoint size(glass.getWidth(), glass.getHeight());
-    const bool same_key = cached_wave_ == wave_ && cached_skin_ == skin_ && cached_scale_ == scale
-                          && cached_size_ == size && cached_colour_ == c.plate_wave;
-    if(!wave_cache_ || !same_key) {
+    const bool same_rest = cached_wave_ == wave_ && cached_skin_ == skin_ && cached_scale_ == scale
+                           && cached_size_ == size;
+    const bool same_key = same_rest && cached_colour_ == c.plate_wave;
+    // MS-R67: a new colour alone (HUE) is made at most every kRecolourEvery.
+    bool rebuild = !wave_cache_ || !same_key;
+    if(rebuild && wave_cache_ && same_rest && !Recolour(now))
+        rebuild = false;
+    if(rebuild) {
         // MS-R47: a bitmap that could not be made for this key is not tried on every
         // frame of the animation; the plate goes on without the waveform.
         if(same_key && wave_failed_ && now - wave_failed_at_ < kWaveRetry)
@@ -1293,6 +1413,7 @@ void MapView::DrawUnchecked(CDrawContext* context) {
         // 0.2.3: PITCH tints halo, rays and tails; the head's core stays ivory.
         tail_ink_ = PitchTint(c.tail, pitch_);
         const CColor ray_ink = PitchTint(c.grain, pitch_);
+        UpdateSprites(context, ray_ink);
         // Many grains at once: shorter and fainter rays, so that the plate stays calm.
         const double calm = Calm(d.grain_count);
         const double ahead = Ahead(now);
@@ -1330,18 +1451,10 @@ void MapView::DrawUnchecked(CDrawContext* context) {
             // A soft warm halo; a thin dark seam keeps the head apart from a bright
             // background behind it.
             const CCoord halo = r * 3.6 + 3.0;
-            if(auto path = owned(context->createGraphicsPath())) {
-                path->addEllipse(CRect(x - halo, y - halo, x + halo, y + halo));
-                if(auto gradient = owned(CGradient::create(0.0, 1.0, WithAlpha(tail_ink_, alpha * level * 0.55),
-                                                           WithAlpha(tail_ink_, 0.0)))) {
-                    gradient->addColorStop(0.3, WithAlpha(tail_ink_, alpha * level * 0.22));
-                    context->fillRadialGradient(path, *gradient, CPoint(x, y), halo);
-                }
-            }
+            DrawSprite(context, sprites_.halo, CRect(x - halo, y - halo, x + halo, y + halo), alpha * level * 0.55);
             // 0.2.3 (brief point 13): four fine diffraction rays, across and down, that fade
             // outwards and with the head (round 2: clearer, gone when it has burnt out).
-            DrawRays(context, x, y, (r + 8.0 + 18.0 * level) * (0.5 + 0.5 * calm), alpha * level * (0.4 + 0.6 * calm),
-                     Mix(ray_ink, CColor(255, 255, 255), 0.3));
+            DrawRays(context, x, y, (r + 8.0 + 18.0 * level) * (0.5 + 0.5 * calm), alpha * level * (0.4 + 0.6 * calm));
             context->setFillColor(CColor(0, 0, 0, static_cast<uint8_t>(40 + 50 * level)));
             context->drawEllipse(CRect(x - r - 0.7, y - r - 0.7, x + r + 0.7, y + r + 0.7), kDrawFilled);
             context->setFillColor(WithAlpha(Mix(c.grain, CColor(255, 255, 255), 0.4), alpha * (0.8 + 0.2 * level)));

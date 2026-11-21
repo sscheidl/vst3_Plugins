@@ -551,6 +551,13 @@ void ToggleButton::onMouseDownEvent(MouseDownEvent& event) {
 MetalKnob::MetalKnob(const CRect& size, IControlListener* listener, int32_t tag, bool small, bool bipolar)
 : CKnob(size, listener, tag, nullptr, nullptr), small_(small), bipolar_(bipolar) {}
 
+bool MetalKnob::hitTest(const CPoint& where, const Event& event) {
+    if(!CKnob::hitTest(where, event))
+        return false;
+    const CRect box = getViewSize();
+    return std::hypot(where.x - box.getCenter().x, where.y - box.getCenter().y) <= box.getWidth() / 2;
+}
+
 void MetalKnob::SetSkin(std::shared_ptr<const Skin> skin) {
     skin_ = std::move(skin);
     invalid();
@@ -803,11 +810,13 @@ bool StartBar::PressAt(double x) {
         if(end) {
             if(edits_.size_begin)
                 edits_.size_begin();
-            edits_.size(SizeAt(x));
+            sent_ = SizeAt(x);
+            edits_.size(sent_);
         } else {
             if(edits_.begin)
                 edits_.begin();
-            edits_.start(Share(x));
+            sent_ = Share(x);
+            edits_.start(sent_);
         }
     } catch(...) {
     }
@@ -818,10 +827,15 @@ void StartBar::DragTo(double x) {
     if(!dragging_)
         return;
     try {
+        // B2B.6: a value the host already has is not sent again.
+        const double value = dragging_end_ ? SizeAt(x) : Share(x);
+        if(value == sent_)
+            return;
+        sent_ = value;
         if(dragging_end_)
-            edits_.size(SizeAt(x));
+            edits_.size(value);
         else
-            edits_.start(Share(x));
+            edits_.start(value);
     } catch(...) {
     }
 }

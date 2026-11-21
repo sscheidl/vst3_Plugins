@@ -341,35 +341,61 @@ SharedPointer<CBitmap> MakeBitmap(const PixelBuffer& pixels) noexcept {
 }
 
 void TurnPixels(const PixelBuffer& from, double degrees, PixelBuffer& to) {
+    // MS-R63 (the GUI review of beta 2): bilinear in 16.16 fixed point, stepping along each
+    // row, over the inscribed disc only; `to` keeps its buffer from the call before.
+    if(to.width != from.width || to.height != from.height || to.bytes.size() != from.bytes.size())
+        to.bytes.assign(from.bytes.size(), 0);
     to.width = from.width;
     to.height = from.height;
     to.scale = from.scale;
-    to.bytes.assign(from.bytes.size(), 0);
     if(!from)
         return;
     const double angle = degrees * 3.14159265358979323846 / 180.0;
     const double c = std::cos(angle), s = std::sin(angle);
-    const double cx = from.width / 2.0, cy = from.height / 2.0;
     const int w = static_cast<int>(from.width), h = static_cast<int>(from.height);
-    const auto at = [&](int x, int y, int k) -> double {
-        return x < 0 || y < 0 || x >= w || y >= h ? 0.0 : from.bytes[(std::size_t(y) * w + x) * 4 + k];
+    const double cx = w / 2.0, cy = h / 2.0, radius = std::min(w, h) / 2.0 + 1.0;
+    constexpr int kShift = 16;
+    constexpr double kOne = 1 << kShift;
+    const std::int64_t step_x = std::llround(c * kOne), step_y = std::llround(-s * kOne);
+    const std::uint8_t* src = from.bytes.data();
+    const auto pixel = [&](std::int64_t x, std::int64_t y) -> const std::uint8_t* {
+        static constexpr std::uint8_t kClear[4] = {0, 0, 0, 0};
+        return x < 0 || y < 0 || x >= w || y >= h ? kClear : src + (std::size_t(y) * w + x) * 4;
     };
-    for(int y = 0; y < h; ++y)
-        for(int x = 0; x < w; ++x) {
-            // Where this pixel's centre comes from: turned back.
-            const double dx = x + 0.5 - cx, dy = y + 0.5 - cy;
-            const double sx = c * dx + s * dy + cx - 0.5, sy = -s * dx + c * dy + cy - 0.5;
-            const int x0 = static_cast<int>(std::floor(sx)), y0 = static_cast<int>(std::floor(sy));
-            if(x0 < -1 || y0 < -1 || x0 >= w || y0 >= h)
+    for(int y = 0; y < h; ++y) {
+        std::uint8_t* row = to.bytes.data() + std::size_t(y) * w * 4;
+        const double dy = y + 0.5 - cy;
+        const double inside = radius * radius - dy * dy;
+        const double span = inside > 0 ? std::sqrt(inside) : -1.0;
+        const int x_from = std::clamp(static_cast<int>(std::floor(cx - span)), 0, w);
+        const int x_to = std::clamp(static_cast<int>(std::ceil(cx + span)), x_from, w);
+        std::memset(row, 0, std::size_t(x_from) * 4);
+        std::memset(row + std::size_t(x_to) * 4, 0, std::size_t(w - x_to) * 4);
+        // Where the row's first pixel centre comes from, turned back; then one step a pixel.
+        const double dx = x_from + 0.5 - cx;
+        std::int64_t fx = std::llround((c * dx + s * dy + cx - 0.5) * kOne);
+        std::int64_t fy = std::llround((-s * dx + c * dy + cy - 0.5) * kOne);
+        for(int x = x_from; x < x_to; ++x, fx += step_x, fy += step_y) {
+            const std::int64_t x0 = fx >> kShift, y0 = fy >> kShift; // floor, also below 0
+            const std::uint32_t wx = static_cast<std::uint32_t>((fx >> (kShift - 8)) & 0xFF);
+            const std::uint32_t wy = static_cast<std::uint32_t>((fy >> (kShift - 8)) & 0xFF);
+            std::uint8_t* out = row + std::size_t(x) * 4;
+            if(x0 < -1 || y0 < -1 || x0 >= w || y0 >= h) {
+                out[0] = out[1] = out[2] = out[3] = 0;
                 continue;
-            const double fx = sx - x0, fy = sy - y0;
-            std::uint8_t* out = &to.bytes[(std::size_t(y) * w + x) * 4];
+            }
+            const bool inner = x0 >= 0 && y0 >= 0 && x0 + 1 < w && y0 + 1 < h;
+            const std::uint8_t* p00 = inner ? src + (std::size_t(y0) * w + x0) * 4 : pixel(x0, y0);
+            const std::uint8_t* p10 = inner ? p00 + 4 : pixel(x0 + 1, y0);
+            const std::uint8_t* p01 = inner ? p00 + std::size_t(w) * 4 : pixel(x0, y0 + 1);
+            const std::uint8_t* p11 = inner ? p01 + 4 : pixel(x0 + 1, y0 + 1);
             for(int k = 0; k < 4; ++k) {
-                const double top = at(x0, y0, k) * (1 - fx) + at(x0 + 1, y0, k) * fx;
-                const double bottom = at(x0, y0 + 1, k) * (1 - fx) + at(x0 + 1, y0 + 1, k) * fx;
-                out[k] = static_cast<std::uint8_t>(std::lround(top * (1 - fy) + bottom * fy));
+                const std::uint32_t top = p00[k] * (256 - wx) + p10[k] * wx;
+                const std::uint32_t bottom = p01[k] * (256 - wx) + p11[k] * wx;
+                out[k] = static_cast<std::uint8_t>((top * (256 - wy) + bottom * wy + 32768) >> 16);
             }
         }
+    }
 }
 
 SkinImage TintedCopy(const SkinImage& white, CColor tint) noexcept {
@@ -584,17 +610,26 @@ std::string SkinFolderGuide() {
         "Folders, the first that has a file wins:\n"
         "  1. Messier-Skin in your Documents folder\n"
         "  2. Messier-Skin beside Messier.vst3 (for all users; needs administrator rights)\n\n"
-        "Bitmaps: PNG, the size below for @1x and exactly twice that for @2x.\n"
-        "<nebula> is spiral, barred, ring or cloud.\n\n";
+        "Bitmaps: PNG, the size below for @1x and exactly twice that for @2x.\n";
+    // B2C.2: every preset's key, and the names exactly as the skin looks for them.
+    text += "<nebula> is one of:";
+    for(const GuiPresetInfo& preset : kPresets)
+        text += std::string(" ") + preset.nebula_key;
+    text += "\n\n";
     char line[128];
-    for(const ImageSpec& spec : kImages) {
-        const std::string name = std::string("messier_") + (spec.per_variant ? "nebula_<nebula>_" : "") + spec.stem + "@1x.png";
+    for(std::size_t i = 0; i < kSkinImageCount; ++i) {
+        const ImageSpec& spec = kImages[i];
+        std::string name = SkinImageFileName(GuiPreset::kSpiral, static_cast<SkinImageId>(i), 1);
+        if(spec.per_variant)
+            name.replace(name.find("spiral"), 6, "<nebula>");
         std::snprintf(line, sizeof line, "  %-36s %4d x %-4d   @2x.png: %d x %d\n", name.c_str(), spec.width,
                       spec.height, spec.width * 2, spec.height * 2);
         text += line;
     }
     text += "\nThe nebula layers are white; HUE and the colours nebula_a (arms) and nebula_b (haze)\n"
-            "tint them. Bitmaps of beta 1 (messier_slate_*) are still taken where they fit.\n\n"
+            "tint them; the painted galaxies (messier_nebula_<nebula>@1x.png) are in colour and\n"
+            "HUE turns their hue. Bitmaps of beta 1 (messier_slate_*) are still taken where they\n"
+            "fit; beta 1's colour table messier_slate_colours.txt only under the spiral.\n\n"
             "Colour tables: messier_colours.txt, one line per colour,\n"
             "  name = #RRGGBB or #RRGGBBAA (AA: opacity); from \";\" on a comment.\n"
             "A line left out keeps the built-in colour. The tables of both folders apply;\n"
@@ -689,9 +724,12 @@ Skin::Skin(GuiPreset preset, const std::vector<std::filesystem::path>& folders)
     const IPlatformFactory& factory = getPlatformFactory();
     // Custom skins (0.2.7): the folders' colour tables, the first folder's last so that
     // it wins, and their bitmaps before the built-in ones.
-    // Beta 2: beta 1's table of Slate first, the new one over it.
+    // Beta 2: beta 1's table of Slate first, the new one over it. B2C.3 (the user's
+    // decision of 2026-11-21): beta 1's table only under Slate's successor, the spiral.
     for(auto folder = folders.rbegin(); folder != folders.rend(); ++folder)
         for(const std::string& table : {std::string("messier_slate_colours.txt"), ColourTableFileName(preset_)}) {
+            if(table == "messier_slate_colours.txt" && preset_ != GuiPreset::kSpiral)
+                continue;
             std::string text;
             if(ReadSkinTable(*folder / table, text))
                 overrides_ += ApplyColourTable(text, base_colours_);
@@ -710,6 +748,8 @@ Skin::Skin(GuiPreset preset, const std::vector<std::filesystem::path>& folders)
             if(bitmap->getSize() == size)
                 image.x1 = makeOwned<CBitmap>(bitmap);
         }
+        if(name2.empty())
+            return; // MS-R70: an image needed at 1x only
         const CPoint twice(size.x * 2, size.y * 2);
         PlatformBitmapPtr file2 = BitmapFromFolders(folders, name2, twice);
         if(file2) {
@@ -726,7 +766,12 @@ Skin::Skin(GuiPreset preset, const std::vector<std::filesystem::path>& folders)
     for(std::size_t i = 0; i < kSkinImageCount; ++i) {
         const auto id = static_cast<SkinImageId>(i);
         SkinImage& image = images_[i];
-        load(image, SkinImageFileName(preset_, id, 1), SkinImageFileName(preset_, id, 2), SkinImageSize(id));
+        // MS-R70 (the GUI review of beta 2): the dust masks are soft and drawn from their 1x
+        // copy at every zoom (MapView::DrawDustLayer); their 2x files are not decoded.
+        const bool dust = id == SkinImageId::kDustWisps || id == SkinImageId::kDustVeil
+                          || id == SkinImageId::kDustBands || id == SkinImageId::kDustClouds;
+        load(image, SkinImageFileName(preset_, id, 1), dust ? std::string() : SkinImageFileName(preset_, id, 2),
+             SkinImageSize(id));
         // Beta 2: beta 1's bitmap where the new one is not there; for one size only where
         // both have the same size (a custom skin with only one of the new files).
         const bool same_size = LegacySkinImageSize(id) == SkinImageSize(id);

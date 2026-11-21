@@ -565,8 +565,16 @@ bool Editor::OpenUnchecked(void* parent, const PlatformType& platformType) {
                                       ToggleButton::Style::Action));
     octave_down_->SetValueInk(true);
     octave_up_->SetValueInk(true);
-    octave_down_->setTooltipText("Keyboard down one octave (lowest: C2 to C4)");
-    octave_up_->setTooltipText("Keyboard up one octave (highest: C6 to C8)");
+    // B2B.4: the range of the one-octave keybed at its lowest and highest place.
+    {
+        const auto c = [](int note) { return "C" + std::to_string(note / 12 - 1); };
+        const std::string lowest = c(kKeyboardLowNote + kKeyboardLowestTranspose) + " to "
+                                   + c(kKeyboardHighNote + kKeyboardLowestTranspose);
+        const std::string highest = c(kKeyboardLowNote + kKeyboardHighestTranspose) + " to "
+                                    + c(kKeyboardHighNote + kKeyboardHighestTranspose);
+        octave_down_->setTooltipText(("Keyboard down one octave (lowest: " + lowest + ")").c_str());
+        octave_up_->setTooltipText(("Keyboard up one octave (highest: " + highest + ")").c_str());
+    }
 
     // The knobs, their names (on the panel) and values.
     const CFontRef value_font = skin.Mono(12.5);
@@ -1285,15 +1293,19 @@ void Editor::ApplySettings(const EditorSettings& settings) {
        && settings.details == settings_.details && transpose == settings_.transpose)
         return;
     settings_.zoom = zoom;
+    // B2B.1 (the GUI review of beta 2): a key held by LATCH is let go with the keyboard, as
+    // in SetKeyboardVisible; nothing would be left in sight to end it.
+    if(settings_.keyboard && !settings.keyboard && keyboard_view_)
+        Guarded([&] { keyboard_view_->ReleaseHeld(); });
     settings_.keyboard = settings.keyboard;
     settings_.details = settings.details;
     settings_.transpose = transpose;
     if(keyboard_view_)
         keyboard_view_->SetTranspose(transpose);
-    // A loaded project decides. If the host keeps the window size, the
-    // content fits into it as it is.
-    if(frame && !Resize())
-        LayOut(rect.getWidth(), rect.getHeight());
+    // A loaded project decides. If the host keeps the window size, or agrees and answers
+    // later (B2B.2: the cause of round 4's KEYS fault), the content fits into the window
+    // as it is meanwhile.
+    ShowSections();
 }
 
 tresult PLUGIN_API Editor::getSize(ViewRect* size) {
