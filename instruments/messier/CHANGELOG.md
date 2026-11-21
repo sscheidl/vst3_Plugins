@@ -189,6 +189,23 @@ size, so it costs nothing extra per frame.
 * **GALAXY / WAVE:** each name lies on a flat key let into the chassis, rounded at its outer
   end and hollowed along its arc; the chosen one is a little lighter in the accent colour.
 
+### Round 9 (2026-11-21): five galaxies in full colour
+
+* **Five new painted galaxies** (delivered 2026-11-21, original illustrations) take the
+  places of round 3's four, and one more: Violet Spiral, Blue Barred Spiral, Crimson Ring,
+  Amber Starburst and Andromeda. They come first in the preset menu.
+* **The four white nebulae stay** as the more restrained presets (Spiral, Barred spiral,
+  Ring nebula, Diffuse nebula).
+* **Stored IDs:** each new galaxy has the ID of round 3's galaxy of its colour (blue 4,
+  orange 5, red 6, violet 7); Andromeda is 8. A window state of rounds 3 to 8 opens with the
+  galaxy of its colour; the state's version stays 9.
+* **HUE** turns the new paintings as before; a preset chosen comes in its own colours
+  (round 6). Each preset's own hue is the painting's measured main hue.
+* **Files:** `messier_nebula_<key>@1x/@2x.png` with the keys `violet_spiral`, `blue_barred`,
+  `crimson_ring`, `amber_starburst` and `andromeda`; the files of blue, orange, red and
+  violet are gone. A custom skin folder uses the new names.
+* The preview program takes a skin folder as its second argument.
+
 ## 1.0.0-beta.1 (2026-11-20), "1.0 beta 1"
 
 The closed, non-profit beta. The code equals 0.2.10; sound, state format and controls are

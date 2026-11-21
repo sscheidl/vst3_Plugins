@@ -45,10 +45,11 @@ namespace {
 
 constexpr CCoord kWidth = kEditorWidth;
 // Beta 2: the nebula variants, in the menu that chose the GUI presets; round 3: the painted
-// galaxies first.
-constexpr std::array kPresetMenuOrder{GuiPreset::kBlueGalaxy, GuiPreset::kOrangeGalaxy, GuiPreset::kRedGalaxy,
-                                      GuiPreset::kVioletGalaxy, GuiPreset::kSpiral,     GuiPreset::kBarred,
-                                      GuiPreset::kRing,         GuiPreset::kCloud};
+// galaxies first; round 9: the five new ones in their delivery's order, then the white
+// nebulae as the more restrained presets.
+constexpr std::array kPresetMenuOrder{GuiPreset::kVioletSpiral,   GuiPreset::kBlueBarred, GuiPreset::kCrimsonRing,
+                                      GuiPreset::kAmberStarburst, GuiPreset::kAndromeda,  GuiPreset::kSpiral,
+                                      GuiPreset::kBarred,         GuiPreset::kRing,       GuiPreset::kCloud};
 static_assert(kPresetMenuOrder.size() == kGuiPresetCount);
 
 // After the last step of a drag, wait this long before telling the host the

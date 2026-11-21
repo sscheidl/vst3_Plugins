@@ -167,3 +167,20 @@ glass of 360 pixels, a strip without clear pixels; 6.6 ms at 720 pixels, which t
 does not use: the soft layers are made at one pixel per window unit). The upload of the
 bitmap is not in that number. Not rerun for these GUI-only changes: VS 2026 Debug, VS 2022,
 ASan.
+
+## Round 9 (2026-11-21): five galaxies in full colour
+
+The five delivered paintings take the places of round 3's four colour galaxies; the white
+nebulae stay. The CHANGELOG lists the change. Not yet tested by the user in the host.
+
+| Step | Result |
+|---|---|
+| Delivery: 21 checksums, sizes, RGBA, clear beyond r 176, nuclei centred | passed (own check) |
+| `tools/check_gui_bitmaps.py` on `resource/gui` | the five new bitmaps pass |
+| VS 2026 Release, `ctest -R '^messier\.'` | 6/6 |
+| Validator, Messier2 (side-by-side, VS 2026) | 47/0 |
+| Mutation check of the new tests (menu order, stored hues) | 2 mutants, all caught |
+
+Known and left as it is (the user's decision): the checker reports `dust_clouds` at 1x and
+2x, which has up to 7.5 % alpha between r 176 and 179. The window clears the dust masks
+beyond r 176 itself, so nothing of it is drawn. Not rerun: VS 2026 Debug, VS 2022, ASan.

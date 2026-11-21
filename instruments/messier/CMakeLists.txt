@@ -136,9 +136,9 @@ set_target_properties(${MESSIER_PLUGIN} PROPERTIES FOLDER "Messier")
 # beta 1 (docs/GRAFIKAUFTRAG_GUI.md).
 set(MESSIER_GUI_IMAGES messier_keys_white messier_keys_black)
 set(MESSIER_GUI_NEW chassis ring glass dome dust_wisps_dark dust_veil_dark dust_bands_dark dust_clouds knob_l knob_s thumb button button_down screw pad pad_lit)
-# Round 3: the painted galaxies (blue, orange, red, violet), one GUI preset each; a new
-# galaxy or nebula is one more name here and one more entry in gui_skin.cpp's kPresets.
-foreach(variant IN ITEMS spiral barred ring cloud blue orange red violet)
+# Round 3: the painted galaxies, one GUI preset each; a new galaxy or nebula is one more
+# name here and one more entry in gui_skin.cpp's kPresets. Round 9: five in full colour.
+foreach(variant IN ITEMS spiral barred ring cloud violet_spiral blue_barred crimson_ring amber_starburst andromeda)
     list(APPEND MESSIER_GUI_NEW nebula_${variant} nebula_${variant}_arms nebula_${variant}_haze)
 endforeach()
 foreach(stem IN LISTS MESSIER_GUI_NEW)

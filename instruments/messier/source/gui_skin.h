@@ -34,12 +34,16 @@ enum class GuiPreset : std::int32_t {
     kBarred = 1,
     kRing = 2,
     kCloud = 3,
-    kBlueGalaxy = 4,
-    kOrangeGalaxy = 5,
-    kRedGalaxy = 6,
-    kVioletGalaxy = 7,
+    // Round 9 (2026-11-21): five painted galaxies in full colour take the places of round
+    // 3's four (blue, orange, red, violet: the same stored IDs, each for the galaxy of its
+    // colour), and one more.
+    kBlueBarred = 4,
+    kAmberStarburst = 5,
+    kCrimsonRing = 6,
+    kVioletSpiral = 7,
+    kAndromeda = 8,
 };
-constexpr std::int32_t kGuiPresetCount = 8;
+constexpr std::int32_t kGuiPresetCount = 9;
 // The presets before round 3: the window settings up to version 8 stored HUE for these.
 constexpr std::int32_t kLegacyGuiPresetCount = 4;
 

@@ -2309,15 +2309,19 @@ void TestWindow021() {
         // 0.2.7: and the two skin entries after a separator.
         CHECK(presets->isMultipleCheckStyle() && presets->getNbEntries() == kGuiPresetCount + 3);
         for(int32 i = 0; i < kGuiPresetCount; ++i) // 0.2.4: all delivered; the spiral checked
-            CHECK(presets->getEntry(i)->isChecked() == (i == 4) && presets->getEntry(i)->isEnabled());
-        // Round 3: the painted galaxies first, then beta 2's nebula variants.
-        CHECK(presets->getEntry(0)->getTitle() == "Blue galaxy" && presets->getEntry(3)->getTitle() == "Violet galaxy");
-        CHECK(presets->getEntry(4)->getTitle() == "Spiral galaxy (M51)"
-              && presets->getEntry(5)->getTitle() == "Barred spiral (M109)");
-        CHECK(presets->getEntry(6)->getTitle() == "Ring nebula (M57)"
-              && presets->getEntry(7)->getTitle() == "Diffuse nebula (M42)");
-        CHECK(MakePresetMenu(GuiPreset::kRing)->getEntry(6)->isChecked());
-        CHECK(MakePresetMenu(GuiPreset::kRedGalaxy)->getEntry(2)->isChecked());
+            CHECK(presets->getEntry(i)->isChecked() == (i == 5) && presets->getEntry(i)->isEnabled());
+        // Round 3: the painted galaxies first, then beta 2's nebula variants. Round 9: the five
+        // in full colour, in their delivery's order.
+        CHECK(presets->getEntry(0)->getTitle() == "Violet Spiral" && presets->getEntry(1)->getTitle() == "Blue Barred Spiral"
+              && presets->getEntry(2)->getTitle() == "Crimson Ring" && presets->getEntry(3)->getTitle() == "Amber Starburst"
+              && presets->getEntry(4)->getTitle() == "Andromeda");
+        CHECK(presets->getEntry(5)->getTitle() == "Spiral galaxy (M51)"
+              && presets->getEntry(6)->getTitle() == "Barred spiral (M109)");
+        CHECK(presets->getEntry(7)->getTitle() == "Ring nebula (M57)"
+              && presets->getEntry(8)->getTitle() == "Diffuse nebula (M42)");
+        CHECK(MakePresetMenu(GuiPreset::kRing)->getEntry(7)->isChecked());
+        CHECK(MakePresetMenu(GuiPreset::kAndromeda)->getEntry(4)->isChecked());
+        CHECK(MakePresetMenu(GuiPreset::kCrimsonRing)->getEntry(2)->isChecked());
         CHECK(!PopUpMenu(nullptr, sizes, VSTGUI::CPoint(), {})); // nothing to show it in
     }
     VSTGUI::exit();
@@ -3030,9 +3034,27 @@ void TestGuiPresets() {
         CHECK(load(9, 1.0, 1, 0, &plum, 1, &two, kPresetWave, 1) == kResultOk && has(two));
         std::vector<std::int32_t> too_many(kMaxStoredAccents + 1, kPresetAccent);
         CHECK(load(9, 1.0, 1, 0, &plum, 1, &too_many, kPresetWave, 1) == kResultFalse);
-        const std::int32_t galaxy = static_cast<std::int32_t>(GuiPreset::kVioletGalaxy);
+        const std::int32_t galaxy = static_cast<std::int32_t>(GuiPreset::kVioletSpiral);
         CHECK(load(9, 1.0, 1, 0, &galaxy, 1, &all, kPresetWave, 1) == kResultOk
-              && controller->WindowSettings().preset == GuiPreset::kVioletGalaxy);
+              && controller->WindowSettings().preset == GuiPreset::kVioletSpiral);
+        // Round 9: a state of rounds 3 to 8 (eight presets) keeps its galaxy by its stored ID
+        // (blue 4, orange 5, red 6, violet 7: now the galaxy of that colour) and its hues; the
+        // ninth preset, new, has its own colours. The new one is stored and read back.
+        static_assert(static_cast<std::int32_t>(GuiPreset::kBlueBarred) == 4
+                      && static_cast<std::int32_t>(GuiPreset::kAmberStarburst) == 5
+                      && static_cast<std::int32_t>(GuiPreset::kCrimsonRing) == 6
+                      && static_cast<std::int32_t>(GuiPreset::kVioletSpiral) == 7
+                      && static_cast<std::int32_t>(GuiPreset::kAndromeda) == 8 && kGuiPresetCount == 9);
+        const std::vector<std::int32_t> eight{kPresetAccent, 10, 20, 30, 235, 0, 300, 250};
+        const std::int32_t red = 6;
+        CHECK(load(9, 1.0, 1, 0, &red, 1, &eight, kPresetWave, 1) == kResultOk
+              && controller->WindowSettings().preset == GuiPreset::kCrimsonRing && controller->WindowSettings().Accent() == 300
+              && controller->WindowSettings().accents[8] == kPresetAccent && controller->WindowSettings().accents[4] == 235);
+        const std::int32_t andromeda = static_cast<std::int32_t>(GuiPreset::kAndromeda);
+        std::vector<std::int32_t> nine(kGuiPresetCount, kPresetAccent);
+        nine[8] = 260;
+        CHECK(load(9, 1.0, 1, 0, &andromeda, 1, &nine, kPresetWave, 1) == kResultOk
+              && controller->WindowSettings().preset == GuiPreset::kAndromeda && controller->WindowSettings().Accent() == 260);
         // A preset of a later version is refused, as before.
         const std::int32_t later = kGuiPresetCount;
         CHECK(load(9, 1.0, 1, 0, &later, 1, &all, kPresetWave, 1) == kResultFalse);
@@ -3074,11 +3096,11 @@ void TestGuiPresets() {
         // one again after a turn of HUE.
         editor->SetAccent(0); // red
         CHECK(editor->Settings().Accent() == 0);
-        editor->SetGuiPreset(GuiPreset::kOrangeGalaxy);
+        editor->SetGuiPreset(GuiPreset::kAmberStarburst);
         CHECK(editor->Settings().Accent() == kPresetAccent);
         editor->SetAccent(0);
-        editor->SetGuiPreset(GuiPreset::kOrangeGalaxy);
-        CHECK(editor->Settings().Accent() == kPresetAccent && editor->Settings().preset == GuiPreset::kOrangeGalaxy);
+        editor->SetGuiPreset(GuiPreset::kAmberStarburst);
+        CHECK(editor->Settings().Accent() == kPresetAccent && editor->Settings().preset == GuiPreset::kAmberStarburst);
     }
     // F3 of the Fable audit (0.2.9): a change in one window reaches the other window of
     // the instance; a view kept while closed takes the controller's settings when asked.

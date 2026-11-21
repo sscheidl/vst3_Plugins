@@ -96,10 +96,14 @@ const GuiPresetInfo kPresets[kGuiPresetCount] = {
     {"Diffuse nebula (M42)", "slate", "cloud", true, WithNebula(Rgb(178, 92, 120), Rgb(104, 52, 96))},
     // Round 3: the painted galaxies (messier_nebula_<key>, in colour). The first tint has
     // the painting's own main hue, so that HUE turns the painting to the hue it shows.
-    {"Blue galaxy", "slate", "blue", true, WithNebula(Rgb(64, 130, 220), Rgb(24, 60, 130))},
-    {"Orange galaxy", "slate", "orange", true, WithNebula(Rgb(222, 128, 66), Rgb(130, 60, 30))},
-    {"Red galaxy", "slate", "red", true, WithNebula(Rgb(206, 56, 92), Rgb(110, 24, 48))},
-    {"Violet galaxy", "slate", "violet", true, WithNebula(Rgb(158, 84, 214), Rgb(84, 40, 128))},
+    // Round 9: five new paintings in full colour (delivered 2026-11-21) in their places,
+    // their main hues measured from the bitmaps; Andromeda is nearly without colour, its
+    // tints a restrained blue for the accents.
+    {"Blue Barred Spiral", "slate", "blue_barred", true, WithNebula(Rgb(64, 130, 220), Rgb(24, 60, 130))},
+    {"Amber Starburst", "slate", "amber_starburst", true, WithNebula(Rgb(222, 128, 66), Rgb(130, 60, 30))},
+    {"Crimson Ring", "slate", "crimson_ring", true, WithNebula(Rgb(206, 56, 92), Rgb(110, 24, 48))},
+    {"Violet Spiral", "slate", "violet_spiral", true, WithNebula(Rgb(177, 84, 214), Rgb(103, 40, 128))},
+    {"Andromeda", "slate", "andromeda", true, WithNebula(Rgb(110, 150, 190), Rgb(48, 70, 104))},
 };
 
 struct ImageSpec {

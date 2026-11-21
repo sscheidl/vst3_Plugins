@@ -39,8 +39,9 @@ for variant in ("spiral", "barred", "ring", "cloud"):
     IMAGES[f"nebula_{variant}"] = (360, 360, True, True)
     for layer in ("arms", "haze"):
         IMAGES[f"nebula_{variant}_{layer}"] = (360, 360, True, False)
-for variant in ("blue", "orange", "red", "violet"):
+for variant in ("violet_spiral", "blue_barred", "crimson_ring", "amber_starburst", "andromeda"):
     # Round 3 (2026-11-21): the painted galaxies, one GUI preset each, in colour only.
+    # Round 9: the five in full colour (their painted stars and knots are intended).
     IMAGES[f"nebula_{variant}"] = (360, 360, True, False)
 
 NEUTRAL = ("chassis", "ring", "glass", "knob_l", "knob_s", "thumb", "button", "button_down")
